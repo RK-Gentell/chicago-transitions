@@ -203,12 +203,6 @@ const TT = {
     example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when confirmed.',
     done: (t, ctx) => markEmail2(facById(t.fac), ctx.byName),
     opens: t => ({ subject: 'Chicago still hasn\'t sent it: ' + facName(facById(t.fac)), body: '<p>5 business days since Email 1 and no email to the facility yet. Reach out to ' + esc(st.settings.chicagoGreeting) + ' directly.</p>' })
-  },
-  REP_FIRST: {
-    title: t => 'First order today: ' + facName(facById(t.fac)),
-    form: () => `${chk('a', 'Emailed Shani the list of eligible pump-fed and trach pts')}${chk('b', 'Confirmed syringe "ISE-N"')}${chk('c', 'Spike Set blank in the portal? Found which spike set they use and filled it in')}`,
-    example: () => ({ a: true, b: true, c: true }), validate: () => V('a') && V('b') ? '' : 'Tick the first 2.', done: () => { },
-    opens: t => ({ subject: 'First order today: ' + facName(facById(t.fac)), body: '<p>Email Shani the eligible pump-fed and trach pts list, confirm the syringe, and find the spike set if it\'s blank.</p>' })
   }
 };
 

@@ -341,7 +341,6 @@ function sendEmail1(f, correction) {
   f.email1 = st.today;
   mail({ key: 'm:E15:' + f.id, code: 'E15', to: s.e1To, cc: [am], fac: f.id, noTag: true, link: 'none', day: addBiz(st.today, 3), cond: { fac: f.id, untilEmail2: true }, subject: 'RE: ' + subj, body: `<p>Hi ${esc(s.chicagoGreeting)},</p><p>Checking in, has the facility email for <b>${esc(facName(f))}</b> gone out? Please CC ${esc(CFG.mailbox)} on it.</p><p>Thank you!<br>${esc(nameOf(am))}</p>` });
   newTask('CHICAGO_FOLLOW', { fac: f.id, assignee: am, amTask: true, opensOn: addBiz(st.today, 5) });
-  if (f.rep) newTask('REP_FIRST', { fac: f.id, assignee: f.rep, opensOn: f.dates.ord, due: f.dates.ord });
 }
 function sendEmail3(f) {
   const g = FG(f), d = f.dates, am = amOf(f), areas = covKnown(g) ? areasPhrase(g)[0] : '';
@@ -508,8 +507,6 @@ function run() {
     if (!f.email3 && done(fTask(f, 'FASTCARE')) && f.wound && f.regional) sendEmail3(f);
     // after Email 2: the follow-up on Chicago isn't needed
     if (f.email2) { const cf = fTask(f, 'CHICAGO_FOLLOW'); if (cf && !done(cf)) { cf.status = 'Not needed'; cf.doneOn = st.today; } }
-    // first-order to-dos follow the ordering date
-    { const rf = fTask(f, 'REP_FIRST'); if (rf && !done(rf) && f.dates && rf.opensOn !== f.dates.ord) { rf.opensOn = f.dates.ord; rf.due = f.dates.ord; } }
     // at risk: ordering date within 3 business days and Email 1 not out
     if (f.dates && !f.email1 && f.riskFor !== f.dates.ord) {
       f.riskFor = f.dates.ord; const day = addBiz(f.dates.ord, -3);
@@ -519,7 +516,7 @@ function run() {
     if (f.email2 && done(fTask(f, 'GDD')) && (!f.email3 || done(fTask(f, 'EMAIL3_FOLLOW')))) {
       f.complete = st.today;
       tasksOf(f).forEach(t => { if (!done(t) && ['CHICAGO_FOLLOW'].includes(t.type)) t.status = 'Not needed'; });
-      mail({ key: 'm:E24:' + f.id, code: 'E24', to: [am, f.rep, f.requester], fac: f.id, link: 'fac', subject: 'Transition complete: ' + facName(f), body: `<p><b>${esc(facName(f))}</b> is done. First DOS ${fmt(f.dates.dos)}, ordering ${fmt(f.dates.ord)}, delivery ${fmt(f.dates.del)}. Intake rep: ${esc(nameOf(f.rep))}.</p>` });
+      mail({ key: 'm:E24:' + f.id, code: 'E24', to: [am, f.requester], fac: f.id, link: 'fac', subject: 'Transition complete: ' + facName(f), body: `<p><b>${esc(facName(f))}</b> is done. First DOS ${fmt(f.dates.dos)}, ordering ${fmt(f.dates.ord)}, delivery ${fmt(f.dates.del)}. Intake rep: ${esc(nameOf(f.rep))}.</p>` });
     }
   });
   // the "no corporate yet" rep task closes itself once every facility on it has a rep or a corporate
