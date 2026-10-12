@@ -11,7 +11,7 @@
    ===================================================================== */
 
 var st = null;
-const CFG = Object.assign({ mailbox: 'chicagotransitions@gentell.com', appUrl: location.origin + location.pathname }, window.CT_CONFIG || {});
+const CFG = Object.assign({ mailbox: 'transitions@gentell.com', appUrl: location.origin + location.pathname }, window.CT_CONFIG || {});
 
 // ---------- fixed lists ----------
 const AREAS = ['Enteral', 'Ostomy', 'Urological', 'Respiratory', 'Wound Care', 'Supplements'];
