@@ -91,7 +91,7 @@ function DemoStore() {
 }
 function demoSettings() {
   const s = defaultSettings();
-  s.people.forEach(p => { if (!p.email) p.email = p.name.toLowerCase().replace(/[^a-z ]/g, '').trim().replace(/\s+/g, '.') + '@demo.gentell.com'; });
+  s.people.forEach(p => { p.email = p.name.toLowerCase().replace(/[^a-z ]/g, '').trim().replace(/\s+/g, '.') + '@demo.gentell.com'; }); // demo never uses real addresses
   s.people.push({ name: 'Requester (demo)', email: 'requester@demo.gentell.com' });
   s.e1To = ['darlene.kusek@demo.gentell.com', 'christian.brandt@demo.gentell.com', 'danielle.butler@demo.gentell.com', 'brittney.barrows@demo.gentell.com'];
   s.e1Cc = ['kyle.king@demo.gentell.com', 'damian.proulx@demo.gentell.com', 'brian.schorn@demo.gentell.com', 'jocelyn.vidal@demo.gentell.com', 'linda.anwaya@demo.gentell.com', 'aliyah.price@demo.gentell.com'];
@@ -192,6 +192,8 @@ function SPStore() {
           await gfetch(listUrl(k) + '/columns', { method: 'POST', body: JSON.stringify(col) });
         }
       }
+      // the folder the "CT - Mailbox" flow saves incoming emails to
+      try { await gfetch('/sites/' + siteId + '/drive/root/children', { method: 'POST', body: JSON.stringify({ name: 'CT Mailbox', folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }) }); } catch (e) { if (e.status !== 409) throw e; }
       this.needsSetup = false;
       // first run: save default settings
       const existing = await getAll(listUrl('data') + "/items?$expand=fields($select=Key)&$filter=fields/Key eq 'settings'");
