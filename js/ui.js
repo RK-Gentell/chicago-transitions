@@ -98,7 +98,7 @@ function waitingOn(f) {
   st.tasks.filter(t => !t.fac && f.group && lc(t.group) === lc(f.group) && !done(t)).forEach(t => w.push(taskTitle(t) + ' (' + nameOf(t.assignee) + ')'));
   if (g.price && !f.inPortal && !fTask(f, 'PORTAL_ADD')) w.push('Add to portal (' + roleName('portal') + ')');
   if (f.email1 && !f.email2) w.push('Chicago’s email to the facility (Email 2)');
-  if (f.email3 && !done(fTask(f, 'EMAIL3_FOLLOW'))) w.push('Wound rep / regional reply to Email 3');
+  if (f.email3 && !done(fTask(f, 'EMAIL3_FOLLOW'))) w.push('Reply to Email 3 (wound rep / regional)');
   if (f.email2 && !done(fTask(f, 'GDD'))) w.push('GDD answer (' + roleName('gdd') + ')');
   return w;
 }
@@ -311,7 +311,7 @@ function taskDrawer(t) {
   ${isDone ? `<div class="okmsg">${t.status === 'Not needed' ? 'Not needed anymore' : 'Done by <b>' + esc(t.doneByName || nameOf(t.doneBy)) + '</b>'} on ${fmt(t.doneOn)}${t.doneBy && t.doneBy !== t.assignee ? ' (assigned to ' + esc(nameOf(t.assignee)) + ')' : ''}.</div>` : `
   ${quick}
   ${me() !== t.assignee ? `<div class="instr">This is ${esc(nameOf(t.assignee))}'s task. You can finish it anyway. It'll say "Done by ${esc(meName())}" and ${esc(nameOf(t.assignee))} gets an FYI email.</div>` : ''}
-  ${isWaiting(t) ? `<div class="instr">This starts on ${fmt(t.opensOn)}. You can still do it now.</div>` : ''}
+  ${isWaiting(t) ? `<div class="note">Starts ${fmt(t.opensOn)}. You can do it now if it's ready.</div>` : ''}
   ${f && (f.why || (f.files || []).length) ? `<div class="meta">${f.why ? '<b>Why:</b> ' + esc(f.why) : ''}${(f.files || []).length ? ' · <b>Attachments:</b> ' + f.files.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>`).join(', ') : ''}</div>` : ''}
   <form id="tf" style="display:flex;flex-direction:column;gap:12px">${def.form(t)}<div id="tf_err"></div><div class="row" style="align-items:center"><button class="btn pri" type="submit">Mark done</button>${STORE.mode === 'demo' ? '<button class="btn" type="button" id="tf_ex">Fill example</button>' : ''}</div></form>
   <div class="card" style="padding:10px"><div class="row" style="align-items:center"><label for="re" class="meta">Reassign to</label><select id="re">${ppl.map(([e, n]) => `<option value="${esc(e)}" ${e === t.assignee ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select><button class="btn sm" id="re_go">Reassign</button></div></div>`}

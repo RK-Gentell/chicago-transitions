@@ -193,10 +193,10 @@ const TT = {
     done: t => sendEmail1(facById(t.fac))
   },
   EMAIL3_FOLLOW: {
-    title: t => 'Regional reply: ' + facName(facById(t.fac)),
-    form: t => { const f = facById(t.fac); return `<div class="instr">Waiting on ${esc(f.wound && f.wound.name)} / ${esc(f.regional && f.regional.name)}. When they reply, put their corrections and new contacts straight into the portal.</div>${fld('In-service', sel('is', ['Booked', 'Not yet', 'Facility didn\'t join'], '', true), 'The rep and Malka see this on the tracker.')}${chk('ok', 'Portal contacts updated')}`; },
+    title: t => 'Email 3 follow-up: ' + facName(facById(t.fac)),
+    form: t => { const f = facById(t.fac); const who = [...new Set([f.wound && f.wound.name, f.regional && f.regional.name].filter(Boolean))].map(esc).join(' and ') || 'the wound rep and regional'; return `<div class="instr">Email 3 went to ${who}${f.email3 ? ' on ' + fmt(f.email3) : ''}. It asked them to check our contacts, send the missing ones and get the in-service booked.<ol><li>Find their reply (subject <span class="q">${esc(facName(f))}- Transfer from GNS Chicago to Lakewood</span>).</li><li>Put any corrections and new contacts into the portal.</li><li>Pick the in-service status below and mark done.</li></ol></div><div class="note">Replies to ${esc(CFG.mailbox)} also show on the facility page under "Mailbox". No reply yet? Follow up with them, or mark done with "Not yet".</div>${fld('In-service', sel('is', ['Booked', 'Not yet', 'Facility didn\'t join'], '', true), 'The rep and Malka see this on the tracker.')}${chk('ok', 'Portal has their corrections and new contacts (or they had none)')}`; },
     example: () => ({ is: 'Booked', ok: true }),
-    validate: () => V('ok') && V('is') ? '' : 'Pick the in-service status and tick when the portal is updated.',
+    validate: () => V('ok') && V('is') ? '' : 'Pick the in-service status and tick the portal box.',
     done: t => { facById(t.fac).inservice = V('is'); },
     opens: t => { const f = facById(t.fac); return { subject: 'Follow up with ' + (f.wound && f.wound.name) + ' / ' + (f.regional && f.regional.name), body: '<p>No reply to Email 3 in 5 business days. Follow up, and mark the task done once the portal contacts are updated.</p>' }; }
   },
