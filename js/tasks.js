@@ -17,6 +17,9 @@ const sel = (id, opts, v, list) => (!list && opts.length === 2)
   : `<select id="${id}">${[['', 'Select…'], ...opts].map(o => `<option ${optV(o) === v && v ? 'selected' : ''} value="${esc(optV(o))}">${esc(optL(o))}</option>`).join('')}</select>`;
 const txt = (id, v, ph) => `<input type="text" id="${id}" value="${esc(v || '')}" placeholder="${esc(ph || '')}">`;
 const dt = (id, v) => `<input type="date" id="${id}" value="${esc(v || '')}">`;
+// small (i) button; the text shows on hover, focus or click
+const INFO_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="12" cy="12" r="9.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 11v5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="7.9" r="1.05" fill="currentColor"/></svg>';
+const tip = s => `<span class="infow"><button type="button" class="info" aria-label="More info" aria-expanded="false">${INFO_SVG}</button><span class="tip" role="note">${s}</span></span>`;
 const fld = (label, inner, hint) => `<div class="field"><label>${label}</label>${inner}${hint ? `<div class="hint">${hint}</div>` : ''}</div>`;
 const chk = (id, label, v) => `<label class="chk"><input type="checkbox" id="${id}" ${v ? 'checked' : ''}><span>${label}</span></label>`;
 const V = id => { const e = document.getElementById(id); return e ? (e.type === 'checkbox' ? e.checked : e.value.trim()) : ''; };
@@ -133,7 +136,7 @@ const TT = {
       ${n.addr ? fld('Address', txt('fc_addr', '', '123 Main St, City, ST 12345'), 'State comes from the 2 letters before the zip.') : ''}
       <div><b>Contacts we already have</b>${f.contacts.length ? contactTable(f.contacts) : '<div class="meta">None yet.</div>'}</div>
       <div class="row">${fld('Wound and Product Specialist', personPick('w', f.wound), 'Pick from the list; it fills their Gentell email.')}${fld('Regional Manager', personPick('r', f.regional))}</div>
-      <div class="field"><label>Other contacts from FastCare (skip the ones above)</label>${contactEditor('cts', '', false)}</div>`;
+      <div class="field"><label>Other contacts from FastCare${tip('Skip the ones above.')}</label>${contactEditor('cts', '', false)}</div>`;
     },
     example: t => { const n = t.need || {}; const o = { w: 'Peter West <peter.west@demo.gentell.com>', r: 'Brian McCauley <brian.mccauley@demo.gentell.com>' }; if (n.corp) { o.fc_grp = 'New corporate…'; o.fc_new = 'Infinity Healthcare Management'; } if (n.addr) o.fc_addr = '123 Demo St, LaGrange, IN 46761'; o.cts = [{ first: 'Joan', last: 'Ruiz', dept: 'Central Supply', email: 'jruiz@demo.com' }, { first: '', last: 'Cole', dept: 'Other', note: 'MDS/unit manager', email: 'jcole@demo.com' }]; return o; },
     validate: t => {
@@ -222,7 +225,7 @@ function portalForm(f) {
 }
 function dateEditor(f) {
   const d = f.dates, r = f.rec, w = dateWarn(f, d.dos);
-  return `<div class="card" style="padding:10px" id="dedit"><b>${d.changed ? 'Dates (changed)' : 'Recommended dates'}</b><div class="meta">Change any 1 date and the other 2 move with it.</div>
+  return `<div class="card" style="padding:10px" id="dedit"><b>${d.changed ? 'Dates (changed)' : 'Recommended dates'}</b>${tip('Change any 1 date and the other 2 move with it.')}
   <div class="row">${fld('Ordering date', dt('de_ord', d.ord))}${fld('Date of service', dt('de_dos', d.dos))}${fld('Delivery date', dt('de_del', d.del))}</div>
   <div class="meta" id="de_info">${d.day} delivery · OS Days ${d.os} · ${d.partB ? 'Part B only: ordering 2 business days before DOS' : 'ordering 1 business day before DOS'} · Ship Point ${d.ship}</div>
   <div id="de_warn">${w.map(x => '<div class="err" style="margin-top:6px">' + esc(x) + '</div>').join('')}</div>

@@ -28,6 +28,9 @@ Never rename these lists or columns: the flows use them.
 - Failures must show (banner, Failed email status). Never fail silently.
 - Changing a list/column the flows read means Raizy has to change the flow too: tell her exactly what to click.
 
+## Cache
+`index.html` loads the css/js with `?v=N`. Bump N on every push that changes css or js, or people keep the old version for up to 10 minutes.
+
 ## Testing before every push
 Open `index.html?demo` (demo mode, nothing saved) and walk through the change. Automated tests live outside this repo; at minimum run `node --check` on every js file and click through a full transition in demo mode.
 

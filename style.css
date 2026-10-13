@@ -76,7 +76,7 @@ tr.click{cursor:pointer} tr.click:hover td{background:var(--soft)}
 .drawer .body{padding:14px 16px 30px;overflow:auto;display:flex;flex-direction:column;gap:12px}.drawer .body>*{flex-shrink:0}
 .scrim{position:fixed;inset:0;background:rgba(13,19,27,.4);backdrop-filter:blur(2px);z-index:30}
 .field{display:flex;flex-direction:column;gap:4px}
-.field label{font-size:12.5px;font-weight:500;color:var(--muted);display:flex;align-items:center;gap:4px}
+.field>label{font-size:12.5px;font-weight:500;color:var(--muted);display:flex;align-items:center;gap:4px}
 .field .hint{font-size:12px;color:var(--muted)}
 .row{display:flex;gap:10px;flex-wrap:wrap}
 .row>.field{flex:1 1 160px;min-width:0}
@@ -142,3 +142,5 @@ textarea.plain{font-family:var(--sans);font-size:13px}
 .infow.open .tip{display:block}
 @media (hover:hover){.infow:hover .tip,.info:focus-visible+.tip{display:block}}
 h1 .tip{font-size:13px}
+.sect{font-size:12.5px;font-weight:500;color:var(--ink);display:flex;align-items:center}
+.card>.infow:first-of-type{margin-left:6px}
