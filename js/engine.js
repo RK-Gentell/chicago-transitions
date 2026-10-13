@@ -99,6 +99,15 @@ const isAm = e => !!(person(e) || {}).am;
 const isAdmin = e => !!(person(e) || {}).admin;
 const fallbackOwner = () => roleEmail('escalate') || (people().find(p => p.admin && validEmail(p.email)) || {}).email || '';
 function deptMap() { const m = {}; st.settings.depts.forEach(d => m[d.name] = d.type); return m; }
+// the state decides the ship point, and the ship point decides the delivery date. No known state = no dates.
+const stateFrom = addr => (String(addr || '').match(/,\s*([A-Z]{2})\s*\d{5}/) || [])[1] || '';
+const stateOK = f => !!(f && f.state && shipOf(st.settings.shipEnt, f.state));
+// '' when the address is fine to schedule with, otherwise what's wrong (for forms)
+function addressProblem(addr) {
+  if (!/,\s*[A-Z]{2}\s*\d{5}/.test(addr || '')) return 'Type the full address, ending with the state and zip (…, IN 46761).';
+  const s = stateFrom(addr); if (!shipOf(st.settings.shipEnt, s)) return 'There\'s no ship point for ' + s + ' in Settings ("Ship points"), so the delivery date can\'t be worked out. Ask Raizy to add it.';
+  return '';
+}
 function shipOf(tbl, state) { for (const k in tbl) if (tbl[k].split(/\s+/).includes(state)) return +k; return null; }
 
 function settingsProblems() {
@@ -148,7 +157,7 @@ function facsOfGroup(name) { return st.facs.filter(f => lc(f.group) === lc(name)
 
 // ---------- dates for a facility ----------
 function calcDates(f) {
-  const b = f.bt, g = FG(f); if (!b || !covKnown(g) || !f.state) return null;
+  const b = f.bt, g = FG(f); if (!b || !covKnown(g) || !stateOK(f)) return null;
   let dos; const why = [];
   const e = b.lastEnt ? add(b.lastEnt, 30) : null, o = b.lastOuts ? add(b.lastOuts, 28) : null;
   if (e && o) { dos = e > o ? e : o; why.push('Enteral ' + fmtS(b.lastEnt) + ' + 30 = ' + fmtS(e) + '; OUTs ' + fmtS(b.lastOuts) + ' + 28 = ' + fmtS(o) + '. Later = ' + fmtS(dos)); }
@@ -301,7 +310,7 @@ function mailStillValid(m) {
 }
 
 // ---------- tasks ----------
-const REPEATABLE = new Set(['RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY']);
+const REPEATABLE = new Set(['RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS']);
 function newTask(type, o) {
   const base = 't:' + type + ':' + (o.fac ? 'f' + o.fac : 'g' + lc(o.group));
   let key = base;
@@ -551,7 +560,14 @@ function run() {
       }
     }
     // dates (frozen once Email 1 went out)
-    { const d = calcDates(f); if (d && !f.email1) { f.rec = d; f.dates = f.dosChosen ? Object.assign(derive(f, f.dosChosen), { why: [...d.why, 'Changed by ' + (f.dosBy || 'someone') + ' from the recommended ' + fmtS(d.dos)], changed: true }) : d; } }
+    // no usable state (address missing or no ship point for it): no dates, so nothing can be scheduled with a wrong delivery date
+    { const d = calcDates(f); if (!f.email1) { f.rec = d || null; f.dates = !d ? null : f.dosChosen ? Object.assign(derive(f, f.dosChosen), { why: [...d.why, 'Changed by ' + (f.dosBy || 'someone') + ' from the recommended ' + fmtS(d.dos)], changed: true }) : d; } }
+    if (stateOK(f)) tasksOf(f, 'ADDRESS').forEach(t => { if (!done(t)) { t.status = 'Not needed'; t.doneOn = st.today; } });
+    // address still missing (or its state has no ship point) once FastCare is done: the transition lead gets a task for it
+    if (!f.email1 && !stateOK(f) && (done(fTask(f, 'FASTCARE')) || preDone(f, 'fc')) && !tasksOf(f, 'ADDRESS').some(t => !done(t))) {
+      const t = newTask('ADDRESS', { fac: f.id, assignee: am, amTask: true });
+      todo(t, 'address for ' + facName(f), 'We need the full address for <b>' + esc(facName(f)) + '</b> before it can be scheduled.');
+    }
     // Amy adds it to Brightree once the price table is in
     if (hasPrice(g) && f.address && !fTask(f, 'PORTAL_ADD') && !f.inPortal) addAmy(f);
     // existing EMR login: ask corporate to add this facility

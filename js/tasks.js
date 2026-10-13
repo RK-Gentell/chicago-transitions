@@ -144,14 +144,14 @@ const TT = {
       const n = t.need || {};
       if (n.corp && !V('fc_grp')) return 'Pick the corporate (or "No corporate").';
       if (n.corp && V('fc_grp') === 'New corporate…' && !V('fc_new')) return 'Type the new corporate name.';
-      if (n.addr && !/,\s*[A-Z]{2}\s*\d{5}/.test(V('fc_addr'))) return 'Type the full address, ending with state and zip.';
+      if (n.addr && addressProblem(V('fc_addr'))) return addressProblem(V('fc_addr'));
       if (!readPerson('w')) return 'Pick the wound rep from the list (start typing their name).';
       if (!readPerson('r')) return 'Pick the regional from the list (start typing their name).';
       return ceErr('cts');
     },
     done: t => {
       const f = facById(t.fac), n = t.need || {};
-      if (n.addr) { f.address = V('fc_addr'); const m = f.address.match(/,\s*([A-Z]{2})\s*\d{5}/); f.state = m ? m[1] : f.state; }
+      if (n.addr) { f.address = V('fc_addr'); f.state = stateFrom(f.address); }
       if (n.corp) {
         const v = V('fc_grp');
         if (v === 'No corporate (Independent HQ)') makeStandalone(f);
@@ -172,8 +172,8 @@ const TT = {
   },
   PORTAL_SETUP: {
     title: t => 'Portal setup: ' + facName(facById(t.fac)),
-    form: t => portalForm(facById(t.fac)), example: () => ({ ok: true }),
-    validate: () => V('ok') ? '' : 'Tick when saved.',
+    form: t => { const f = facById(t.fac); return f.dates ? portalForm(f) : '<div class="err">No dates yet: the facility needs a full address with a state that has a ship point. Fix it on the facility page.</div>'; }, example: () => ({ ok: true }),
+    validate: t => !facById(t.fac).dates ? 'No dates yet: fix the address on the facility page first.' : V('ok') ? '' : 'Tick when saved.',
     done: t => { G(facById(t.fac)).noteDone = true; }
   },
   EMR_PORTAL: {
@@ -189,9 +189,16 @@ const TT = {
   },
   SCHEDULE: {
     title: t => 'Schedule: ' + facName(facById(t.fac)),
-    form: t => scheduleForm(facById(t.fac)), example: () => ({}),
-    validate: t => { const f = facById(t.fac); const s = settingsProblems(); if (s.length) return 'The Chicago handoff email can\'t go out until Settings are finished: ' + s.join(' '); if (!f.rep) return 'The facility has no intake rep.'; if (f.dates.ord < st.today) return 'The ordering date has passed. Change the dates above and click "Save dates" first.'; return ''; },
+    form: t => { const f = facById(t.fac); return f.dates ? scheduleForm(f) : '<div class="err">No dates yet: the facility needs a full address with a state that has a ship point. Fix it on the facility page.</div>'; }, example: () => ({}),
+    validate: t => { const f = facById(t.fac); if (!f.dates || !stateOK(f)) return 'No dates yet: fix the address on the facility page first.'; const s = settingsProblems(); if (s.length) return 'The Chicago handoff email can\'t go out until Settings are finished: ' + s.join(' '); if (!f.rep) return 'The facility has no intake rep.'; if (f.dates.ord < st.today) return 'The ordering date has passed. Change the dates above and click "Save dates" first.'; return ''; },
     done: t => sendEmail1(facById(t.fac))
+  },
+  ADDRESS: {
+    title: t => 'Address: ' + facName(facById(t.fac)),
+    form: t => { const f = facById(t.fac); return `<div class="instr">${f.address ? 'The address on file is <span class="q">' + esc(f.address) + '</span>, but ' + (stateFrom(f.address) ? 'there\'s no ship point for ' + esc(stateFrom(f.address)) + ' in Settings.' : 'it doesn\'t end with a state and zip.') : 'We don\'t have an address for this facility.'} The state decides the ship point, which decides the delivery date, so dates can\'t be worked out without it.</div>${fld('Full address', txt('ad_addr', f.address || '', '123 Main St, City, ST 12345'))}`; },
+    example: () => ({ ad_addr: '123 Demo St, LaGrange, IN 46761' }),
+    validate: () => addressProblem(V('ad_addr')),
+    done: t => { const f = facById(t.fac); f.address = V('ad_addr'); f.state = stateFrom(f.address); }
   },
   E3_REPLY: {
     title: t => 'In-service & contacts reply: ' + facName(facById(t.fac)),

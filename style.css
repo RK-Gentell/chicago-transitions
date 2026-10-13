@@ -147,3 +147,18 @@ h1 .tip{font-size:13px}
 .mailsec{display:flex;align-items:baseline;gap:6px}h2.mailsec{margin:20px 0 8px}h3.mailsec{font-size:13px;font-weight:500;margin:10px 0 6px;color:var(--muted)}
 .predone{display:flex;flex-direction:column;gap:6px}
 [hidden]{display:none!important}
+
+/* new request form */
+.rqform{display:flex;flex-direction:column;gap:22px;max-width:900px}
+.rqform section{display:flex;flex-direction:column;gap:8px}
+.rqh{font-size:16px;font-weight:500;color:var(--ink);margin:0;display:flex;align-items:center;gap:2px}
+.rqi{font-size:13px;color:var(--muted)}
+.areas{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.areas select{width:100%}
+@media (max-width:900px){.areas{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.rqd summary{list-style:none;cursor:pointer}
+.rqd summary::-webkit-details-marker{display:none}
+.rqd summary .rqh::before{content:'';width:8px;height:8px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:rotate(-45deg);margin-right:10px;transition:transform .16s ease}
+.rqd[open] summary .rqh::before{transform:rotate(45deg)}
+.rqd .predone{margin-top:10px}
+#rq_precount{margin-left:8px}

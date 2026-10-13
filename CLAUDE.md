@@ -37,6 +37,9 @@ Never say "Email 1/2/3" in the UI or emails. Internally (code, `email1`/`email2`
 ## Email 3 replies
 Email 3 goes to the wound rep + regional. `processInbox` treats any email to the mailbox (in To) with the facility name + "transfer from gns chicago" in the subject, received on/after Email 3, as a reply, unless it's from the mailbox, GNS Chicago (Email 1 To/CC) or someone on the team who isn't the wound rep/regional. A reply sets `f.e3Reply` and makes an `E3_REPLY` task for the transition lead (put their info in; or "keep following up", which starts a new follow-up round `f.e3Round`). No reply: `chaseEmail3` queues 1 step at a time (+3 business days, +3, then an alert to the transition lead). Manual: "In-service & contacts: taken care of" on the facility page. Completion waits on `e3Done`. Follow-ups (E15, E16F, E16A, E17) go out as High importance.
 
+## Address and dates
+The state (from the address) picks the ship point, which sets the delivery date. `stateOK(f)` = a state with a ship point in Settings. No `stateOK` → `calcDates` returns null and `f.dates` is cleared (before the Chicago handoff email), so portal setup and scheduling can't happen. Once FastCare is done (or skipped), a missing/bad address makes an `ADDRESS` task for the transition lead; it closes itself when the address is fixed anywhere. Every address input uses `addressProblem()`. A state change after the handoff email emails the transition lead (dates stay as sent).
+
 ## Request form
 Corporate is per line (no dropdown). "Already done" (`PRE_ITEMS` in engine.js, `applyPre`) sets what the skipped steps would have set and the engine skips their tasks; `g.existing` = corporate already in the portal (no price table / EMR access tasks). Info-only emails (`FYI_CODES`) get a "no action needed" line. To-do emails for tasks with steps use `todo()`: one line, details live in the task.
 
