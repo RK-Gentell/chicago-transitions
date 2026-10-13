@@ -58,19 +58,19 @@ const TT = {
     form: t => {
       const fs = ruleFacs(t), R = peopleOpts(repList()), A = peopleOpts(amList());
       return `<div class="instr">${fs.length} facilit${fs.length === 1 ? 'y' : 'ies'} with no rep. Same people for all? Fill the top row and click "Apply to all". Different reps per facility? Change the rows below.</div>
-      <div class="card" style="padding:10px"><b>All facilities</b><div class="row">${fld('Intake rep', sel('rep', R, '', true))}${fld('Clinical rep', sel('clin', R, '', true), 'Blank = same as intake')}${fld('Account Manager', sel('am', A, '', true))}</div><button type="button" class="btn sm" data-applyall="1">Apply to all ↓</button></div>
-      <div class="tablewrap"><table><tr><th>Facility</th><th>Intake rep</th><th>Clinical rep</th><th>AM</th></tr>${fs.map(f => `<tr><td>${esc(f.name)}</td><td>${sel('rep_' + f.id, R, f.rep, true)}</td><td>${sel('clin_' + f.id, R, f.clin, true)}</td><td>${sel('am_' + f.id, A, f.am, true)}</td></tr>`).join('')}</table></div>
-      ${fld('Why these reps? (optional)', txt('why', '', 'Goes in the email to the AM'))}
+      <div class="card" style="padding:10px"><b>All facilities</b><div class="row">${fld('Intake rep', sel('rep', R, '', true))}${fld('Clinical rep', sel('clin', R, '', true), 'Blank = same as intake')}${fld('Account manager', sel('acct', R, '', true))}${fld('Transition lead', sel('am', A, '', true))}</div><button type="button" class="btn sm" data-applyall="1">Apply to all ↓</button></div>
+      <div class="tablewrap"><table><tr><th>Facility</th><th>Intake rep</th><th>Clinical rep</th><th>Account manager</th><th>Transition lead</th></tr>${fs.map(f => `<tr><td>${esc(f.name)}</td><td>${sel('rep_' + f.id, R, f.rep, true)}</td><td>${sel('clin_' + f.id, R, f.clin, true)}</td><td>${sel('acct_' + f.id, R, f.acct, true)}</td><td>${sel('am_' + f.id, A, f.am, true)}</td></tr>`).join('')}</table></div>
+      ${fld('Why these reps? (optional)', txt('why', '', 'Goes in the email to the transition lead'))}
       ${t.group === '__nocorp' ? '' : chk('rule', 'Save the top row as the corporate rule (future facilities under this corporate get it automatically)', true)}`;
     },
     example: t => { const r = repList()[0], a = amList()[0], o = { rep: lc(r.email), am: lc(a.email) }; ruleFacs(t).forEach(f => { o['rep_' + f.id] = lc(r.email); o['am_' + f.id] = lc(a.email); }); return o; },
-    validate: t => { for (const f of ruleFacs(t)) { if (!V('rep_' + f.id) || !V('am_' + f.id)) return 'Pick an intake rep and AM for ' + f.name + ' (or use "Apply to all").'; } if (V('rule') && !(V('rep') && V('am'))) return 'To save a corporate rule, fill the top row.'; return ''; },
+    validate: t => { for (const f of ruleFacs(t)) { if (!V('rep_' + f.id) || !V('am_' + f.id)) return 'Pick an intake rep and transition lead for ' + f.name + ' (or use "Apply to all").'; } if (V('rule') && !(V('rep') && V('am'))) return 'To save a corporate rule, fill the top row.'; return ''; },
     done: (t, ctx) => {
       const g = grp(t.group);
-      if (g && V('rule')) { g.rep = V('rep'); g.clin = V('clin') || V('rep'); g.am = V('am'); }
+      if (g && V('rule')) { g.rep = V('rep'); g.clin = V('clin') || V('rep'); g.am = V('am'); g.acct = V('acct'); }
       const byAm = {};
-      ruleFacs(t).forEach(f => { f.rep = V('rep_' + f.id); f.clin = V('clin_' + f.id) || f.rep; f.am = V('am_' + f.id); (byAm[f.am] = byAm[f.am] || []).push(f); });
-      // skip facilities this AM already got a "New transition" for when the request came in
+      ruleFacs(t).forEach(f => { f.rep = V('rep_' + f.id); f.clin = V('clin_' + f.id) || f.rep; f.am = V('am_' + f.id); f.acct = V('acct_' + f.id) || f.acct; (byAm[f.am] = byAm[f.am] || []).push(f); });
+      // skip facilities this transition lead already got a "New transition" for when the request came in
       Object.entries(byAm).map(([am, list]) => [am, list.filter(f => !st.mails.some(m => m.key === 'm:E2:' + f.req + ':' + lc(am)))]).filter(([, list]) => list.length).forEach(([am, list]) => mail({ key: 'm:E2:' + t.key + ':' + am, code: 'E2', to: [am], link: 'none', subject: 'New transition: ' + list.map(f => f.name).join(', '), body: `<p>${esc(ctx.byName)} assigned you ${list.length} facilit${list.length > 1 ? 'ies' : 'y'}${t.group === '__nocorp' ? '' : ' from <b>' + esc(t.group) + '</b>'}: ${list.map(f => esc(f.name) + ' (intake rep ' + esc(nameOf(f.rep)) + ')').join(', ')}.</p>${V('why') ? '<p><b>Why these reps:</b> ' + esc(V('why')) + '</p>' : ''}<p><b>Background:</b> ${esc(list[0].why) || '-'}</p><p>All requests already went out.</p>${amFirstTasks(list)}` }));
     }
   },
@@ -163,7 +163,7 @@ const TT = {
   },
   BRIGHTREE: {
     title: t => 'Brightree report: ' + facById(t.fac).name,
-    form: t => { const f = facById(t.fac); return `<div class="instr"><ol><li>GNS Chicago's Brightree: search the facility, copy "Name" exactly.</li><li>Star → "My Ad-Hoc Reports" → "GNS Lakewood Report". Error → log back in.</li><li>"Sales Order_Facility" "Equals" the name. "Delivery_Scheduled date" "Between" 01/01/2026 and <b>${fmtS(st.today)}</b>. "Request Report".</li><li>"My Scheduled Reports" → wait for "Completed" → open the CSV.</li><li>Sort by "Patient Full Name", then "Delivery Actual date" (column E, <b>never D</b>). Bottom row per area of care (column R).</li><li>"Save As" → "Excel Workbook" → Z: > GNS Chicago Transition > Sales Order Reports > ${esc(f.group || '(corporate)')} (create the folder if it's missing). Name it <span class="q">${esc(facName(f))} ${fmtS(st.today).replace(/\//g, '-')}</span>.</li></ol></div><div class="note">Only what the system needs goes in here: the dates (for scheduling), and how often enteral ships (Email 1 + schedule). Everything else on the report goes straight into the portal. Dates calculate from it.</div>
+    form: t => { const f = facById(t.fac); return `<div class="instr"><ol><li>GNS Chicago's Brightree: search the facility, copy "Name" exactly.</li><li>Star → "My Ad-Hoc Reports" → "GNS Lakewood Report". Error → log back in.</li><li>"Sales Order_Facility" "Equals" the name. "Delivery_Scheduled date" "Between" 01/01/2026 and <b>${fmtS(st.today)}</b>. "Request Report".</li><li>"My Scheduled Reports" → wait for "Completed" → open the CSV.</li><li>Sort by "Patient Full Name", then "Delivery Actual date" (column E, <b>never D</b>). Bottom row per area of care (column R).</li><li>"Save As" → "Excel Workbook" → Z: > GNS Chicago Transition > Sales Order Reports > ${esc(f.group || '(corporate)')} (create the folder if it's missing). Name it <span class="q">${esc(facName(f))} ${fmtS(st.today).replace(/\//g, '-')}</span>.</li></ol></div><div class="note">Only what the system needs goes in here: the dates (for scheduling), and how often enteral ships (the Chicago handoff email + schedule). Everything else on the report goes straight into the portal. Dates calculate from it.</div>
       <div class="row">${fld('Last enteral (Delivery Actual date)', dt('le'))}${fld('Last uro / ostomy / trach', dt('lo'))}</div>
       <div class="row">${fld('Enteral ships', sel('cad', ['Monthly', 'Weekly', 'Biweekly'], 'Monthly'))}</div>`; },
     example: () => ({ le: add(st.today, -19), lo: add(st.today, -23), cad: 'Monthly' }),
@@ -190,37 +190,37 @@ const TT = {
   SCHEDULE: {
     title: t => 'Schedule: ' + facName(facById(t.fac)),
     form: t => scheduleForm(facById(t.fac)), example: () => ({}),
-    validate: t => { const f = facById(t.fac); const s = settingsProblems(); if (s.length) return 'Email 1 can\'t go out until Settings are finished: ' + s.join(' '); if (!f.rep) return 'The facility has no intake rep.'; if (f.dates.ord < st.today) return 'The ordering date has passed. Change the dates above and click "Save dates" first.'; return ''; },
+    validate: t => { const f = facById(t.fac); const s = settingsProblems(); if (s.length) return 'The Chicago handoff email can\'t go out until Settings are finished: ' + s.join(' '); if (!f.rep) return 'The facility has no intake rep.'; if (f.dates.ord < st.today) return 'The ordering date has passed. Change the dates above and click "Save dates" first.'; return ''; },
     done: t => sendEmail1(facById(t.fac))
   },
   E3_REPLY: {
-    title: t => 'Email 3 reply: ' + facName(facById(t.fac)),
+    title: t => 'In-service & contacts reply: ' + facName(facById(t.fac)),
     form: t => { const f = facById(t.fac), r = t.reply || {}, m = (st.inbox || []).find(x => x._id && x._id === r.inbox);
-      return `<div class="instr">${esc(r.from ? e3Who(f, r.from) : 'Someone')} replied to Email 3${r.at ? ' on ' + fmt(r.at) : ''}. Put the info they sent (new contacts, corrections) into the portal.${m && m.path ? ` <a href="${esc(STORE.fileUrl(m.path))}" target="_blank" rel="noopener">Open their email</a>` : ''}</div>${m && m.preview ? `<div class="note">"${esc(m.preview.slice(0, 300))}"</div>` : ''}${fld('Where things stand', sel('e3s', [['done', 'Their info is in the portal'], ['more', 'They didn\'t send everything yet: keep following up']], '', true))}`; },
+      return `<div class="instr">${esc(r.from ? e3Who(f, r.from) : 'Someone')} replied to the in-service & contacts request${r.at ? ' on ' + fmt(r.at) : ''}. Put the info they sent (new contacts, corrections) into the portal.${m && m.path ? ` <a href="${esc(STORE.fileUrl(m.path))}" target="_blank" rel="noopener">Open their email</a>` : ''}</div>${m && m.preview ? `<div class="note">"${esc(m.preview.slice(0, 300))}"</div>` : ''}${fld('Where things stand', sel('e3s', [['done', 'Their info is in the portal'], ['more', 'They didn\'t send everything yet: keep following up']], '', true))}`; },
     example: () => ({ e3s: 'done' }), validate: () => V('e3s') ? '' : 'Pick where things stand.',
     done: t => { const f = facById(t.fac); if (V('e3s') === 'more') { f.e3Reply = null; f.e3Round = (f.e3Round || 0) + 1; f.e3RoundFrom = st.today; } else markE3Done(f, typeof meName === 'function' ? meName() : ''); }
   },
   EMAIL3_FOLLOW: {
-    title: t => 'Email 3 follow-up: ' + facName(facById(t.fac)),
-    form: t => { const f = facById(t.fac); const who = [...new Set([f.wound && f.wound.name, f.regional && f.regional.name].filter(Boolean))].map(esc).join(' and ') || 'the wound rep and regional'; return `<div class="instr">Email 3 went to ${who}${f.email3 ? ' on ' + fmt(f.email3) : ''}. It asked them to check our contacts, send the missing ones and get the in-service booked.<ol><li>Find their reply (subject <span class="q">${esc(facName(f))}- Transfer from GNS Chicago to Lakewood</span>).</li><li>Put any corrections and new contacts into the portal.</li><li>Pick the in-service status below and mark done.</li></ol></div><div class="note">Replies to ${esc(CFG.mailbox)} also show on the facility page under "Mailbox". No reply yet? Follow up with them, or mark done with "Not yet".</div>${fld('In-service', sel('is', ['Booked', 'Not yet', 'Facility didn\'t join'], '', true), 'The rep and Malka see this on the tracker.')}${chk('ok', 'Portal has their corrections and new contacts (or they had none)')}`; },
+    title: t => 'In-service & contacts follow-up: ' + facName(facById(t.fac)),
+    form: t => { const f = facById(t.fac); const who = [...new Set([f.wound && f.wound.name, f.regional && f.regional.name].filter(Boolean))].map(esc).join(' and ') || 'the wound rep and regional'; return `<div class="instr">The in-service & contacts request went to ${who}${f.email3 ? ' on ' + fmt(f.email3) : ''}. It asked them to check our contacts, send the missing ones and get the in-service booked.<ol><li>Find their reply (subject <span class="q">${esc(facName(f))}- Transfer from GNS Chicago to Lakewood</span>).</li><li>Put any corrections and new contacts into the portal.</li><li>Pick the in-service status below and mark done.</li></ol></div><div class="note">Replies to ${esc(CFG.mailbox)} also show on the facility page under "Mailbox". No reply yet? Follow up with them, or mark done with "Not yet".</div>${fld('In-service', sel('is', ['Booked', 'Not yet', 'Facility didn\'t join'], '', true), 'The rep and Malka see this on the tracker.')}${chk('ok', 'Portal has their corrections and new contacts (or they had none)')}`; },
     example: () => ({ is: 'Booked', ok: true }),
     validate: () => V('ok') && V('is') ? '' : 'Pick the in-service status and tick the portal box.',
     done: t => { facById(t.fac).inservice = V('is'); },
-    opens: t => { const f = facById(t.fac); return { subject: 'Follow up with ' + (f.wound && f.wound.name) + ' / ' + (f.regional && f.regional.name), body: '<p>No reply to Email 3 in 5 business days. Follow up, and mark the task done once the portal contacts are updated.</p>' }; }
+    opens: t => { const f = facById(t.fac); return { subject: 'Follow up with ' + (f.wound && f.wound.name) + ' / ' + (f.regional && f.regional.name), body: '<p>No reply to the in-service & contacts request in 5 business days. Follow up, and mark the task done once the portal contacts are updated.</p>' }; }
   },
   CHICAGO_FOLLOW: {
     title: t => 'Chicago hasn\'t sent the facility email: ' + facName(facById(t.fac)),
     form: () => `<div class="instr">The system nudged Chicago once. Reach out to ${esc(st.settings.chicagoGreeting)} directly.</div>${chk('ok', 'Chicago confirmed it went out')}`,
     example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when confirmed.',
     done: (t, ctx) => markEmail2(facById(t.fac), ctx.byName),
-    opens: t => ({ subject: 'Chicago still hasn\'t sent it: ' + facName(facById(t.fac)), body: '<p>5 business days since Email 1 and no email to the facility yet. Reach out to ' + esc(st.settings.chicagoGreeting) + ' directly.</p>' })
+    opens: t => ({ subject: 'Chicago still hasn\'t sent it: ' + facName(facById(t.fac)), body: '<p>5 business days since the Chicago handoff email and no transfer notice to the facility yet. Reach out to ' + esc(st.settings.chicagoGreeting) + ' directly.</p>' })
   }
 };
 
 function portalForm(f) {
   const g = FG(f), d = f.dates, rep = nameOf(f.rep);
   const nonCovEnt = g.cov.Enteral === 'Covered and Noncovered';
-  const rows = [['"Account Manager"', nameOf(amOf(f))], ['"Biller"', st.settings.biller], ['"Clinical Review"', nameOf(f.clin || f.rep)], ['"Insurance Specialist", "Intake Specialist"', rep], ['"Price Table"', g.price ? g.price + ' (Amy usually fills it. Empty → type it)' : 'Already set up for this corporate. Leave it as it is.'], ['"Pricing Group"', 'Placeholder Pricing Group'],
+  const rows = [['"Account Manager"', nameOf(acctOf(f)) || '(none picked. Pick one on the facility page)'], ['"Biller"', st.settings.biller], ['"Clinical Review"', nameOf(f.clin || f.rep)], ['"Insurance Specialist", "Intake Specialist"', rep], ['"Price Table"', g.price ? g.price + ' (Amy usually fills it. Empty → type it)' : 'Already set up for this corporate. Leave it as it is.'], ['"Pricing Group"', 'Placeholder Pricing Group'],
     ['"Main Vendor"', f.gdd === 'Yes' ? f.gddWh : f.gdd === 'No' ? 'Not GDD. Leave it as it is' : 'Chris hasn\'t answered yet. Leave it. If he says GDD, you get a separate task'],
     ['"Emergency Supply Days"', '4'], ['"Ship Point"', String(d.ship) + ' (' + f.state + ')'], ['"Ship Point- United Ostomy, Fordmed"', String(d.shipOst || '')],
     ['"Pump Brand"', 'Brand in the feed set name on the report (Cardinal KGR Omni Feed Set → Omni). No spike set on the report → from "Pump Tracking" (Eduardo: ' + (f.pumps === 'checked' ? 'checked ✓' : 'not checked yet') + ')'],
@@ -244,5 +244,5 @@ function dateEditor(f) {
 function scheduleForm(f) {
   const d = f.dates, b = f.bt;
   return `${dateEditor(f)}<div class="instr"><ol><li>"Facilities" → schedule icon under "Actions" → "Facility Schedule".</li><li>"Start Date" <span class="q">${fmtS(d.del)}</span>, "Day of the Week" <span class="q">${d.day}</span>, "Weeks" <span class="q">4</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>${b.cadence !== '4' ? `<li>"Select Area of Care" → "Enteral" → "Add Schedule": same Start Date and day, "Weeks" <span class="q">${b.cadence}</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>` : ''}<li>"Generate Dates" → check "Override Manually" → "Save".</li><li>"Schedules" → Ordering Calendar → open the entry on ${fmt(d.ord)} and check the 3 dates match the ones above. Wrong? Recheck Start Date, Day of the Week and OS Days and generate again. Missing? The ordering date probably landed on a weekend.</li><li>Intake note: <span class="q">Transition from Chicago</span> + <span class="q">Email Shani the list of eligible pump fed and trach pts so she can review Chicago's billing</span> + anything useful from the report.</li></ol></div>
-  <div class="note">"Mark done" sends Email 1 to Chicago with these dates. Changed a date above? Click "Save dates" first.</div>`;
+  <div class="note">"Mark done" sends the Chicago handoff email with these dates. Changed a date above? Click "Save dates" first.</div>`;
 }

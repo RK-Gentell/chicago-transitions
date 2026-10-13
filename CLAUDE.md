@@ -7,7 +7,7 @@ A task app that runs the Chicago → Lakewood facility transition process from t
 
 ## Files
 - `config.js`: tenant, app (client) ID, SharePoint site, shared mailbox, app URL. Empty clientId = demo mode.
-- `js/engine.js`: the rules. `run()` creates every task and email that's due. Dates, email wording (Email 1 / Email 3 templates), reminders, inbox matching.
+- `js/engine.js`: the rules. `run()` creates every task and email that's due. Dates, email wording (Chicago handoff email / in-service & contacts request templates), reminders, inbox matching.
 - `js/tasks.js`: the task types (`TT`): title, form, validate, done, opens (waiting tasks), quick (email-button answers).
 - `js/store.js`: loading and saving. `SPStore` (Microsoft Graph) and `DemoStore` (in memory).
 - `js/ui.js`: screens and clicks. Every change goes through `act()`: reload → change → `run()` → save → reload.
@@ -28,8 +28,14 @@ Never rename these lists or columns: the flows use them.
 - Failures must show (banner, Failed email status). Never fail silently.
 - Changing a list/column the flows read means Raizy has to change the flow too: tell her exactly what to click.
 
+## Names users see
+Never say "Email 1/2/3" in the UI or emails. Internally (code, `email1`/`email2`/`email3` fields, E14/E16 codes) they still are. Email 1 = "Chicago handoff email" (us → GNS Chicago). Email 2 = "Transfer notice to facility" (GNS Chicago → facility). Email 3 = "In-service & contacts request" (us → wound rep + regional).
+
+## People on a facility
+`am` in the data (`f.am`, `g.am`, `p.am`, `amOf`, the `Am` column) is the **transition lead**: runs the transition, gets the tasks and emails. Never rename it (the mailbox flow reads `Am`). The **account manager** is `acct` (`f.acct`, `g.acct`, `acctOf`): picked from the "Rep / account manager" list and CC'd only where the intake rep gets email (Chicago handoff, in-service & contacts request). It also fills the portal's "Account Manager" field.
+
 ## Email 3 replies
-Email 3 goes to the wound rep + regional. `processInbox` treats any email to the mailbox (in To) with the facility name + "transfer from gns chicago" in the subject, received on/after Email 3, as a reply, unless it's from the mailbox, GNS Chicago (Email 1 To/CC) or someone on the team who isn't the wound rep/regional. A reply sets `f.e3Reply` and makes an `E3_REPLY` task for the AM (put their info in; or "keep following up", which starts a new follow-up round `f.e3Round`). No reply: `chaseEmail3` queues 1 step at a time (+3 business days, +3, then an alert to the AM). Manual: "Email 3 is taken care of" on the facility page. Completion waits on `e3Done`. Follow-ups (E15, E16F, E16A, E17) go out as High importance.
+Email 3 goes to the wound rep + regional. `processInbox` treats any email to the mailbox (in To) with the facility name + "transfer from gns chicago" in the subject, received on/after Email 3, as a reply, unless it's from the mailbox, GNS Chicago (Email 1 To/CC) or someone on the team who isn't the wound rep/regional. A reply sets `f.e3Reply` and makes an `E3_REPLY` task for the transition lead (put their info in; or "keep following up", which starts a new follow-up round `f.e3Round`). No reply: `chaseEmail3` queues 1 step at a time (+3 business days, +3, then an alert to the transition lead). Manual: "In-service & contacts: taken care of" on the facility page. Completion waits on `e3Done`. Follow-ups (E15, E16F, E16A, E17) go out as High importance.
 
 ## Request form
 Corporate is per line (no dropdown). "Already done" (`PRE_ITEMS` in engine.js, `applyPre`) sets what the skipped steps would have set and the engine skips their tasks; `g.existing` = corporate already in the portal (no price table / EMR access tasks). Info-only emails (`FYI_CODES`) get a "no action needed" line. To-do emails for tasks with steps use `todo()`: one line, details live in the task.

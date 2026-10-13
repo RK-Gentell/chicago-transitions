@@ -109,9 +109,9 @@ function settingsProblems() {
     else if (!validEmail(p.email)) out.push(p.name + ' needs an email (' + ROLES[r] + ').');
   }
   people().filter(p => (p.am || p.rep || p.admin) && !validEmail(p.email)).forEach(p => out.push(p.name + ' needs an email.'));
-  if (!amList().length) out.push('Add at least 1 account manager.');
+  if (!amList().length) out.push('Tick at least 1 transition lead.');
   if (!repList().length) out.push('Add at least 1 intake rep.');
-  if (!s.e1To.length) out.push('Email 1 "To" list (Chicago) is empty.');
+  if (!s.e1To.length) out.push('Chicago handoff email "To" list is empty.');
   if (!/^https?:\/\//.test(s.inserviceUrl || '')) out.push('In-service link is missing.');
   return [...new Set(out)];
 }
@@ -132,7 +132,9 @@ const gTask = (gname, type) => st.tasks.find(t => !t.fac && lc(t.group) === lc(g
 const fTask = (f, type) => st.tasks.find(t => t.fac === f.id && t.type === type);
 const done = t => !!t && (t.status === 'Done' || t.status === 'Not needed');
 const isWaiting = t => !done(t) && !!t.opensOn && t.opensOn > st.today;
+// "am" in the data = the transition lead (runs this transition). The account manager is "acct": kept in the loop like the intake rep.
 function amOf(f) { return f.am || G(f).am || fallbackOwner(); }
+function acctOf(f) { return f.acct || (f.group ? G(f).acct : '') || ''; }
 function FG(f) { const g = G(f); return Object.assign({}, g, { cov: Object.assign({}, g.cov || {}, f.cov || {}) }); }
 function covKnown(g) { return !!g.cov && AREAS.every(a => g.cov[a]); }
 function partB(g) { return AREAS.every(a => ['Covered Only', "Don't Supply", 'Purchase Order', 'Facility Bulk Order'].includes(g.cov[a])); }
@@ -184,7 +186,7 @@ function dateWarn(f, dos) {
 function saveDates(f, dos, by) {
   if (f.rec && dos === f.rec.dos) { f.dosChosen = ''; f.dosBy = ''; f.dates = f.rec; }
   else { f.dosChosen = dos; f.dosBy = by; f.dates = Object.assign(derive(f, dos), { why: [...(f.rec ? f.rec.why : []), 'Changed by ' + by + ' from the recommended ' + (f.rec ? fmtS(f.rec.dos) : '')], changed: true }); }
-  if (f.email1) mail({ key: 'm:E13:dates:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, subject: 'Dates changed after Email 1: ' + facName(f), body: '<p>' + esc(by) + ' changed the dates after Email 1 went out. Fix the Ordering Calendar, then click "Dates changed: send correction" on the facility page.</p>', link: 'fac' });
+  if (f.email1) mail({ key: 'm:E13:dates:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, subject: 'Dates changed after the Chicago handoff email: ' + facName(f), body: '<p>' + esc(by) + ' changed the dates after the Chicago handoff email went out. Fix the Ordering Calendar, then click "Dates changed: send correction" on the facility page.</p>', link: 'fac' });
 }
 
 // ---------- stage ----------
@@ -207,12 +209,12 @@ const PRE_ITEMS = [
   ['added', 'Facility added to Brightree', 'Skips Amy\'s "Add … to Brightree" task. Type each facility\'s name above exactly as Brightree shows it.'],
   ['pumps', 'Pumps checked and added to "Pump Tracking"', ''],
   ['gdd', 'GDD question answered', ''],
-  ['fc', 'FastCare info gathered, and Email 3 sent to the wound rep and regional', 'Skips the FastCare task, Email 3 and its follow-ups.'],
+  ['fc', 'FastCare info gathered, and the in-service & contacts request sent to the wound rep and regional', 'Skips the FastCare task, the in-service & contacts request and its follow-ups.'],
   ['ct', 'The contacts on this request are already in the portal', ''],
   ['emr', 'EMR info for the facility is in the portal', ''],
   ['ps', 'Portal setup done', ''],
-  ['e1', 'Scheduled, and Email 1 sent to GNS Chicago', 'Skips the Brightree report and scheduling. Dates stay blank.'],
-  ['e2', 'GNS Chicago emailed the facility (Email 2)', '']
+  ['e1', 'Scheduled, and the Chicago handoff email sent', 'Skips the Brightree report and scheduling. Dates stay blank.'],
+  ['e2', 'GNS Chicago sent the transfer notice to the facility', '']
 ];
 // the AM's first tasks on new facilities, as links (skips ones ticked "already done")
 const amFirstTasks = list => { const ts = list.flatMap(f => [preDone(f, 'fc') ? null : [esc(f.name) + ': FastCare', 't:FASTCARE:f' + f.id], preDone(f, 'e1') ? null : [esc(f.name) + ': Brightree report', 't:BRIGHTREE:f' + f.id]].filter(Boolean)); return ts.length ? '<p>Your tasks:</p>' + taskList(ts) : '<p>Nothing for you to do yet. You\'ll get an email when there is.</p>'; };
@@ -334,7 +336,7 @@ function ensureTaskMails() {
         mail({ key: 'm:open:' + t.key + ':' + hash(ok), code: 'E13', to: [t.assignee], cc: om.cc, fac: t.fac, subject: om.subject, body: om.body, task: t.key, day: t.opensOn, cond: { task: t.key, assignee: t.assignee, opensOn: t.opensOn } });
       }
     }
-    // reminders: 1 business day after the due date, then 2 (CC the AM), then 4 (CC the escalation person).
+    // reminders: 1 business day after the due date, then 2 (CC the transition lead), then 4 (CC the escalation person).
     // Only the next one is ever queued; the one after is queued once its turn comes.
     const rk = t.assignee + '|' + t.due, days = [1, 2, 4];
     if (t.remFor !== rk) { t.remFor = rk; t.remNext = 0; }
@@ -375,7 +377,7 @@ function email1Body(f) {
 }
 function sendEmail1(f, correction) {
   const am = amOf(f), s = st.settings, subj = facName(f) + '- Transfer from GNS Chicago to Lakewood';
-  mail({ key: 'm:' + (correction ? 'E22' : 'E14') + ':' + f.id + (correction ? ':' + uid() : ''), code: correction ? 'E22' : 'E14', to: [...s.e1To, f.rep], cc: [...s.e1Cc, am], fac: f.id, noTag: true, link: 'none', subject: (correction ? 'CORRECTION: ' : '') + subj, body: (correction ? '<p><b>Corrected dates below.</b></p>' : '') + email1Body(f) });
+  mail({ key: 'm:' + (correction ? 'E22' : 'E14') + ':' + f.id + (correction ? ':' + uid() : ''), code: correction ? 'E22' : 'E14', to: [...s.e1To, f.rep], cc: [...s.e1Cc, am, acctOf(f)], fac: f.id, noTag: true, link: 'none', subject: (correction ? 'CORRECTION: ' : '') + subj, body: (correction ? '<p><b>Corrected dates below.</b></p>' : '') + email1Body(f) });
   if (correction) return;
   f.email1 = st.today;
   mail({ key: 'm:E15:' + f.id, code: 'E15', to: s.e1To, cc: [am], fac: f.id, noTag: true, link: 'none', day: addBiz(st.today, 3), cond: { fac: f.id, untilEmail2: true }, subject: 'RE: ' + subj, body: `<p>Hi ${esc(s.chicagoGreeting)},</p><p>Checking in, has the facility email for <b>${esc(facName(f))}</b> gone out? Please CC ${esc(CFG.mailbox)} on it.</p><p>Thank you!<br>${esc(nameOf(am))}</p>` });
@@ -399,7 +401,7 @@ function email3Body(f) {
 }
 function sendEmail3(f) {
   f.email3 = st.today;
-  mail({ key: 'm:E16:' + f.id, code: 'E16', to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [f.rep, roleEmail('rules'), amOf(f)], fac: f.id, noTag: true, link: 'none', subject: E3_SUBJECT(f), body: email3Body(f) });
+  mail({ key: 'm:E16:' + f.id, code: 'E16', to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [f.rep, acctOf(f), roleEmail('rules'), amOf(f)], fac: f.id, noTag: true, link: 'none', subject: E3_SUBJECT(f), body: email3Body(f) });
 }
 // One step at a time: only the next follow-up is ever queued, and it's cancelled the moment "Done" comes in.
 function chaseEmail3(f) {
@@ -414,8 +416,8 @@ function chaseEmail3(f) {
   const day = addBiz(last, 3), key = pre + step + ':' + mine.length, am = amOf(f), cond = { fac: f.id, e3Round: round };
   if (step < 3) mail({ key, code: 'E16F', day, cond, to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [am], fac: f.id, noTag: true, link: 'none', subject: 'RE: ' + E3_SUBJECT(f),
       body: `${e3Hi(f)}<p>${step === 1 ? 'Just following up on my email below' : 'Following up again on my email below'} about <b>${esc(facName(f))}</b>. Can you please get the in-service booked and send over the contact info?</p><p>Thank you!<br>${esc(nameOf(am))}</p><hr>${email3Body(f)}` });
-  else mail({ key, code: 'E16A', day, cond, to: [am], fac: f.id, link: 'fac', subject: 'No reply to Email 3: ' + facName(f),
-      body: `<p>${esc(e3Names(f).join(' and ') || 'The wound rep and regional')} didn't reply to Email 3 for <b>${esc(facName(f))}</b>, even after 2 follow-ups. Please reach out to them.</p>` + note('When it\'s taken care of, click "Email 3 is taken care of" on the facility page. The facility can\'t be marked complete until then.') });
+  else mail({ key, code: 'E16A', day, cond, to: [am], fac: f.id, link: 'fac', subject: 'No reply to the in-service & contacts request: ' + facName(f),
+      body: `<p>${esc(e3Names(f).join(' and ') || 'The wound rep and regional')} didn't reply to the in-service & contacts request for <b>${esc(facName(f))}</b>, even after 2 follow-ups. Please reach out to them.</p>` + note('When it\'s taken care of, click "In-service & contacts: taken care of" on the facility page. The facility can\'t be marked complete until then.') });
 }
 // request said some steps are already done: set what those steps would have set, so their tasks never get made
 function applyPre(f, pre, l) {
@@ -435,7 +437,7 @@ const e3Who = (f, from) => { const x = [f.wound, f.regional].find(p => p && lc(p
 function gotE3Reply(f, m) {
   f.e3Reply = { from: m.from, at: (m.received || '').slice(0, 10) || st.today, inbox: m._id || '' };
   const t = newTask('E3_REPLY', { fac: f.id, assignee: amOf(f), amTask: true, reply: f.e3Reply });
-  todo(t, 'Email 3 reply for ' + facName(f), esc(e3Who(f, m.from)) + ' replied to Email 3 for <b>' + esc(facName(f)) + '</b>. Put in the info they sent.');
+  todo(t, 'reply to the in-service & contacts request for ' + facName(f), esc(e3Who(f, m.from)) + ' replied to the in-service & contacts request for <b>' + esc(facName(f)) + '</b>. Put in the info they sent.');
 }
 function addAmy(f) {
   const g = G(f), t = newTask('PORTAL_ADD', { fac: f.id, assignee: roleEmail('portal') });
@@ -529,7 +531,7 @@ function run() {
     if (!f.rep && g.rep) { f.rep = g.rep; f.clin = g.clin || g.rep; if (!f.am && g.am) f.am = g.am; }
     if (!f.rep && !st.tasks.some(t => lc(t.group) === lc(g.name) && t.type === 'RULE' && !done(t))) {
       const t = newTask('RULE', { group: g.name, assignee: roleEmail('rules') });
-      queue('E3', t.assignee, f, t, (fs, ts) => ({ code: 'E3', to: [ts[0].assignee], task: ts[0].key, cond: { task: ts[0].key }, subject: 'Pick a rep: ' + g.name, body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>These facilities from <b>${esc(g.name)}</b> have no rep and the corporate has no rep rule:</p><ul>${facsOfGroup(g.name).filter(x => !x.rep).map(x => '<li>' + esc(x.name) + '</li>').join('')}</ul><p>Pick the intake rep, clinical rep and AM. Tick "Save as the corporate rule" so future facilities under this corporate get them automatically.</p>` }));
+      queue('E3', t.assignee, f, t, (fs, ts) => ({ code: 'E3', to: [ts[0].assignee], task: ts[0].key, cond: { task: ts[0].key }, subject: 'Pick a rep: ' + g.name, body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>These facilities from <b>${esc(g.name)}</b> have no rep and the corporate has no rep rule:</p><ul>${facsOfGroup(g.name).filter(x => !x.rep).map(x => '<li>' + esc(x.name) + '</li>').join('')}</ul><p>Pick the intake rep, clinical rep, account manager and transition lead. Tick "Save as the corporate rule" so future facilities under this corporate get them automatically.</p>` }));
     }
     // corporate asks, once per corporate
     if (!groupsSeen[lc(g.name)]) {
@@ -596,7 +598,7 @@ function run() {
     // at risk: ordering date within 3 business days and Email 1 not out
     if (f.dates && !f.email1 && f.riskFor !== f.dates.ord) {
       f.riskFor = f.dates.ord; const day = addBiz(f.dates.ord, -3);
-      mail({ key: 'm:risk:' + f.id + ':' + f.dates.ord, code: 'E18', to: [am], fac: f.id, link: 'fac', day: day > st.today ? day : st.today, cond: { fac: f.id, untilEmail1: true, ord: f.dates.ord }, subject: 'At risk: ' + facName(f) + ' orders ' + fmt(f.dates.ord) + ' and Chicago hasn\'t been emailed', body: '<p>Finish the open tasks so Email 1 can go out.</p>' });
+      mail({ key: 'm:risk:' + f.id + ':' + f.dates.ord, code: 'E18', to: [am], fac: f.id, link: 'fac', day: day > st.today ? day : st.today, cond: { fac: f.id, untilEmail1: true, ord: f.dates.ord }, subject: 'At risk: ' + facName(f) + ' orders ' + fmt(f.dates.ord) + ' and Chicago hasn\'t been emailed', body: '<p>Finish the open tasks so the Chicago handoff email can go out.</p>' });
     }
     // complete
     if (f.email2 && (done(fTask(f, 'GDD')) || preDone(f, 'gdd')) && (!f.email3 || f.e3Done)) {
