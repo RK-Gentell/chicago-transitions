@@ -504,3 +504,32 @@ document.addEventListener('drop', e => {
 });
 
 boot();
+
+// ---------- info buttons ----------
+// Helper text (.hint under a field, .sub under a page title) is tucked behind a small "i" button next to the label or title.
+const INFO_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="12" cy="12" r="9.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 11v5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="7.9" r="1.05" fill="currentColor"/></svg>';
+function infoize(root) {
+  root.querySelectorAll('.hint:not([data-tipped]), p.sub:not([data-tipped])').forEach(h => {
+    h.dataset.tipped = '1';
+    if (!h.textContent.trim()) { h.remove(); return; }
+    let anchor = null;
+    if (h.classList.contains('hint')) { const fld = h.closest('.field'); anchor = fld && fld.querySelector(':scope > label'); }
+    else { let p = h.previousElementSibling; if (p && /^H[12]$/.test(p.tagName)) anchor = p; }
+    if (!anchor) return;
+    const w = document.createElement('span'); w.className = 'infow';
+    w.innerHTML = `<button type="button" class="info" aria-label="More info" aria-expanded="false">${INFO_SVG}</button>`;
+    const tip = document.createElement('span'); tip.className = 'tip'; tip.setAttribute('role', 'note');
+    while (h.firstChild) tip.appendChild(h.firstChild);
+    w.appendChild(tip); anchor.appendChild(w); h.remove();
+  });
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('.info');
+  document.querySelectorAll('.infow.open').forEach(w => { if (!b || !w.contains(b)) { w.classList.remove('open'); w.firstChild.setAttribute('aria-expanded', 'false'); } });
+  if (b) { e.preventDefault(); e.stopPropagation(); const w = b.parentNode, on = !w.classList.contains('open'); w.classList.toggle('open', on); b.setAttribute('aria-expanded', String(on)); if (on) placeTip(w); }
+}, true);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('.infow.open').forEach(w => w.classList.remove('open')); });
+new MutationObserver(() => { infoize(document.getElementById('main')); infoize(document.getElementById('layer')); }).observe(document.body, { childList: true, subtree: true });
+function placeTip(w) { const t = w.querySelector('.tip'); if (!t) return; t.style.left = ''; const r = t.getBoundingClientRect(); if (r.width && r.right > innerWidth - 8) t.style.left = (-8 - (r.right - innerWidth + 8)) + 'px'; }
+document.addEventListener('mouseover', e => { const w = e.target.closest && e.target.closest('.infow'); if (w) placeTip(w); });
+document.addEventListener('focusin', e => { const w = e.target.closest && e.target.closest('.infow'); if (w) placeTip(w); });

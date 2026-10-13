@@ -199,16 +199,16 @@ function stageOf(f) {
 function atRisk(f) { const d = f.dates; return !!(d && !f.email1 && !f.hold && !f.complete && addBiz(st.today, 3) >= d.ord); }
 
 // ---------- email ----------
-const btnStyle = 'display:inline-block;background:#1d5f7c;color:#ffffff;padding:8px 16px;border-radius:4px;text-decoration:none;font-weight:bold;margin:0 8px 8px 0';
+const btnStyle = 'display:inline-block;background:#003171;color:#ffffff;padding:8px 16px;border-radius:4px;text-decoration:none;font-weight:bold;margin:0 8px 8px 0';
 const appLink = q => CFG.appUrl + (q ? '?' + q : '');
 const taskUrl = (key, answer) => appLink('task=' + encodeURIComponent(key) + (answer ? '&answer=' + encodeURIComponent(answer) : ''));
 // smaller grey line for side information (what happens next, why), under the main instruction
-const note = s => '<p style="color:#6b7280;font-size:9.5pt;margin:-4px 0 10px">' + s + '</p>';
+const note = s => '<p style="color:#6B6F75;font-size:9.5pt;margin:-4px 0 10px">' + s + '</p>';
 // one line per task in emails that cover several: facility name + its own buttons
 const taskList = (items, answers) => '<ul>' + items.map(([label, key]) => '<li style="margin:4px 0">' + label + ' &nbsp; ' + (answers || []).map(a => `<a href="${esc(taskUrl(key, a))}">${esc(a)}</a> &middot; `).join('') + `<a href="${esc(taskUrl(key))}">Open the task</a></li>`).join('') + '</ul>';
 function emailHtml(body, m) {
   let links = '';
-  if (m.task && m.buttons) links = '<p>' + m.buttons.map(b => `<a href="${esc(appLink('task=' + encodeURIComponent(m.task) + '&answer=' + encodeURIComponent(b)))}" style="${btnStyle}">${esc(b)}</a>`).join('') + `<a href="${esc(appLink('task=' + encodeURIComponent(m.task)))}" style="${btnStyle};background:#5d6b78">Open the task</a></p>`;
+  if (m.task && m.buttons) links = '<p>' + m.buttons.map(b => `<a href="${esc(appLink('task=' + encodeURIComponent(m.task) + '&answer=' + encodeURIComponent(b)))}" style="${btnStyle}">${esc(b)}</a>`).join('') + `<a href="${esc(appLink('task=' + encodeURIComponent(m.task)))}" style="${btnStyle};background:#6B6F75">Open the task</a></p>`;
   else if (m.task && m.link !== 'none') links = `<p><a href="${esc(appLink('task=' + encodeURIComponent(m.task)))}" style="${btnStyle}">Open the task</a></p>`;
   else if (m.link === 'mytasks') links = `<p><a href="${esc(appLink('view=mytasks'))}" style="${btnStyle}">Open my tasks</a></p>`;
   else if (m.link === 'fac' && m.fac) links = `<p><a href="${esc(appLink('fac=' + m.fac))}" style="${btnStyle}">Open the facility</a></p>`;
