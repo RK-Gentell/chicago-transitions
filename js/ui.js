@@ -96,7 +96,7 @@ function waitingOn(f) {
   if (f.complete) return [];
   const g = G(f), w = [];
   st.tasks.filter(t => !t.fac && f.group && lc(t.group) === lc(f.group) && !done(t)).forEach(t => w.push(taskTitle(t) + ' (' + nameOf(t.assignee) + ')'));
-  if (g.price && !f.inPortal && !fTask(f, 'PORTAL_ADD')) w.push('Add to portal (' + roleName('portal') + ')');
+  if (g.price && !f.inPortal && !fTask(f, 'PORTAL_ADD')) w.push('Add to Brightree (' + roleName('portal') + ')');
   if (f.email1 && !f.email2) w.push('Chicago’s email to the facility (Email 2)');
   if (f.email3 && !f.e3Done) w.push('"Done" reply to Email 3 (' + (e3Names(f).join(' / ') || 'wound rep / regional') + ')');
   if (f.email2 && !done(fTask(f, 'GDD'))) w.push('GDD answer (' + roleName('gdd') + ')');
@@ -212,7 +212,7 @@ function requestHtml() {
     ${fld('Attachments', `<div class="drop" id="rq_drop" tabindex="0"><b>Drag files here</b> or <label class="linkish" for="rq_files">browse</label><input type="file" id="rq_files" multiple hidden></div><div class="instr" style="margin-top:6px"><b>Emails:</b> forward them to <span class="q">${esc(CFG.mailbox)}</span> with the facility name in the subject. They show up on the facility page under "Mailbox".</div><div id="rq_list" class="meta">${ui.dropped.map(f => esc(f.name)).join(', ')}</div>`, 'PDFs, docs, or emails you saved from Outlook first. Saved in SharePoint, in a folder for this request. Linked on every task.')}
     <div class="sect">Areas of care${tip('Leave "Not sure" and the app asks you later.')}</div><div class="row">${AREAS.map(a => fld(a, sel('rq_' + a, [...covOpts(a), 'Not sure'], 'Not sure', true))).join('')}</div>
     <div class="row">${fld('Intake rep', sel('rq_rep', peopleOpts(repList()), '', true), 'Optional. Blank → corporate rule or ' + esc(roleName('rules')) + '.')}${fld('Account Manager', sel('rq_am', peopleOpts(amList()), '', true), 'Optional')}</div>
-    <div class="sect">Already done${tip('Tick anything that\'s already taken care of. The app skips that task.')}</div>${chk('rq_added', 'Facility already added (Amy\'s "Add … to the portal" task)')}<div class="note" id="rq_addednote" hidden>Type each facility's name above exactly as the portal shows it, e.g. <span class="q">Waters Of Lagrange- 211526</span>.</div>${chk('rq_pumps', 'Pumps already added to the portal ("Pump Tracking")')}
+    <div class="sect">Already done${tip('Tick anything that\'s already taken care of. The app skips that task.')}</div>${chk('rq_added', 'Facility already added to Brightree (Amy\'s "Add … to Brightree" task)')}<div class="note" id="rq_addednote" hidden>Type each facility's name above exactly as Brightree shows it, e.g. <span class="q">Waters Of Lagrange- 211526</span>.</div>${chk('rq_pumps', 'Pumps already added to the portal ("Pump Tracking")')}
     <div class="sect">Contacts${tip('Optional. Only if you have them.')}</div>
     <div class="field"><label>Corporate contacts</label>${contactEditor('rq_corp', 'Corporate', false)}<div class="hint">Put the person we ask for things first. Ignored if the corporate already has contacts.</div></div>
     <div class="field"><label>Facility contacts</label>${contactEditor('rq_fcts', '', true)}<div class="hint">Several facilities? Type the facility name in the first box; blank = all of them.</div></div>

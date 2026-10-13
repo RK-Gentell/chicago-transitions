@@ -100,10 +100,10 @@ const TT = {
     example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when they confirm.', done: () => { }
   },
   PORTAL_ADD: {
-    title: t => 'Add ' + facById(t.fac).name + ' to the portal',
-    form: t => { const f = facById(t.fac), g = G(f); return `<div class="kv"><div>Name</div><div>${esc(f.name)}</div><div>Address</div><div>${esc(f.address)}</div><div>Corporate</div><div>${g.standalone ? '<b>None. Set it up as its own corporate named "' + esc(f.group) + '"</b>' : esc(f.group)}</div><div>Price table</div><div>${esc(g.price)}</div></div><div class="meta">Add it if it isn't there yet. Already there? Just mark done.</div>${fld('Facility name as the portal shows it', txt('pn', '', 'Waters Of Lagrange- 211526'), 'Every email uses it.')}`; },
+    title: t => 'Add ' + facById(t.fac).name + ' to Brightree',
+    form: t => { const f = facById(t.fac), g = G(f); return `<div class="kv"><div>Name</div><div>${esc(f.name)}</div><div>Address</div><div>${esc(f.address)}</div><div>Corporate</div><div>${g.standalone ? '<b>None. Set it up as its own corporate named "' + esc(f.group) + '"</b>' : esc(f.group)}</div><div>Price table</div><div>${esc(g.price)}</div></div><div class="meta">Add it if it isn't there yet. Already there? Just mark done.</div>${fld('Facility name as Brightree shows it', txt('pn', '', 'Waters Of Lagrange- 211526'), 'Every email uses it.')}`; },
     example: t => ({ pn: facById(t.fac).name + '- 2115' + (26 + t.fac) }),
-    validate: () => V('pn') ? '' : 'Enter the portal name.',
+    validate: () => V('pn') ? '' : 'Enter the name as Brightree shows it.',
     done: t => { const f = facById(t.fac); f.inPortal = true; f.portalName = V('pn'); }
   },
   PUMPS: {

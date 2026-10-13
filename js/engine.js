@@ -21,7 +21,7 @@ const covOpts = a => a === 'Supplements' ? COV_SUPP : COV;
 const ROLES = {
   rules: 'Picks the reps',
   price: 'Price tables',
-  portal: 'Adds facilities to the portal',
+  portal: 'Adds facilities to Brightree',
   emr: 'EMR access',
   pumps: 'Pumps',
   gdd: 'GDD orders',
@@ -399,8 +399,8 @@ function isDoneReply(preview) {
 }
 function addAmy(f) {
   const g = G(f), t = newTask('PORTAL_ADD', { fac: f.id, assignee: roleEmail('portal') });
-  mail({ key: 'm:E8:' + t.key, code: 'E8', to: [t.assignee], cc: [amOf(f)], fac: f.id, task: t.key, cond: { task: t.key }, subject: 'Add ' + f.name + ' to the portal',
-    body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>Please add this facility to the portal (if it's already there, just mark the task done).</p><table border="1" cellpadding="4" style="border-collapse:collapse"><tr><td>Name</td><td>${esc(f.name)}</td></tr><tr><td>Address</td><td>${esc(f.address)}</td></tr><tr><td>Corporate</td><td>${g.standalone ? '<b>None. Set it up as its own corporate named "' + esc(f.group) + '"</b>' : esc(f.group)}</td></tr><tr><td>Price table</td><td>${esc(g.price)}</td></tr></table>` });
+  mail({ key: 'm:E8:' + t.key, code: 'E8', to: [t.assignee], cc: [amOf(f)], fac: f.id, task: t.key, cond: { task: t.key }, subject: 'Add ' + f.name + ' to Brightree',
+    body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>Please add this facility to Brightree (if it's already there, just mark the task done).</p><table border="1" cellpadding="4" style="border-collapse:collapse"><tr><td>Name</td><td>${esc(f.name)}</td></tr><tr><td>Address</td><td>${esc(f.address)}</td></tr><tr><td>Corporate</td><td>${g.standalone ? '<b>None. Set it up as its own corporate named "' + esc(f.group) + '"</b>' : esc(f.group)}</td></tr><tr><td>Price table</td><td>${esc(g.price)}</td></tr></table>` });
 }
 const first = n => String(n || '').split(' ')[0];
 function makeStandalone(f) {
@@ -512,7 +512,7 @@ function run() {
     }
     // dates (frozen once Email 1 went out)
     { const d = calcDates(f); if (d && !f.email1) { f.rec = d; f.dates = f.dosChosen ? Object.assign(derive(f, f.dosChosen), { why: [...d.why, 'Changed by ' + (f.dosBy || 'someone') + ' from the recommended ' + fmtS(d.dos)], changed: true }) : d; } }
-    // Amy adds it to the portal once the price table is in
+    // Amy adds it to Brightree once the price table is in
     if (g.price && f.address && !fTask(f, 'PORTAL_ADD') && !f.inPortal) addAmy(f);
     // existing EMR login: ask corporate to add this facility
     const main = mainCorp(g);
