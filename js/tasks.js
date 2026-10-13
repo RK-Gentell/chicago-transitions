@@ -67,7 +67,7 @@ const TT = {
       if (g && V('rule')) { g.rep = V('rep'); g.clin = V('clin') || V('rep'); g.am = V('am'); }
       const byAm = {};
       ruleFacs(t).forEach(f => { f.rep = V('rep_' + f.id); f.clin = V('clin_' + f.id) || f.rep; f.am = V('am_' + f.id); (byAm[f.am] = byAm[f.am] || []).push(f); });
-      Object.entries(byAm).forEach(([am, list]) => mail({ key: 'm:E2:' + t.key + ':' + am, code: 'E2', to: [am], link: 'mytasks', subject: 'New transition: ' + list.map(f => f.name).join(', '), body: `<p>${esc(ctx.byName)} assigned you ${list.length} facilit${list.length > 1 ? 'ies' : 'y'}${t.group === '__nocorp' ? '' : ' from <b>' + esc(t.group) + '</b>'}: ${list.map(f => esc(f.name) + ' (intake rep ' + esc(nameOf(f.rep)) + ')').join(', ')}.</p>${V('why') ? '<p><b>Why these reps:</b> ' + esc(V('why')) + '</p>' : ''}<p><b>Background:</b> ${esc(list[0].why) || '-'}</p><p>All requests already went out. Your Brightree and FastCare tasks are ready.</p>` }));
+      Object.entries(byAm).forEach(([am, list]) => mail({ key: 'm:E2:' + t.key + ':' + am, code: 'E2', to: [am], link: 'none', subject: 'New transition: ' + list.map(f => f.name).join(', '), body: `<p>${esc(ctx.byName)} assigned you ${list.length} facilit${list.length > 1 ? 'ies' : 'y'}${t.group === '__nocorp' ? '' : ' from <b>' + esc(t.group) + '</b>'}: ${list.map(f => esc(f.name) + ' (intake rep ' + esc(nameOf(f.rep)) + ')').join(', ')}.</p>${V('why') ? '<p><b>Why these reps:</b> ' + esc(V('why')) + '</p>' : ''}<p><b>Background:</b> ${esc(list[0].why) || '-'}</p><p>All requests already went out. Your tasks:</p>${taskList(list.flatMap(f => [[esc(f.name) + ': FastCare', 't:FASTCARE:f' + f.id], [esc(f.name) + ': Brightree report', 't:BRIGHTREE:f' + f.id]]))}` }));
     }
   },
   AREAS: {
@@ -86,7 +86,7 @@ const TT = {
   },
   EMR: {
     title: t => 'EMR access for ' + t.group,
-    form: t => { const gf = facsOfGroup(t.group).filter(x => !x.hold); return `<div class="instr">Enter "Emr", "Emr Username" and "Emr Password" in the portal on each facility below. Save the QR code on the server in the "Authenticator" folder, named the username. Only the username goes in here: the system needs it to ask corporate to add new facilities in this group to the same login.</div><ul>${gf.map(x => '<li>' + esc(facName(x)) + (x.inPortal ? '' : ' <b>(not in the portal yet)</b>') + '</li>').join('')}</ul>${fld('"Emr Username"', txt('user', '', 'e.g. ihcm.lakewood'))}${chk('ok', 'Entered in the portal on every facility above, and saved the QR code')}`; },
+    form: t => { const gf = facsOfGroup(t.group).filter(x => !x.hold); return `<div class="instr">Enter "Emr", "Emr Username" and "Emr Password" in the portal on each facility below. Save the QR code on the server in the "Authenticator" folder, named the username.</div><div class="note">Only the username goes in here: the system needs it to ask corporate to add new facilities in this group to the same login.</div><ul>${gf.map(x => '<li>' + esc(facName(x)) + (x.inPortal ? '' : ' <b>(not in the portal yet)</b>') + '</li>').join('')}</ul>${fld('"Emr Username"', txt('user', '', 'e.g. ihcm.lakewood'))}${chk('ok', 'Entered in the portal on every facility above, and saved the QR code')}`; },
     example: () => ({ user: 'ihcm.lakewood', ok: true }),
     validate: () => V('user') && V('ok') ? '' : 'Enter the username and confirm it\'s in the portal.',
     done: t => { const g = grp(t.group); g.emr = V('user'); g.emrNew = true; }
@@ -120,7 +120,7 @@ const TT = {
   },
   GDD_PORTAL: {
     title: t => 'GDD warehouse in portal: ' + facName(facById(t.fac)),
-    form: t => { const f = facById(t.fac); return `<div class="instr">portal.isgmed.com → the facility → edit pencil. "Main Vendor": <span class="q">${esc(f.gddWh)}</span>. Chris answered after the portal setup was done, so this is the only thing left to add.</div>${chk('ok', 'Saved')}`; },
+    form: t => { const f = facById(t.fac); return `<div class="instr">portal.isgmed.com → the facility → edit pencil. "Main Vendor": <span class="q">${esc(f.gddWh)}</span>.</div><div class="note">Chris answered after the portal setup was done, so this is the only thing left to add.</div>${chk('ok', 'Saved')}`; },
     example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when saved.', done: () => { }
   },
   FASTCARE: {
@@ -159,7 +159,7 @@ const TT = {
   },
   BRIGHTREE: {
     title: t => 'Brightree report: ' + facById(t.fac).name,
-    form: t => { const f = facById(t.fac); return `<div class="instr"><ol><li>GNS Chicago's Brightree: search the facility, copy "Name" exactly.</li><li>Star → "My Ad-Hoc Reports" → "GNS Lakewood Report". Error → log back in.</li><li>"Sales Order_Facility" "Equals" the name. "Delivery_Scheduled date" "Between" 01/01/2026 and <b>${fmtS(st.today)}</b>. "Request Report".</li><li>"My Scheduled Reports" → wait for "Completed" → open the CSV.</li><li>Sort by "Patient Full Name", then "Delivery Actual date" (column E, <b>never D</b>). Bottom row per area of care (column R).</li><li>"Save As" → "Excel Workbook" → Z: > GNS Chicago Transition > Sales Order Reports > ${esc(f.group || '(corporate)')} (create the folder if it's missing). Name it <span class="q">${esc(facName(f))} ${fmtS(st.today).replace(/\//g, '-')}</span>.</li></ol>Only what the system needs goes in here: the dates (for scheduling), and how often enteral ships (Email 1 + schedule). Everything else on the report goes straight into the portal.</div>
+    form: t => { const f = facById(t.fac); return `<div class="instr"><ol><li>GNS Chicago's Brightree: search the facility, copy "Name" exactly.</li><li>Star → "My Ad-Hoc Reports" → "GNS Lakewood Report". Error → log back in.</li><li>"Sales Order_Facility" "Equals" the name. "Delivery_Scheduled date" "Between" 01/01/2026 and <b>${fmtS(st.today)}</b>. "Request Report".</li><li>"My Scheduled Reports" → wait for "Completed" → open the CSV.</li><li>Sort by "Patient Full Name", then "Delivery Actual date" (column E, <b>never D</b>). Bottom row per area of care (column R).</li><li>"Save As" → "Excel Workbook" → Z: > GNS Chicago Transition > Sales Order Reports > ${esc(f.group || '(corporate)')} (create the folder if it's missing). Name it <span class="q">${esc(facName(f))} ${fmtS(st.today).replace(/\//g, '-')}</span>.</li></ol></div><div class="note">Only what the system needs goes in here: the dates (for scheduling), and how often enteral ships (Email 1 + schedule). Everything else on the report goes straight into the portal. Dates calculate from it.</div>
       <div class="row">${fld('Last enteral (Delivery Actual date)', dt('le'))}${fld('Last uro / ostomy / trach', dt('lo'))}</div>
       <div class="row">${fld('Enteral ships', sel('cad', ['Monthly', 'Weekly', 'Biweekly'], 'Monthly'))}</div>`; },
     example: () => ({ le: add(st.today, -19), lo: add(st.today, -23), cad: 'Monthly' }),
@@ -218,7 +218,7 @@ function portalForm(f) {
     ['"Auto-supply ENFIT adapter"', nonCovEnt ? 'Check it if the pump is Kangaroo or Omni. Otherwise leave it' : 'Leave unchecked (enteral isn\'t non-covered)'],
     ['"Notes" and "General Info"', 'Transition from Chicago / email Shani list of eligible pump and trach pts so she can check the prior Gentell billing / anything useful from the report (skip respiratory) / no spike set on the report → "Rep to find out which spike set they use at the first pump-fed patient"']];
   if (!g.noteDone) rows.push(['Corporate note ("Corporates")', 'Don\'t charge shipping for special orders or pumps (we will charge for rush shipping, but get corp approval for rush orders)']);
-  return `<div class="instr">portal.isgmed.com → "Facilities" → "Facilities" → search 1 word → check "Corporate" → edit pencil. Leave every other field as it is. Have the Brightree report open for the pump, spike set and supplements lines. Nothing here gets typed back into this app.</div><div class="tablewrap"><table class="vals">${rows.map(r => `<tr><td>${esc(r[0])}</td><td><b>${esc(r[1])}</b></td></tr>`).join('')}</table></div><div class="meta">EMR and contacts are separate tasks, so this doesn't wait on them.</div>${chk('ok', 'Saved ("Facility successfully updated.")')}`;
+  return `<div class="instr">portal.isgmed.com → "Facilities" → "Facilities" → search 1 word → check "Corporate" → edit pencil. Leave every other field as it is. Have the Brightree report open for the pump, spike set and supplements lines.</div><div class="note">Nothing here gets typed back into this app.</div><div class="tablewrap"><table class="vals">${rows.map(r => `<tr><td>${esc(r[0])}</td><td><b>${esc(r[1])}</b></td></tr>`).join('')}</table></div><div class="note">EMR and contacts are separate tasks, so this doesn't wait on them.</div>${chk('ok', 'Saved ("Facility successfully updated.")')}`;
 }
 function dateEditor(f) {
   const d = f.dates, r = f.rec, w = dateWarn(f, d.dos);
@@ -233,5 +233,5 @@ function dateEditor(f) {
 function scheduleForm(f) {
   const d = f.dates, b = f.bt;
   return `${dateEditor(f)}<div class="instr"><ol><li>"Facilities" → schedule icon under "Actions" → "Facility Schedule".</li><li>"Start Date" <span class="q">${fmtS(d.del)}</span>, "Day of the Week" <span class="q">${d.day}</span>, "Weeks" <span class="q">4</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>${b.cadence !== '4' ? `<li>"Select Area of Care" → "Enteral" → "Add Schedule": same Start Date and day, "Weeks" <span class="q">${b.cadence}</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>` : ''}<li>"Generate Dates" → check "Override Manually" → "Save".</li><li>"Schedules" → Ordering Calendar → open the entry on ${fmt(d.ord)} and check the 3 dates match the ones above. Wrong? Recheck Start Date, Day of the Week and OS Days and generate again. Missing? The ordering date probably landed on a weekend.</li><li>Intake note: <span class="q">Transition from Chicago</span> + <span class="q">Email Shani the list of eligible pump fed and trach pts so she can review Chicago's billing</span> + anything useful from the report.</li></ol></div>
-  <div class="meta">"Mark done" sends Email 1 to Chicago with these dates. Changed a date above? Click "Save dates" first.</div>`;
+  <div class="note">"Mark done" sends Email 1 to Chicago with these dates. Changed a date above? Click "Save dates" first.</div>`;
 }

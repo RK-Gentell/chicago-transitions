@@ -201,6 +201,11 @@ function atRisk(f) { const d = f.dates; return !!(d && !f.email1 && !f.hold && !
 // ---------- email ----------
 const btnStyle = 'display:inline-block;background:#1d5f7c;color:#ffffff;padding:8px 16px;border-radius:4px;text-decoration:none;font-weight:bold;margin:0 8px 8px 0';
 const appLink = q => CFG.appUrl + (q ? '?' + q : '');
+const taskUrl = (key, answer) => appLink('task=' + encodeURIComponent(key) + (answer ? '&answer=' + encodeURIComponent(answer) : ''));
+// smaller grey line for side information (what happens next, why), under the main instruction
+const note = s => '<p style="color:#6b7280;font-size:9.5pt;margin:-4px 0 10px">' + s + '</p>';
+// one line per task in emails that cover several: facility name + its own buttons
+const taskList = (items, answers) => '<ul>' + items.map(([label, key]) => '<li style="margin:4px 0">' + label + ' &nbsp; ' + (answers || []).map(a => `<a href="${esc(taskUrl(key, a))}">${esc(a)}</a> &middot; `).join('') + `<a href="${esc(taskUrl(key))}">Open the task</a></li>`).join('') + '</ul>';
 function emailHtml(body, m) {
   let links = '';
   if (m.task && m.buttons) links = '<p>' + m.buttons.map(b => `<a href="${esc(appLink('task=' + encodeURIComponent(m.task) + '&answer=' + encodeURIComponent(b)))}" style="${btnStyle}">${esc(b)}</a>`).join('') + `<a href="${esc(appLink('task=' + encodeURIComponent(m.task)))}" style="${btnStyle};background:#5d6b78">Open the task</a></p>`;
@@ -429,13 +434,13 @@ function run() {
       const need = { corp: !f.group, addr: !f.address };
       const tf = newTask('FASTCARE', { fac: f.id, assignee: am, amTask: true, need });
       mail({ key: 'm:E13:' + tf.key, code: 'E13', to: [am], fac: f.id, task: tf.key, cond: { task: tf.key }, subject: 'To do: FastCare for ' + f.name,
-        body: '<p>Get from FastCare: ' + [need.corp ? 'the corporate (the areas of care and price table requests go out as soon as you save it)' : '', need.addr ? 'the address' : '', 'the wound rep, regional and any contacts we don\'t have yet (the ones we have are listed in the task). Email 3 goes to the wound rep and regional as soon as this task is done'].filter(Boolean).join('; ') + '.</p>' });
+        body: '<p>Get from FastCare: ' + [need.corp ? 'the corporate' : '', need.addr ? 'the address' : '', 'the wound rep, regional and any contacts we don\'t have yet'].filter(Boolean).join('; ') + '.</p>' + note(['The contacts we already have are listed in the task.', need.corp ? 'The areas of care and price table requests go out as soon as you save the corporate.' : '', 'Email 3 goes to the wound rep and regional as soon as this task is done.'].filter(Boolean).join(' ')) });
       const tg = newTask('GDD', { fac: f.id, assignee: roleEmail('gdd') });
       queue('E10', tg.assignee, f, tg, (fs, ts) => fs.length === 1
         ? { code: 'E10', to: [ts[0].assignee], fac: fs[0].id, task: ts[0].key, buttons: ['No'], cond: { task: ts[0].key }, subject: 'GDD orders for ' + fs[0].name + '?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did <b>${esc(fs[0].name)}</b> (${esc(fs[0].group || 'corporate not known yet')}) get orders from GDD? If yes, open the task and pick the warehouse.</p>` }
-        : { code: 'E10', to: [ts[0].assignee], link: 'mytasks', subject: 'GDD orders for ' + fs.length + ' facilities?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did any of these get orders from GDD? Answer each one in "My tasks" (if yes, pick the warehouse).</p><ul>${fs.map(x => '<li>' + esc(x.name) + '</li>').join('')}</ul>` });
+        : { code: 'E10', to: [ts[0].assignee], link: 'none', subject: 'GDD orders for ' + fs.length + ' facilities?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did any of these get orders from GDD? Click "No" or open the task to pick the warehouse.</p>${taskList(fs.map((x, i) => ['<b>' + esc(x.name) + '</b>', ts[i].key]), ['No'])}` });
       const tb = newTask('BRIGHTREE', { fac: f.id, assignee: am, amTask: true });
-      mail({ key: 'm:E13:' + tb.key, code: 'E13', to: [am], fac: f.id, task: tb.key, cond: { task: tb.key }, subject: 'To do: Brightree report for ' + f.name, body: '<p>Run the GNS Lakewood Report and enter what you find. Dates calculate from it.</p>' });
+      mail({ key: 'm:E13:' + tb.key, code: 'E13', to: [am], fac: f.id, task: tb.key, cond: { task: tb.key }, subject: 'To do: Brightree report for ' + f.name, body: '<p>Run the GNS Lakewood Report and enter what you find.</p>' + note('Dates calculate from it.') });
     }
 
     // corporate not known yet: Malka picks reps per facility; corporate asks wait for the FastCare task
@@ -484,7 +489,7 @@ function run() {
       const tp = newTask('PUMPS', { fac: f.id, assignee: roleEmail('pumps') });
       queue('E9', tp.assignee, f, tp, (fs, ts) => fs.length === 1
         ? { code: 'E9', to: [ts[0].assignee], fac: fs[0].id, task: ts[0].key, buttons: ['Checked'], cond: { task: ts[0].key }, subject: 'Pumps: ' + facName(fs[0]), body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p><b>${esc(facName(fs[0]))}</b> (${esc(fs[0].group)}) is in the portal now. Please check if GNS Chicago sent it pumps and add any to "Pump Tracking". Click "Checked" when you're done.</p>` }
-        : { code: 'E9', to: [ts[0].assignee], link: 'mytasks', subject: 'Pumps: ' + fs.length + ' facilities', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>These are in the portal now. Please check if GNS Chicago sent them pumps and add any to "Pump Tracking". Mark each one "Checked" in "My tasks".</p><ul>${fs.map(x => '<li>' + esc(facName(x)) + '</li>').join('')}</ul>` });
+        : { code: 'E9', to: [ts[0].assignee], link: 'none', subject: 'Pumps: ' + fs.length + ' facilities', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>These are in the portal now. Please check if GNS Chicago sent them pumps and add any to "Pump Tracking". Click "Checked" next to each one when you're done.</p>${taskList(fs.map((x, i) => ['<b>' + esc(facName(x)) + '</b>', ts[i].key]), ['Checked'])}` });
     }
     // portal setup: rep + price table + all areas of care + in the portal + dates
     if (!fTask(f, 'PORTAL_SETUP') && f.rep && g.price && covKnown(FG(f)) && f.inPortal && f.dates && f.bt) {
@@ -504,7 +509,7 @@ function run() {
     }
     if (!fTask(f, 'SCHEDULE') && done(fTask(f, 'PORTAL_SETUP'))) {
       const t = newTask('SCHEDULE', { fac: f.id, assignee: am, amTask: true });
-      mail({ key: 'm:E13:' + t.key, code: 'E13', to: [am], fac: f.id, task: t.key, cond: { task: t.key }, subject: 'To do: schedule ' + facName(f), body: '<p>Facility Schedule, Generate Dates, check the Ordering Calendar. "Mark done" sends Email 1 to Chicago.</p>' });
+      mail({ key: 'm:E13:' + t.key, code: 'E13', to: [am], fac: f.id, task: t.key, cond: { task: t.key }, subject: 'To do: schedule ' + facName(f), body: '<p>Facility Schedule, Generate Dates, check the Ordering Calendar.</p>' + note('"Mark done" sends Email 1 to Chicago.') });
     }
     // Email 3 to the wound rep + regional: as soon as the FastCare task is done
     if (!f.email3 && done(fTask(f, 'FASTCARE')) && f.wound && f.regional) sendEmail3(f);
