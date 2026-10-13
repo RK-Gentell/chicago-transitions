@@ -96,9 +96,9 @@ function waitingOn(f) {
   if (f.complete) return [];
   const g = G(f), w = [];
   st.tasks.filter(t => !t.fac && f.group && lc(t.group) === lc(f.group) && !done(t)).forEach(t => w.push(taskTitle(t) + ' (' + nameOf(t.assignee) + ')'));
-  if (g.price && !f.inPortal && !fTask(f, 'PORTAL_ADD')) w.push('Add to Brightree (' + roleName('portal') + ')');
+  if (hasPrice(g) && !f.inPortal && !fTask(f, 'PORTAL_ADD')) w.push('Add to Brightree (' + roleName('portal') + ')');
   if (f.email1 && !f.email2) w.push('Chicago’s email to the facility (Email 2)');
-  if (f.email3 && !f.e3Done) w.push('"Done" reply to Email 3 (' + (e3Names(f).join(' / ') || 'wound rep / regional') + ')');
+  if (f.email3 && !f.e3Done && !f.e3Reply) w.push('Reply to Email 3 (' + (e3Names(f).join(' / ') || 'wound rep / regional') + ')');
   if (f.email2 && !done(fTask(f, 'GDD'))) w.push('GDD answer (' + roleName('gdd') + ')');
   return w;
 }
@@ -151,7 +151,7 @@ function render() {
   else if (ui.view === 'inbox') m.innerHTML = inboxHtml();
   else if (ui.view === 'outbox') m.innerHTML = outboxHtml();
   else if (ui.view === 'settings') m.innerHTML = admin ? settingsHtml() : '<div class="empty">Only admins can change settings.</div>';
-  else if (ui.view === 'new') m.innerHTML = requestHtml();
+  else if (ui.view === 'new') { m.innerHTML = requestHtml(); corpInfo(); }
   renderLayer();
 }
 function doneTable() {
@@ -180,7 +180,7 @@ function groupsHtml() {
 }
 function inboxHtml() {
   const facOpts = st.facs.filter(f => !f.archived).map(f => [String(f.id), facName(f)]);
-  return `<h1>Mailbox</h1><p class="sub">Emails that came into ${esc(CFG.mailbox)} in the last ${INBOX_DAYS} days, newest first. The app matches them to a facility by the [CT-0000] number or the facility name in the subject. Not matched? Pick the facility.</p><div class="tablewrap"><table><tr><th>Received</th><th>From</th><th>Subject</th><th>Facility</th><th></th></tr>${st.inbox.map(m => `<tr><td class="num">${esc((m.received || '').slice(0, 10))}</td><td>${esc(m.from)}</td><td>${esc(m.subject)}${m.isEmail2 ? ' <span class="pill p-sent">Email 2</span>' : ''}${m.isE3Done ? ' <span class="pill p-sent">Email 3 done</span>' : ''}<div class="meta">${esc((m.preview || '').slice(0, 160))}</div></td><td>${m.fac && facById(m.fac) ? `<span class="linkish" data-fac="${m.fac}">${esc(facName(facById(m.fac)))}</span>` : `<select data-linkin="${m._id}"><option value="">Pick a facility…</option>${facOpts.map(o => `<option value="${o[0]}">${esc(o[1])}</option>`).join('')}</select>`}</td><td>${m.path ? `<a href="${esc(STORE.fileUrl(m.path))}" target="_blank" rel="noopener">Open email</a>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="meta">Nothing yet.</td></tr>'}</table></div>`;
+  return `<h1>Mailbox</h1><p class="sub">Emails that came into ${esc(CFG.mailbox)} in the last ${INBOX_DAYS} days, newest first. The app matches them to a facility by the [CT-0000] number or the facility name in the subject. Not matched? Pick the facility.</p><div class="tablewrap"><table><tr><th>Received</th><th>From</th><th>Subject</th><th>Facility</th><th></th></tr>${st.inbox.map(m => `<tr><td class="num">${esc((m.received || '').slice(0, 10))}</td><td>${esc(m.from)}</td><td>${esc(m.subject)}${m.isEmail2 ? ' <span class="pill p-sent">Email 2</span>' : ''}${m.isE3Reply ? ' <span class="pill p-sent">Email 3 reply</span>' : ''}<div class="meta">${esc((m.preview || '').slice(0, 160))}</div></td><td>${m.fac && facById(m.fac) ? `<span class="linkish" data-fac="${m.fac}">${esc(facName(facById(m.fac)))}</span>` : `<select data-linkin="${m._id}"><option value="">Pick a facility…</option>${facOpts.map(o => `<option value="${o[0]}">${esc(o[1])}</option>`).join('')}</select>`}</td><td>${m.path ? `<a href="${esc(STORE.fileUrl(m.path))}" target="_blank" rel="noopener">Open email</a>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="meta">Nothing yet.</td></tr>'}</table></div>`;
 }
 const mailPill = m => m.status === 'Sent' ? '<span class="pill p-sent">Sent</span>' : m.status === 'Failed' ? '<span class="pill p-hold">Failed</span>' : m.status === 'Cancelled' ? '<span class="pill p-req">Cancelled</span>' : m.day > st.today ? '<span class="pill p-chi">Scheduled</span>' : '<span class="pill p-setup">Sending</span>';
 function mailHtml(x, admin) {
@@ -204,34 +204,39 @@ function outboxHtml() {
 // ---------- new request ----------
 function requestHtml() {
   const demo = STORE.mode === 'demo';
-  const groups = Object.values(st.groups).filter(g => !g.standalone).map(g => g.name).sort();
   return `<h1>New transition request</h1><p class="sub">${demo ? 'Filled with a demo request. Change anything. ' : ''}Everything else is automatic: each person gets an email for their part.</p><form id="rq" class="card" style="display:flex;flex-direction:column;gap:12px;max-width:900px">
-    ${fld('Facilities, 1 per line: Name; full address; corporate', `<textarea id="rq_fac" style="min-height:90px">${demo ? 'Waters Of Lagrange; 123 Demo St, LaGrange, IN 46761\nWaters Of Princeton; 456 Demo Ave, Princeton, IN 47670' : ''}</textarea>`, 'Address and corporate are optional. "?" = don\'t know, "none" = no corporate. Spaces around the semicolons are ignored. State comes from the 2 letters before the zip.')}
-    <div class="row">${fld('Corporate', sel('rq_grp', [...groups, 'New corporate…', "Don't know yet", 'No corporate (standalone)'], demo ? 'New corporate…' : '', true), "For every line that doesn't name one. Don't know? Pick \"Don't know yet\". It goes on the AM's FastCare task.")}<div class="field" id="rq_newbox" ${demo ? '' : 'hidden'}><label>New corporate name</label>${txt('rq_grp_new', demo ? 'Infinity Healthcare Management' : '')}</div></div>
+    ${fld('Facilities, 1 per line: Name; full address; corporate', `<textarea id="rq_fac" style="min-height:90px">${demo ? 'Waters Of Lagrange; 123 Demo St, LaGrange, IN 46761; Infinity Healthcare Management\nWaters Of Princeton; 456 Demo Ave, Princeton, IN 47670; Infinity Healthcare Management' : ''}</textarea><div id="rq_corpinfo" class="note"></div>`, 'Address and corporate are optional. No corporate or "?" = don\'t know yet (it goes on the AM\'s FastCare task). "none" = no corporate. Spaces around the semicolons are ignored. State comes from the 2 letters before the zip.')}
     ${fld('Why / background', `<textarea id="rq_why" class="plain">${demo ? 'Infinity is moving its Indiana buildings to Lakewood. Chicago already knows (demo).' : ''}</textarea>`)}
-    ${fld('Attachments', `<div class="drop" id="rq_drop" tabindex="0"><b>Drag files here</b> or <label class="linkish" for="rq_files">browse</label><input type="file" id="rq_files" multiple hidden></div><div class="instr" style="margin-top:6px"><b>Emails:</b> forward them to <span class="q">${esc(CFG.mailbox)}</span> with the facility name in the subject. They show up on the facility page under "Mailbox".</div><div id="rq_list" class="meta">${ui.dropped.map(f => esc(f.name)).join(', ')}</div>`, 'PDFs, docs, or emails you saved from Outlook first. Saved in SharePoint, in a folder for this request. Linked on every task.')}
     <div class="sect">Areas of care${tip('Leave "Not sure" and the app asks you later.')}</div><div class="row">${AREAS.map(a => fld(a, sel('rq_' + a, [...covOpts(a), 'Not sure'], 'Not sure', true))).join('')}</div>
     <div class="row">${fld('Intake rep', sel('rq_rep', peopleOpts(repList()), '', true), 'Optional. Blank → corporate rule or ' + esc(roleName('rules')) + '.')}${fld('Account Manager', sel('rq_am', peopleOpts(amList()), '', true), 'Optional')}</div>
-    <div class="sect">Already done${tip('Tick anything that\'s already taken care of. The app skips that task.')}</div>${chk('rq_added', 'Facility already added to Brightree (Amy\'s "Add … to Brightree" task)')}<div class="note" id="rq_addednote" hidden>Type each facility's name above exactly as Brightree shows it, e.g. <span class="q">Waters Of Lagrange- 211526</span>.</div>${chk('rq_pumps', 'Pumps already added to the portal ("Pump Tracking")')}
     <div class="sect">Contacts${tip('Optional. Only if you have them.')}</div>
-    <div class="field"><label>Corporate contacts</label>${contactEditor('rq_corp', 'Corporate', false)}<div class="hint">Put the person we ask for things first. Ignored if the corporate already has contacts.</div></div>
-    <div class="field"><label>Facility contacts</label>${contactEditor('rq_fcts', '', true)}<div class="hint">Several facilities? Type the facility name in the first box; blank = all of them.</div></div>
+    <div class="row"><button type="button" class="btn sm" data-showce="rq_corpbox">+ Add corporate contact</button><button type="button" class="btn sm" data-showce="rq_fctsbox">+ Add facility contact</button></div>
+    <div class="field" id="rq_corpbox" hidden><label>Corporate contacts</label>${contactEditor('rq_corp', 'Corporate', false)}<div class="hint">Put first the person we ask for things, like adding a facility to their EMR login. Not needed if the corporate already has contacts in the app.</div></div>
+    <div class="field" id="rq_fctsbox" hidden><label>Facility contacts</label>${contactEditor('rq_fcts', '', true)}<div class="hint">Several facilities? Type the facility name in the first box. Leave it blank for all of them.</div></div>
+    <div class="sect">Already done${tip('Tick anything that\'s already taken care of, for every facility on this request. The app skips those tasks. Info that usually comes from a skipped task (like an EMR username or dates) stays blank.')}</div>
+    <div class="predone">${PRE_ITEMS.map(([k, l, h]) => chk('rq_pre_' + k, esc(l) + (h ? tip(esc(h)) : ''))).join('')}</div>
+    ${fld('Attachments', `<div class="drop" id="rq_drop" tabindex="0"><b>Drag files here</b> or <label class="linkish" for="rq_files">browse</label><input type="file" id="rq_files" multiple hidden></div><div class="instr" style="margin-top:6px"><b>Emails:</b> forward them to <span class="q">${esc(CFG.mailbox)}</span> with the facility name in the subject. They show up on the facility page under "Mailbox".</div><div id="rq_list" class="meta">${ui.dropped.map(f => esc(f.name)).join(', ')}</div>`, 'PDFs, docs, or emails you saved from Outlook first. Saved in SharePoint, in a folder for this request. Linked on every task.')}
     <div id="rq_err"></div><div><button class="btn pri" type="submit">Submit request</button></div></form>`;
+}
+// under the facilities box: which corporates are new to the app (catches typos)
+function corpInfo() {
+  const box = $('#rq_corpinfo'); if (!box) return;
+  const names = [...new Set(V('rq_fac').split('\n').map(l => (l.split(';')[2] || '').trim()).filter(c => c && c !== '?' && !/^(none|no corporate|standalone)$/i.test(c)))];
+  box.innerHTML = names.map(n => grp(n) ? `<b>${esc(grp(n).name)}</b>: already in the app` : `<b>${esc(n)}</b>: new to the app`).join(' · ');
 }
 function parseRequest() {
   const lines = V('rq_fac').split('\n').map(l => l.trim()).filter(Boolean);
   if (!lines.length) return { err: 'Add at least 1 facility.' };
-  const grpDefault = V('rq_grp');
-  if (!grpDefault) return { err: 'Pick the corporate (or "Don\'t know yet").' };
   for (const id of ['rq_corp', 'rq_fcts']) { const e = ceErr(id); if (e) return { err: (id === 'rq_corp' ? 'Corporate' : 'Facility') + ' contacts: ' + e }; }
   const out = [];
   for (const l of lines) {
     const p = l.split(';').map(x => x.trim()); const name = p[0], address = p[1] || '', c3 = p[2] || '';
     if (!name) return { err: 'A line has no facility name: "' + l + '"' };
-    const none = /^(none|no corporate|standalone)$/i.test(c3) || (!c3 && grpDefault === 'No corporate (standalone)');
-    const unknown = c3 === '?' || (!c3 && grpDefault === "Don't know yet");
-    const group = none ? name : unknown ? '' : (c3 || (grpDefault === 'New corporate…' ? V('rq_grp_new') : grpDefault));
-    if (!group && !unknown) return { err: 'Type the new corporate name, or pick "Don\'t know yet".' };
+    const none = /^(none|no corporate|standalone)$/i.test(c3);
+    const unknown = !c3 || c3 === '?';
+    const group = none ? name : unknown ? '' : c3;
+    if (V('rq_pre_fc') && unknown) return { err: '"' + name + '" has no corporate. Add it to the line, or untick "FastCare info gathered" (FastCare is where the AM would find it).' };
+    if (V('rq_pre_fc') && !address && !V('rq_pre_added')) return { err: '"' + name + '" has no address, and Amy needs it to add it to Brightree. Add it to the line, or untick "FastCare info gathered".' };
     if (address && !/,\s*[A-Z]{2}\s*\d{5}/.test(address)) return { err: '"' + name + '": the address has to end with the state and zip (…, IN 46761), or leave it out.' };
     const dup = st.facs.find(f => !f.archived && !f.complete && lc(f.name) === lc(name));
     if (dup && !ui.confirmDup) { ui.confirmDup = true; return { err: '"' + name + '" is already in the tracker (CT-' + pad(dup.id) + '). Submit again if this really is a new request.' }; }
@@ -244,7 +249,7 @@ async function submitRequest() {
   if (p.err) { $('#rq_err').innerHTML = '<div class="err">' + esc(p.err) + '</div>'; return; }
   const covIn = {}; AREAS.forEach(a => { const v = V('rq_' + a); if (v && v !== 'Not sure') covIn[a] = v; });
   const corp = readContacts('rq_corp'), fcts = readContacts('rq_fcts'), why = V('rq_why'), rep = V('rq_rep'), am = V('rq_am');
-  const files = ui.dropped.slice(), pumpsDone = !!V('rq_pumps'), added = !!V('rq_added');
+  const files = ui.dropped.slice(), pre = {}; PRE_ITEMS.forEach(([k]) => { if (V('rq_pre_' + k)) pre[k] = true; });
   $('#rq button[type=submit]').disabled = true; $('#rq_err').innerHTML = '<div class="meta">Saving…</div>';
   const ok = await act(async () => {
     const ids = await STORE.allocateIds(p.lines.length);
@@ -254,16 +259,19 @@ async function submitRequest() {
     const req = { key: 'req:' + pad(ids[0]), by: me(), byName: meName(), at: st.today, why, files: saved, facIds: ids };
     st.reqs.push(req);
     const created = p.lines.map((l, i) => {
-      if (l.group) { const g = ensureGroup(l.group, l.none); g.cov = Object.assign({}, covIn, g.cov || {}); if (corp.length && !(g.contacts || []).length) g.contacts = corp.map(c => ({ first: c.first, last: c.last, dept: c.dept, note: c.note, email: c.email })); }
+      if (l.group) { const g = ensureGroup(l.group, l.none); if (pre.corp && !g.price) g.existing = true; g.cov = Object.assign({}, covIn, g.cov || {}); if (corp.length && !(g.contacts || []).length) g.contacts = corp.map(c => ({ first: c.first, last: c.last, dept: c.dept, note: c.note, email: c.email })); }
       const f = { id: ids[i], req: req.key, name: l.name, address: l.address, state: l.state, group: l.group ? grp(l.group).name : '', pendingCov: Object.assign({}, covIn), rep, clin: rep, am, contacts: [], requested: st.today, requester: me(), why, files: saved };
-      if (pumpsDone) f.pumps = 'already done';
-      if (added) { f.inPortal = true; f.portalName = l.name; f.addedBefore = true; }
+      applyPre(f, pre, l);
       fcts.forEach(c => { if (c.fac && !lc(l.name).startsWith(lc(c.fac))) return; addContacts(f, [c], 'requester'); });
+      if (pre.ct) f.contacts.forEach(c => c.inPortal = true);
       st.facs.push(f); return f;
     });
-    mail({ key: 'm:E1:' + req.key, code: 'E1', to: [me()], link: 'none', subject: 'Request received: ' + created.map(f => f.name).join(', '), body: `<p>Got it. ${created.map(f => esc(f.name) + ' (CT-' + pad(f.id) + ')').join(', ')}.</p><p>You'll get an email if anything is needed from you.</p>` });
-    const am1 = created[0].am || G(created[0]).am;
-    if (am1) mail({ key: 'm:E2:' + req.key, code: 'E2', to: [am1], link: 'none', subject: 'New transition: ' + created.map(f => f.name).join(', '), body: `<p>${created.length} facilit${created.length > 1 ? 'ies' : 'y'}${created[0].group ? ' from <b>' + esc(created[0].group) + '</b>' : ''}, requested by ${esc(meName())}.</p><p><b>Why:</b> ${esc(why) || '-'}</p>${saved.length ? '<p><b>Attachments:</b> ' + saved.map(f => `<a href="${esc(f.url)}">${esc(f.name)}</a>`).join(', ') + '</p>' : ''}<p>All requests went out. Your tasks:</p>${taskList(created.flatMap(f => [[esc(f.name) + ': FastCare', 't:FASTCARE:f' + f.id], [esc(f.name) + ': Brightree report', 't:BRIGHTREE:f' + f.id]]))}` });
+    // "New transition" to each AM with their facilities; "Request received" only if the requester isn't one of those AMs
+    const amOfNew = f => f.am || (f.group ? G(f).am : '') || '';
+    const byAm = {}; created.forEach(f => { const a = lc(amOfNew(f)); if (a) (byAm[a] = byAm[a] || []).push(f); });
+    Object.entries(byAm).forEach(([a, list]) => mail({ key: 'm:E2:' + req.key + ':' + a, code: 'E2', to: [a], link: 'none', subject: 'New transition: ' + list.map(f => f.name).join(', '),
+      body: `<p>${list.length} facilit${list.length > 1 ? 'ies' : 'y'}${list[0].group ? ' from <b>' + esc(list[0].group) + '</b>' : ''}, requested by ${esc(meName())}.</p><p><b>Why:</b> ${esc(why) || '-'}</p>${saved.length ? '<p><b>Attachments:</b> ' + saved.map(f => `<a href="${esc(f.url)}">${esc(f.name)}</a>`).join(', ') + '</p>' : ''}${Object.keys(pre).length ? '<p><b>Already done:</b> ' + esc(preList(list[0]).join(', ')) + '</p>' : ''}${amFirstTasks(list)}` }));
+    if (!byAm[me()]) mail({ key: 'm:E1:' + req.key, code: 'E1', to: [me()], link: 'none', fyi: true, subject: 'Request received: ' + created.map(f => f.name).join(', '), body: `<p>Got it. ${created.map(f => esc(f.name) + ' (CT-' + pad(f.id) + ')').join(', ')}.</p><p>You'll get an email if anything is needed from you.</p>` });
   }, 'Request submitted');
   if (ok) { ui.dropped = []; ui.confirmDup = false; ui.view = 'mytasks'; render(); }
   else { const b = $('#rq button[type=submit]'); if (b) b.disabled = false; }
@@ -354,8 +362,8 @@ function facDrawer(f) {
     <div class="row">${fld('Corporate', sel('fd_grp', Object.values(st.groups).filter(x => !x.standalone || lc(x.name) === lc(f.group)).map(x => x.name).sort(), g.name, true))}</div>${chk('fd_none', 'No corporate (standalone)', g.standalone)}
     <div class="row">${fld('Intake rep', sel('fd_rep', R, f.rep, true))}${fld('Clinical rep', sel('fd_clin', R, f.clin, true))}${fld('Account Manager', sel('fd_am', A, f.am || amOf(f), true))}</div>
     <div><button class="btn sm pri" type="submit">Save details</button></div></form></details>
-  <div class="kv"><div>Sheet name</div><div>${esc(f.name)}</div><div>Address</div><div>${esc(f.address) || '-'} ${f.state ? '(' + esc(f.state) + ')' : ''}</div><div>Intake / clinical / AM</div><div>${esc(nameOf(f.rep) || 'none')} / ${esc(nameOf(f.clin) || '-')} / ${esc(nameOf(amOf(f)))}</div><div>Wound rep / regional</div><div>${esc(f.wound ? f.wound.name : '-')} / ${esc(f.regional ? f.regional.name : '-')}</div><div>Why</div><div>${esc(f.why) || '-'}</div>${(f.files || []).length ? `<div>Attachments</div><div>${f.files.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>`).join(', ')}</div>` : ''}<div>Pumps checked / GDD</div><div>${f.pumps === 'already done' ? 'Yes (already done when requested)' : f.pumps ? 'Yes' : 'not yet'} / ${esc(f.gdd || '?')}${f.gddWh ? ' (' + esc(f.gddWh) + ')' : ''}</div>${f.dates ? `<div>First DOS</div><div class="num">${fmt(f.dates.dos)}</div><div>Ordering</div><div class="num">${fmt(f.dates.ord)}</div><div>Delivery</div><div class="num">${fmt(f.dates.del)} · OS Days ${f.dates.os}</div>` : ''}<div title="Email 1: us → Chicago. Email 2: Chicago rep → facility. Email 3: us → wound rep + regional">Email 1 / 2 / 3 ⓘ</div><div class="num">${fmtS(f.email1) || '-'} / ${fmtS(f.email2) || '-'}${f.email2By ? ' (' + esc(f.email2By) + ')' : ''} / ${fmtS(f.email3) || '-'}</div>${f.email3 ? `<div>Email 3 "Done"</div><div>${f.e3Done ? fmtS(f.e3Done) + (f.e3DoneBy ? ' (' + esc(nameOf(f.e3DoneBy) || f.e3DoneBy) + ')' : '') : 'waiting for their reply'}</div>` : ''}</div>
-  <div class="row">${f.email1 && !f.email2 ? '<button class="btn pri sm" data-fact="e2">Chicago sent it (Email 2)</button>' : ''}${f.email1 ? '<button class="btn sm" data-fact="corr">Dates changed: send correction</button>' : ''}${f.email3 && !f.e3Done ? '<button class="btn sm" data-fact="e3done">Email 3 is taken care of</button>' : ''}<button class="btn sm" data-fact="hold">${f.hold ? 'Take off hold' : 'Put on hold'}</button>${isAdmin(me()) ? '<button class="btn sm" data-fact="del" style="margin-left:auto">Delete (test or mistake)</button>' : ''}${demo && f.email1 && !f.email2 ? '<button class="btn sm" data-fact="sim_e2">Demo: Chicago CCs the mailbox on Email 2</button>' : ''}${demo && f.email3 && !f.e3Done ? '<button class="btn sm" data-fact="sim_e3">Demo: wound rep replies "Done"</button>' : ''}</div>
+  <div class="kv"><div>Sheet name</div><div>${esc(f.name)}</div><div>Address</div><div>${esc(f.address) || '-'} ${f.state ? '(' + esc(f.state) + ')' : ''}</div><div>Intake / clinical / AM</div><div>${esc(nameOf(f.rep) || 'none')} / ${esc(nameOf(f.clin) || '-')} / ${esc(nameOf(amOf(f)))}</div><div>Wound rep / regional</div><div>${esc(f.wound ? f.wound.name : '-')} / ${esc(f.regional ? f.regional.name : '-')}</div><div>Why</div><div>${esc(f.why) || '-'}</div>${(f.files || []).length ? `<div>Attachments</div><div>${f.files.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>`).join(', ')}</div>` : ''}<div>Pumps checked / GDD</div><div>${f.pumps === 'already done' ? 'Yes (already done when requested)' : f.pumps ? 'Yes' : 'not yet'} / ${esc(f.gdd || '?')}${f.gddWh ? ' (' + esc(f.gddWh) + ')' : ''}</div>${f.dates ? `<div>First DOS</div><div class="num">${fmt(f.dates.dos)}</div><div>Ordering</div><div class="num">${fmt(f.dates.ord)}</div><div>Delivery</div><div class="num">${fmt(f.dates.del)} · OS Days ${f.dates.os}</div>` : ''}<div title="Email 1: us → Chicago. Email 2: Chicago rep → facility. Email 3: us → wound rep + regional">Email 1 / 2 / 3 ⓘ</div><div class="num">${fmtS(f.email1) || '-'} / ${fmtS(f.email2) || '-'}${f.email2By ? ' (' + esc(f.email2By) + ')' : ''} / ${fmtS(f.email3) || '-'}</div>${f.email3 ? `<div>Email 3 reply</div><div>${f.e3Done ? 'Taken care of ' + fmtS(f.e3Done) + (f.e3DoneBy ? ' (' + esc(nameOf(f.e3DoneBy) || f.e3DoneBy) + ')' : '') : f.e3Reply ? 'Replied ' + fmtS(f.e3Reply.at) + ', the AM is putting it in' : 'Waiting for their reply'}</div>` : ''}${f.pre ? `<div>Done before the request</div><div>${esc(preList(f).join(', '))}</div>` : ''}</div>
+  <div class="row">${f.email1 && !f.email2 ? '<button class="btn pri sm" data-fact="e2">Chicago sent it (Email 2)</button>' : ''}${f.email1 ? '<button class="btn sm" data-fact="corr">Dates changed: send correction</button>' : ''}${f.email3 && !f.e3Done ? '<button class="btn sm" data-fact="e3done">Email 3 is taken care of</button>' : ''}<button class="btn sm" data-fact="hold">${f.hold ? 'Take off hold' : 'Put on hold'}</button>${isAdmin(me()) ? '<button class="btn sm" data-fact="del" style="margin-left:auto">Delete (test or mistake)</button>' : ''}${demo && f.email1 && !f.email2 ? '<button class="btn sm" data-fact="sim_e2">Demo: Chicago CCs the mailbox on Email 2</button>' : ''}${demo && f.email3 && !f.e3Done && !f.e3Reply ? '<button class="btn sm" data-fact="sim_e3">Demo: wound rep replies to Email 3</button>' : ''}</div>
   ${f.dates ? dateEditor(f) : ''}
   <div class="card" style="padding:10px"><b>Areas of care</b><div class="meta">From ${esc(f.group || 'the corporate')} unless changed here. A change here is for this facility only.${f.email1 ? ' Email 1 already went out: dates won\'t recalculate.' : ' Dates recalculate.'}</div><form id="fcov"><div class="row">${AREAS.map(a => fld(a + ((f.cov && f.cov[a]) ? ' <span class="tag">this facility</span>' : ''), sel('fc_' + a, covOpts(a), FG(f).cov[a], true))).join('')}</div><div class="row" style="margin-top:6px"><button class="btn sm pri" type="submit">Save areas of care</button><button class="btn sm" type="button" data-covreset="1">Use the corporate's</button></div></form></div>
   <div class="card" style="padding:10px"><b>Contacts</b>${f.contacts.length ? contactTable(f.contacts) : '<div class="meta">None yet.</div>'}<div class="sect" style="margin-top:8px">Add contacts${tip('Add contacts any time. They go on the next "Contacts into portal" task' + (f.email3 ? '' : ' and in Email 3') + '.')}</div>${contactEditor('fac_cts', '', false)}<div class="row" style="margin-top:6px"><button class="btn sm pri" data-addcts="1">Add contacts</button></div><div id="fac_err"></div></div>
@@ -394,6 +402,7 @@ document.addEventListener('click', async e => {
   if (T.id === 'reload') { ui.errors = []; await act(async () => { }); return; }
   if (T.id === 'refresh') { await act(async () => { }, 'Up to date'); return; }
   if (T.id === 'signout') { STORE.signOut(); return; }
+  const sc = T.closest('[data-showce]'); if (sc) { const b = document.getElementById(sc.dataset.showce); if (b) { b.hidden = false; const i = b.querySelector('input'); if (i) i.focus(); } sc.hidden = true; return; }
   if (T.id === 'tf_ex') { fillExample(taskByKey(ui.openTask)); return; }
   if (T.id === 'csv') { trackerCsv(); return; }
   if (T.id === 'loadarch') { ui.busy = true; try { await STORE.load({ archived: true }); } finally { ui.busy = false; } ui.trackerFilter = 'all'; render(); toast('Archived facilities loaded'); return; }
@@ -422,7 +431,7 @@ document.addEventListener('click', async e => {
     const id = ui.openFac, k = fa.dataset.fact;
     if (k === 'e2') await act(() => markEmail2(facById(id), meName()), 'Marked as sent by Chicago');
     if (k === 'e3done') await act(() => markE3Done(facById(id), meName()), 'Email 3 marked done. No more follow-ups.');
-    if (k === 'sim_e3') await act(() => { const f = facById(id); st.inbox.unshift({ _id: uid(), subject: 'RE: ' + E3_SUBJECT(f), from: f.wound.email, to: [CFG.mailbox], cc: [amOf(f)], received: st.today + 'T15:00:00Z', preview: 'Done\r\n\r\n________________________________\r\nFrom: Chicago Transitions <' + CFG.mailbox + '>\r\nSent: ...\r\nSubject: ' + E3_SUBJECT(f), path: '', processed: false }); }, 'The wound rep replied "Done"');
+    if (k === 'sim_e3') await act(() => { const f = facById(id); st.inbox.unshift({ _id: uid(), subject: 'RE: ' + E3_SUBJECT(f), from: f.wound.email, to: [CFG.mailbox], cc: [amOf(f)], received: st.today + 'T15:00:00Z', preview: 'Hi, the dietician is Jane Doe (jane.doe@demo.com). The facility booked the in-service for next Tuesday. Thanks!', path: '', processed: false }); }, 'The wound rep replied to Email 3');
     if (k === 'corr') { if (!confirm('Send Chicago a CORRECTION email with the current dates?')) return; await act(() => sendEmail1(facById(id), true), 'Correction sent'); }
     if (k === 'del') { if (!confirm('Delete this facility? Its tasks close and any emails not sent yet are cancelled. Use it for test facilities or mistakes.')) return; const ok = await act(() => deleteFacility(facById(id), meName()), 'Deleted'); if (ok) { ui.openFac = null; renderLayer(); } return; }
     if (k === 'hold') await act(() => { const f = facById(id); holdToggle(f, !f.hold, meName()); }, 'Saved');
@@ -495,12 +504,14 @@ document.addEventListener('input', e => {
   }
   if (e.target.id === 'rq_fac') ui.confirmDup = false;
 });
+document.addEventListener('input', e => { if (e.target.id === 'rq_fac') corpInfo(); });
 document.addEventListener('change', async e => {
   const id = e.target.id;
   if (id === 'rq_files') addFiles(e.target.files);
-  if (id === 'rq_added') { const n = $('#rq_addednote'); if (n) n.hidden = !e.target.checked; }
+  // "Already done": later steps imply the earlier ones
+  const chain = ['rq_pre_ps', 'rq_pre_e1', 'rq_pre_e2'], ci = chain.indexOf(id);
+  if (ci >= 0) chain.forEach((c, j) => { const el = document.getElementById(c); if (el && (e.target.checked ? j < ci : j > ci)) el.checked = e.target.checked; });
   if (id === 'fc_grp') { const b = $('#fc_newbox'); if (b) b.hidden = e.target.value !== 'New corporate…'; }
-  if (id === 'rq_grp') { const b = $('#rq_newbox'); if (b) b.hidden = e.target.value !== 'New corporate…'; }
   if (['de_ord', 'de_dos', 'de_del'].includes(id)) deLive(id);
   if (e.target.type === 'hidden') segSync(id);
   if (e.target.classList.contains('ce-dept')) { const n = e.target.closest('.ce-row').querySelector('.ce-note'); n.hidden = e.target.value !== 'Other'; }

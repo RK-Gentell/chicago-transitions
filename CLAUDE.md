@@ -28,8 +28,11 @@ Never rename these lists or columns: the flows use them.
 - Failures must show (banner, Failed email status). Never fail silently.
 - Changing a list/column the flows read means Raizy has to change the flow too: tell her exactly what to click.
 
-## Email 3 "Done"
-Email 3 asks the wound rep + regional to reply with one word, "Done". `processInbox` spots it (`isDoneReply` on the reply's own text, subject has the facility name + "transfer from gns chicago", sender isn't the mailbox or GNS Chicago) and sets `f.e3Done`. Until then `chaseEmail3` queues 1 step at a time: follow-up at +3 business days, another at +3, then an alert to the AM. Cancelled the moment Done comes in. Manual: "Email 3 is taken care of" on the facility page. Completion waits on `e3Done`. Follow-ups (E15, E16F, E16A, E17) go out as High importance.
+## Email 3 replies
+Email 3 goes to the wound rep + regional. `processInbox` treats any email to the mailbox (in To) with the facility name + "transfer from gns chicago" in the subject, received on/after Email 3, as a reply, unless it's from the mailbox, GNS Chicago (Email 1 To/CC) or someone on the team who isn't the wound rep/regional. A reply sets `f.e3Reply` and makes an `E3_REPLY` task for the AM (put their info in; or "keep following up", which starts a new follow-up round `f.e3Round`). No reply: `chaseEmail3` queues 1 step at a time (+3 business days, +3, then an alert to the AM). Manual: "Email 3 is taken care of" on the facility page. Completion waits on `e3Done`. Follow-ups (E15, E16F, E16A, E17) go out as High importance.
+
+## Request form
+Corporate is per line (no dropdown). "Already done" (`PRE_ITEMS` in engine.js, `applyPre`) sets what the skipped steps would have set and the engine skips their tasks; `g.existing` = corporate already in the portal (no price table / EMR access tasks). Info-only emails (`FYI_CODES`) get a "no action needed" line. To-do emails for tasks with steps use `todo()`: one line, details live in the task.
 
 ## Cache
 `index.html` loads the css/js with `?v=N`. Bump N on every push that changes css or js, or people keep the old version for up to 10 minutes.

@@ -70,7 +70,8 @@ const TT = {
       if (g && V('rule')) { g.rep = V('rep'); g.clin = V('clin') || V('rep'); g.am = V('am'); }
       const byAm = {};
       ruleFacs(t).forEach(f => { f.rep = V('rep_' + f.id); f.clin = V('clin_' + f.id) || f.rep; f.am = V('am_' + f.id); (byAm[f.am] = byAm[f.am] || []).push(f); });
-      Object.entries(byAm).forEach(([am, list]) => mail({ key: 'm:E2:' + t.key + ':' + am, code: 'E2', to: [am], link: 'none', subject: 'New transition: ' + list.map(f => f.name).join(', '), body: `<p>${esc(ctx.byName)} assigned you ${list.length} facilit${list.length > 1 ? 'ies' : 'y'}${t.group === '__nocorp' ? '' : ' from <b>' + esc(t.group) + '</b>'}: ${list.map(f => esc(f.name) + ' (intake rep ' + esc(nameOf(f.rep)) + ')').join(', ')}.</p>${V('why') ? '<p><b>Why these reps:</b> ' + esc(V('why')) + '</p>' : ''}<p><b>Background:</b> ${esc(list[0].why) || '-'}</p><p>All requests already went out. Your tasks:</p>${taskList(list.flatMap(f => [[esc(f.name) + ': FastCare', 't:FASTCARE:f' + f.id], [esc(f.name) + ': Brightree report', 't:BRIGHTREE:f' + f.id]]))}` }));
+      // skip facilities this AM already got a "New transition" for when the request came in
+      Object.entries(byAm).map(([am, list]) => [am, list.filter(f => !st.mails.some(m => m.key === 'm:E2:' + f.req + ':' + lc(am)))]).filter(([, list]) => list.length).forEach(([am, list]) => mail({ key: 'm:E2:' + t.key + ':' + am, code: 'E2', to: [am], link: 'none', subject: 'New transition: ' + list.map(f => f.name).join(', '), body: `<p>${esc(ctx.byName)} assigned you ${list.length} facilit${list.length > 1 ? 'ies' : 'y'}${t.group === '__nocorp' ? '' : ' from <b>' + esc(t.group) + '</b>'}: ${list.map(f => esc(f.name) + ' (intake rep ' + esc(nameOf(f.rep)) + ')').join(', ')}.</p>${V('why') ? '<p><b>Why these reps:</b> ' + esc(V('why')) + '</p>' : ''}<p><b>Background:</b> ${esc(list[0].why) || '-'}</p><p>All requests already went out.</p>${amFirstTasks(list)}` }));
     }
   },
   AREAS: {
@@ -101,7 +102,7 @@ const TT = {
   },
   PORTAL_ADD: {
     title: t => 'Add ' + facById(t.fac).name + ' to Brightree',
-    form: t => { const f = facById(t.fac), g = G(f); return `<div class="kv"><div>Name</div><div>${esc(f.name)}</div><div>Address</div><div>${esc(f.address)}</div><div>Corporate</div><div>${g.standalone ? '<b>None. Set it up as its own corporate named "' + esc(f.group) + '"</b>' : esc(f.group)}</div><div>Price table</div><div>${esc(g.price)}</div></div><div class="meta">Add it if it isn't there yet. Already there? Just mark done.</div>${fld('Facility name as Brightree shows it', txt('pn', '', 'Waters Of Lagrange- 211526'), 'Every email uses it.')}`; },
+    form: t => { const f = facById(t.fac), g = G(f); return `<div class="kv"><div>Name</div><div>${esc(f.name)}</div><div>Address</div><div>${esc(f.address)}</div><div>Corporate</div><div>${g.standalone ? '<b>None. Set it up as its own corporate named "' + esc(f.group) + '"</b>' : esc(f.group)}</div><div>Price table</div><div>${esc(g.price || (g.existing ? 'Already set up for this corporate' : ''))}</div></div><div class="meta">Add it if it isn't there yet. Already there? Just mark done.</div>${fld('Facility name as Brightree shows it', txt('pn', '', 'Waters Of Lagrange- 211526'), 'Every email uses it.')}`; },
     example: t => ({ pn: facById(t.fac).name + '- 2115' + (26 + t.fac) }),
     validate: () => V('pn') ? '' : 'Enter the name as Brightree shows it.',
     done: t => { const f = facById(t.fac); f.inPortal = true; f.portalName = V('pn'); }
@@ -177,7 +178,7 @@ const TT = {
   },
   EMR_PORTAL: {
     title: t => 'EMR info in portal: ' + facName(facById(t.fac)),
-    form: t => { const g = G(facById(t.fac)); return `<div class="instr">Fill "Emr", "Emr Username" (<span class="q">${esc(g.emr)}</span>) and "Emr Password". Save the QR code in the "Authenticator" folder named <span class="q">${esc(g.emr)}</span>.</div>${chk('ok', 'Done')}`; },
+    form: t => { const g = G(facById(t.fac)); return `<div class="instr">Fill "Emr", "Emr Username" (<span class="q">${esc(g.emr || 'the corporate\'s username')}</span>) and "Emr Password". Save the QR code in the "Authenticator" folder named <span class="q">${esc(g.emr || 'the username')}</span>.</div>${chk('ok', 'Done')}`; },
     example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when done.', done: () => { }
   },
   CONTACTS_PORTAL: {
@@ -191,6 +192,13 @@ const TT = {
     form: t => scheduleForm(facById(t.fac)), example: () => ({}),
     validate: t => { const f = facById(t.fac); const s = settingsProblems(); if (s.length) return 'Email 1 can\'t go out until Settings are finished: ' + s.join(' '); if (!f.rep) return 'The facility has no intake rep.'; if (f.dates.ord < st.today) return 'The ordering date has passed. Change the dates above and click "Save dates" first.'; return ''; },
     done: t => sendEmail1(facById(t.fac))
+  },
+  E3_REPLY: {
+    title: t => 'Email 3 reply: ' + facName(facById(t.fac)),
+    form: t => { const f = facById(t.fac), r = t.reply || {}, m = (st.inbox || []).find(x => x._id && x._id === r.inbox);
+      return `<div class="instr">${esc(r.from ? e3Who(f, r.from) : 'Someone')} replied to Email 3${r.at ? ' on ' + fmt(r.at) : ''}. Put the info they sent (new contacts, corrections) into the portal.${m && m.path ? ` <a href="${esc(STORE.fileUrl(m.path))}" target="_blank" rel="noopener">Open their email</a>` : ''}</div>${m && m.preview ? `<div class="note">"${esc(m.preview.slice(0, 300))}"</div>` : ''}${fld('Where things stand', sel('e3s', [['done', 'Their info is in the portal'], ['more', 'They didn\'t send everything yet: keep following up']], '', true))}`; },
+    example: () => ({ e3s: 'done' }), validate: () => V('e3s') ? '' : 'Pick where things stand.',
+    done: t => { const f = facById(t.fac); if (V('e3s') === 'more') { f.e3Reply = null; f.e3Round = (f.e3Round || 0) + 1; f.e3RoundFrom = st.today; } else markE3Done(f, typeof meName === 'function' ? meName() : ''); }
   },
   EMAIL3_FOLLOW: {
     title: t => 'Email 3 follow-up: ' + facName(facById(t.fac)),
@@ -212,7 +220,7 @@ const TT = {
 function portalForm(f) {
   const g = FG(f), d = f.dates, rep = nameOf(f.rep);
   const nonCovEnt = g.cov.Enteral === 'Covered and Noncovered';
-  const rows = [['"Account Manager"', nameOf(amOf(f))], ['"Biller"', st.settings.biller], ['"Clinical Review"', nameOf(f.clin || f.rep)], ['"Insurance Specialist", "Intake Specialist"', rep], ['"Price Table"', g.price + ' (Amy usually fills it. Empty → type it)'], ['"Pricing Group"', 'Placeholder Pricing Group'],
+  const rows = [['"Account Manager"', nameOf(amOf(f))], ['"Biller"', st.settings.biller], ['"Clinical Review"', nameOf(f.clin || f.rep)], ['"Insurance Specialist", "Intake Specialist"', rep], ['"Price Table"', g.price ? g.price + ' (Amy usually fills it. Empty → type it)' : 'Already set up for this corporate. Leave it as it is.'], ['"Pricing Group"', 'Placeholder Pricing Group'],
     ['"Main Vendor"', f.gdd === 'Yes' ? f.gddWh : f.gdd === 'No' ? 'Not GDD. Leave it as it is' : 'Chris hasn\'t answered yet. Leave it. If he says GDD, you get a separate task'],
     ['"Emergency Supply Days"', '4'], ['"Ship Point"', String(d.ship) + ' (' + f.state + ')'], ['"Ship Point- United Ostomy, Fordmed"', String(d.shipOst || '')],
     ['"Pump Brand"', 'Brand in the feed set name on the report (Cardinal KGR Omni Feed Set → Omni). No spike set on the report → from "Pump Tracking" (Eduardo: ' + (f.pumps === 'checked' ? 'checked ✓' : 'not checked yet') + ')'],

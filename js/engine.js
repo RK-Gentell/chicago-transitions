@@ -198,6 +198,26 @@ function stageOf(f) {
 }
 function atRisk(f) { const d = f.dates; return !!(d && !f.email1 && !f.hold && !f.complete && addBiz(st.today, 3) >= d.ord); }
 
+// a corporate we already work with in the portal (price table, EMR access) that's new to this app
+const hasPrice = g => !!(g && (g.price || g.existing));
+const preDone = (f, k) => !!(f.pre && f.pre[k]);
+// what can be ticked as "already done" on the request. Order = the order of the flow.
+const PRE_ITEMS = [
+  ['corp', 'Corporate is already set up in the portal (we have the price table, EMR access and so on)', 'Skips the price table and EMR access requests. It still gets added here like any corporate.'],
+  ['added', 'Facility added to Brightree', 'Skips Amy\'s "Add … to Brightree" task. Type each facility\'s name above exactly as Brightree shows it.'],
+  ['pumps', 'Pumps checked and added to "Pump Tracking"', ''],
+  ['gdd', 'GDD question answered', ''],
+  ['fc', 'FastCare info gathered, and Email 3 sent to the wound rep and regional', 'Skips the FastCare task, Email 3 and its follow-ups.'],
+  ['ct', 'The contacts on this request are already in the portal', ''],
+  ['emr', 'EMR info for the facility is in the portal', ''],
+  ['ps', 'Portal setup done', ''],
+  ['e1', 'Scheduled, and Email 1 sent to GNS Chicago', 'Skips the Brightree report and scheduling. Dates stay blank.'],
+  ['e2', 'GNS Chicago emailed the facility (Email 2)', '']
+];
+// the AM's first tasks on new facilities, as links (skips ones ticked "already done")
+const amFirstTasks = list => { const ts = list.flatMap(f => [preDone(f, 'fc') ? null : [esc(f.name) + ': FastCare', 't:FASTCARE:f' + f.id], preDone(f, 'e1') ? null : [esc(f.name) + ': Brightree report', 't:BRIGHTREE:f' + f.id]].filter(Boolean)); return ts.length ? '<p>Your tasks:</p>' + taskList(ts) : '<p>Nothing for you to do yet. You\'ll get an email when there is.</p>'; };
+const preList = f => PRE_ITEMS.filter(([k]) => (f.pre || {})[k]).map(x => x[1].split(' (')[0].split(',')[0]);
+
 // ---------- email ----------
 const btnStyle = 'display:inline-block;background:#003171;color:#ffffff;padding:8px 16px;border-radius:4px;text-decoration:none;font-weight:bold;margin:0 8px 8px 0';
 const appLink = q => CFG.appUrl + (q ? '?' + q : '');
@@ -206,18 +226,25 @@ const taskUrl = (key, answer) => appLink('task=' + encodeURIComponent(key) + (an
 const note = s => '<p style="color:#6B6F75;font-size:9.5pt;margin:-4px 0 10px">' + s + '</p>';
 // one line per task in emails that cover several: facility name + its own buttons
 const taskList = (items, answers) => '<ul>' + items.map(([label, key]) => '<li style="margin:4px 0">' + label + ' &nbsp; ' + (answers || []).map(a => `<a href="${esc(taskUrl(key, a))}">${esc(a)}</a> &middot; `).join('') + `<a href="${esc(taskUrl(key))}">Open the task</a></li>`).join('') + '</ul>';
+// emails that only inform: they get a line at the bottom saying no action is needed
+const FYI_CODES = new Set(['E1', 'E11', 'E19', 'E23', 'E24']);
 function emailHtml(body, m) {
   let links = '';
   if (m.task && m.buttons) links = '<p>' + m.buttons.map(b => `<a href="${esc(appLink('task=' + encodeURIComponent(m.task) + '&answer=' + encodeURIComponent(b)))}" style="${btnStyle}">${esc(b)}</a>`).join('') + `<a href="${esc(appLink('task=' + encodeURIComponent(m.task)))}" style="${btnStyle};background:#6B6F75">Open the task</a></p>`;
   else if (m.task && m.link !== 'none') links = `<p><a href="${esc(appLink('task=' + encodeURIComponent(m.task)))}" style="${btnStyle}">Open the task</a></p>`;
   else if (m.link === 'mytasks') links = `<p><a href="${esc(appLink('view=mytasks'))}" style="${btnStyle}">Open my tasks</a></p>`;
   else if (m.link === 'fac' && m.fac) links = `<p><a href="${esc(appLink('fac=' + m.fac))}" style="${btnStyle}">Open the facility</a></p>`;
-  return `<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt">${body}${links}</div>`;
+  const fyi = (m.fyi || FYI_CODES.has(m.code)) ? '<p style="color:#6B6F75;font-size:9.5pt;border-top:1px solid #E5E9ED;padding-top:6px;margin-top:12px">This email is for your information only. No action is needed on your part.</p>' : '';
+  return `<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt">${body}${links}${fyi}</div>`;
 }
 /* mail({key, code, to:[emails], cc, subject, body, task, fac, day, cond, buttons, link, noTag})
    key  must be unique and the same every time the same email would be made, so it is never sent twice.
    day  YYYY-MM-DD to send later (8 am Eastern). Leave out to send now.
    cond when to cancel a later email (see mailStillValid). */
+// "to do" email for a task with steps: just what to do; the details are in the task
+function todo(t, subject, line) {
+  return mail({ key: 'm:E13:' + t.key, code: 'E13', to: [t.assignee], fac: t.fac, task: t.key, cond: { task: t.key }, subject: 'To do: ' + subject, body: '<p>' + line + '</p>' });
+}
 // follow-ups go out as high importance; everything else normal (the "CT - Send emails" flow reads the Importance column)
 const HIGH_CODES = new Set(['E15', 'E16F', 'E16A', 'E17']);
 function mail(m) {
@@ -264,14 +291,15 @@ function mailStillValid(m) {
     const f = facById(c.fac); if (!f || f.hold || f.complete || f.deleted) return false;
     if (c.untilEmail1 && f.email1) return false;
     if (c.untilEmail2 && f.email2) return false;
-    if (c.untilE3Done && f.e3Done) return false;
+    if (c.untilE3Done && (f.e3Done || f.e3Reply)) return false;
+    if ('e3Round' in c && (f.e3Done || f.e3Reply || (f.e3Round || 0) !== c.e3Round)) return false;
     if (c.ord && (!f.dates || f.dates.ord !== c.ord)) return false;
   }
   return true;
 }
 
 // ---------- tasks ----------
-const REPEATABLE = new Set(['RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL']);
+const REPEATABLE = new Set(['RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY']);
 function newTask(type, o) {
   const base = 't:' + type + ':' + (o.fac ? 'f' + o.fac : 'g' + lc(o.group));
   let key = base;
@@ -285,7 +313,7 @@ function newTask(type, o) {
 function taskTitle(t) { return (TT[t.type] && TT[t.type].title(t)) || t.type; }
 function finishTask(t, by, byName) {
   t.status = 'Done'; t.doneBy = by; t.doneByName = byName; t.doneOn = st.today;
-  if (by !== t.assignee && t.assignee) mail({ key: 'm:E19:' + t.key, code: 'E19', to: [t.assignee], fac: t.fac, subject: 'Done by ' + byName + ': ' + taskTitle(t), body: `<p>${esc(byName)} finished this. Nothing for you to do.</p>`, link: 'none' });
+  if (by !== t.assignee && t.assignee) mail({ key: 'm:E19:' + t.key, code: 'E19', to: [t.assignee], fac: t.fac, subject: 'Done by ' + byName + ': ' + taskTitle(t), body: `<p>${esc(byName)} finished this.</p>`, link: 'none' });
 }
 function reassign(t, to, byName) {
   if (!to || to === t.assignee) return;
@@ -353,12 +381,11 @@ function sendEmail1(f, correction) {
   mail({ key: 'm:E15:' + f.id, code: 'E15', to: s.e1To, cc: [am], fac: f.id, noTag: true, link: 'none', day: addBiz(st.today, 3), cond: { fac: f.id, untilEmail2: true }, subject: 'RE: ' + subj, body: `<p>Hi ${esc(s.chicagoGreeting)},</p><p>Checking in, has the facility email for <b>${esc(facName(f))}</b> gone out? Please CC ${esc(CFG.mailbox)} on it.</p><p>Thank you!<br>${esc(nameOf(am))}</p>` });
   newTask('CHICAGO_FOLLOW', { fac: f.id, assignee: am, amTask: true, opensOn: addBiz(st.today, 5) });
 }
-// Email 3 goes to the wound rep and regional. They reply with one word, "Done", when it's all taken care of.
-// No "Done" yet: follow-ups go out 3 and 6 business days later, then the AM gets told (see chaseEmail3).
+// Email 3 goes to the wound rep and regional. When anyone replies (to the mailbox), the follow-ups stop and the AM
+// gets an "Email 3 reply" task to put in what they sent. No reply: follow-ups at +3 and +6 business days, then the AM is told.
 const E3_SUBJECT = f => facName(f) + '- Transfer from GNS Chicago to Lakewood';
 const e3Names = f => [...new Set([f.wound && f.wound.name, f.regional && f.regional.name].filter(Boolean).map(n => String(n).split(' ')[0]))];
 const e3Hi = f => '<p>Hi ' + esc(e3Names(f).join(' and ')) + ',</p>';
-const E3_DONE_ASK = '<p><b>Once everything is taken care of (the in-service is booked and you\'ve sent us the contacts or confirmed the ones above), please reply to this email with one word: "Done".</b> That\'s how we know it\'s all set.</p>';
 function email3Body(f) {
   const g = FG(f), d = f.dates, am = amOf(f), areas = covKnown(g) ? areasPhrase(g)[0] : '';
   return `${e3Hi(f)}
@@ -368,7 +395,6 @@ function email3Body(f) {
 <ul><li>Name and email of a medical provider that can sign forms via our e-sign platform, PandaDoc, so we can bill patients supplies to insurance (this can be a medical director, NP or PA).</li><li>Name and email of the speech therapist or director of rehab</li><li>Name and email of the dietician</li></ul>
 <p>The following are the contacts we have on file. Can you please review and advise if there are any discrepancies with the names or email addresses of these contacts?</p>
 <table border="1" cellpadding="4" style="border-collapse:collapse"><tr><th>First Name</th><th>Last Name</th><th>Department</th><th>Email</th></tr>${f.contacts.map(c => `<tr><td>${esc(c.first)}</td><td>${esc(c.last)}</td><td>${esc(c.dept === 'Other' && c.note ? c.note : c.dept)}</td><td>${esc(c.email)}</td></tr>`).join('') || '<tr><td colspan="4">None yet</td></tr>'}</table>
-${E3_DONE_ASK}
 <p>Thank you for your help!<br>${esc(nameOf(am))}</p>`;
 }
 function sendEmail3(f) {
@@ -377,30 +403,44 @@ function sendEmail3(f) {
 }
 // One step at a time: only the next follow-up is ever queued, and it's cancelled the moment "Done" comes in.
 function chaseEmail3(f) {
-  if (!f.email3 || f.e3Done) return;
-  const mine = st.mails.filter(m => m.fac === f.id && m.key.startsWith('m:E3F:'));
+  if (!f.email3 || f.e3Done || f.e3Reply) return;
+  const round = f.e3Round || 0, pre = 'm:E3F:' + f.id + ':' + (round ? 'r' + round + ':' : '');
+  const roundOf = k => +((k.match(/^m:E3F:\d+:r(\d+):/) || [])[1] || 0);
+  const mine = st.mails.filter(m => m.fac === f.id && m.key.startsWith('m:E3F:') && roundOf(m.key) === round);
   if (mine.some(m => m.status === 'Queued')) return;
   const used = mine.filter(m => m.status !== 'Cancelled');
   const step = used.length + 1; if (step > 3) return;
-  const last = used.map(m => m.day).sort().pop() || f.email3;
-  const day = addBiz(last, 3), key = 'm:E3F:' + f.id + ':' + step + ':' + mine.length, am = amOf(f), cond = { fac: f.id, untilE3Done: true };
+  const last = used.map(m => m.day).sort().pop() || (round ? f.e3RoundFrom : f.email3);
+  const day = addBiz(last, 3), key = pre + step + ':' + mine.length, am = amOf(f), cond = { fac: f.id, e3Round: round };
   if (step < 3) mail({ key, code: 'E16F', day, cond, to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [am], fac: f.id, noTag: true, link: 'none', subject: 'RE: ' + E3_SUBJECT(f),
-    body: `${e3Hi(f)}<p>${step === 1 ? 'Just following up on my email below' : 'Following up again on my email below'} about <b>${esc(facName(f))}</b>. Once the in-service is booked and you've sent us the contacts (or confirmed the ones we have), please reply to this email with one word: <b>"Done"</b>.</p><p>Thank you!<br>${esc(nameOf(am))}</p><hr>${email3Body(f)}` });
-  else mail({ key, code: 'E16A', day, cond, to: [am], fac: f.id, link: 'fac', subject: 'No "Done" yet on Email 3: ' + facName(f),
-    body: `<p>${esc(e3Names(f).join(' and ') || 'The wound rep and regional')} didn't reply "Done" to Email 3, even after 2 follow-ups. Please reach out to them.</p>` + note('When it\'s taken care of, click "Email 3 is taken care of" on the facility page. The facility can\'t be marked complete until then.') });
+      body: `${e3Hi(f)}<p>${step === 1 ? 'Just following up on my email below' : 'Following up again on my email below'} about <b>${esc(facName(f))}</b>. Can you please get the in-service booked and send over the contact info?</p><p>Thank you!<br>${esc(nameOf(am))}</p><hr>${email3Body(f)}` });
+  else mail({ key, code: 'E16A', day, cond, to: [am], fac: f.id, link: 'fac', subject: 'No reply to Email 3: ' + facName(f),
+      body: `<p>${esc(e3Names(f).join(' and ') || 'The wound rep and regional')} didn't reply to Email 3 for <b>${esc(facName(f))}</b>, even after 2 follow-ups. Please reach out to them.</p>` + note('When it\'s taken care of, click "Email 3 is taken care of" on the facility page. The facility can\'t be marked complete until then.') });
+}
+// request said some steps are already done: set what those steps would have set, so their tasks never get made
+function applyPre(f, pre, l) {
+  if (!Object.keys(pre).length) return;
+  const p = Object.assign({}, pre); if (p.e2) p.e1 = true; if (p.e1) p.ps = true;
+  f.pre = p;
+  if (p.added) { f.inPortal = true; f.portalName = l.name; f.addedBefore = true; }
+  if (p.pumps) f.pumps = 'already done';
+  if (p.gdd) f.gdd = 'Already done';
+  if (p.fc) { f.email3 = st.today; markE3Done(f, 'Done before the request'); }
+  if (p.e1) { f.email1 = st.today; f.email1By = 'Done before the request'; }
+  if (p.e2) { f.email2 = st.today; f.email2By = 'Done before the request'; }
 }
 function markE3Done(f, by, day) { if (f.e3Done) return; f.e3Done = day || st.today; f.e3DoneBy = by; }
-// a reply whose own text (above the quoted email) is just "Done"
-function isDoneReply(preview) {
-  let p = String(preview || ''); const cut = p.search(/(?:^|\s)(?:From:|-{2,}\s*Original Message|_{5,}|On [^\n]{0,150}? wrote:|Sent from my)/i);
-  if (cut >= 0) p = p.slice(0, cut);
-  p = p.replace(/\s+/g, ' ').trim();
-  return p.length > 0 && p.length <= 60 && /\bdone\b/i.test(p) && !/\bnot\b|n't\b|\?/i.test(p);
+// someone replied to Email 3: stop the follow-ups, AM puts in what they sent
+const e3Who = (f, from) => { const x = [f.wound, f.regional].find(p => p && lc(p.email) === lc(from)); return x ? x.name : (nameOf(from) || from); };
+function gotE3Reply(f, m) {
+  f.e3Reply = { from: m.from, at: (m.received || '').slice(0, 10) || st.today, inbox: m._id || '' };
+  const t = newTask('E3_REPLY', { fac: f.id, assignee: amOf(f), amTask: true, reply: f.e3Reply });
+  todo(t, 'Email 3 reply for ' + facName(f), esc(e3Who(f, m.from)) + ' replied to Email 3 for <b>' + esc(facName(f)) + '</b>. Put in the info they sent.');
 }
 function addAmy(f) {
   const g = G(f), t = newTask('PORTAL_ADD', { fac: f.id, assignee: roleEmail('portal') });
   mail({ key: 'm:E8:' + t.key, code: 'E8', to: [t.assignee], cc: [amOf(f)], fac: f.id, task: t.key, cond: { task: t.key }, subject: 'Add ' + f.name + ' to Brightree',
-    body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>Please add this facility to Brightree (if it's already there, just mark the task done).</p><table border="1" cellpadding="4" style="border-collapse:collapse"><tr><td>Name</td><td>${esc(f.name)}</td></tr><tr><td>Address</td><td>${esc(f.address)}</td></tr><tr><td>Corporate</td><td>${g.standalone ? '<b>None. Set it up as its own corporate named "' + esc(f.group) + '"</b>' : esc(f.group)}</td></tr><tr><td>Price table</td><td>${esc(g.price)}</td></tr></table>` });
+    body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>Please add <b>${esc(f.name)}</b> to Brightree.</p>` });
 }
 const first = n => String(n || '').split(' ')[0];
 function makeStandalone(f) {
@@ -438,11 +478,12 @@ function processInbox() {
     const mb = lc(CFG.mailbox), inTo = (m.to || []).map(lc).includes(mb), inCc = (m.cc || []).map(lc).includes(mb);
     const live = st.facs.filter(f => !f.archived);
     const match = f => ls.includes(lc(facName(f))) || ls.includes(lc(f.name));
-    // "Done" reply to Email 3 (or one of its follow-ups) from anyone but us or GNS Chicago
+    // a reply to Email 3 (or a follow-up): sent to the mailbox, after Email 3, not from us or GNS Chicago
     const chicago = [...(st.settings.e1To || []), ...(st.settings.e1Cc || [])].map(lc);
-    if (from !== mb && !chicago.includes(from) && ls.includes('transfer from gns chicago') && isDoneReply(m.preview)) {
-      const f = live.find(x => x.email3 && !x.e3Done && match(x));
-      if (f) { markE3Done(f, m.from, (m.received || '').slice(0, 10) || st.today); m.fac = f.id; m.isE3Done = true; return; }
+    if (from !== mb && inTo && !chicago.includes(from) && ls.includes('transfer from gns chicago')) {
+      const team = (st.settings.people || []).map(p => lc(p.email)), them = x => [x.wound && x.wound.email, x.regional && x.regional.email].map(lc);
+      const f = live.find(x => x.email3 && !x.e3Done && !x.e3Reply && match(x) && (m.received || '').slice(0, 10) >= x.email3 && (them(x).includes(from) || !team.includes(from)));
+      if (f) { gotE3Reply(f, m); m.fac = f.id; m.isE3Reply = true; return; }
     }
     if (from !== mb && inCc && !inTo && ls.includes('transfer from gns chicago')) {
       const f = live.find(x => x.email1 && !x.email2 && match(x));
@@ -467,15 +508,12 @@ function run() {
     if (!f.asked) {
       f.asked = true;
       const need = { corp: !f.group, addr: !f.address };
-      const tf = newTask('FASTCARE', { fac: f.id, assignee: am, amTask: true, need });
-      mail({ key: 'm:E13:' + tf.key, code: 'E13', to: [am], fac: f.id, task: tf.key, cond: { task: tf.key }, subject: 'To do: FastCare for ' + f.name,
-        body: '<p>Get from FastCare: ' + [need.corp ? 'the corporate' : '', need.addr ? 'the address' : '', 'the wound rep, regional and any contacts we don\'t have yet'].filter(Boolean).join('; ') + '.</p>' + note(['The contacts we already have are listed in the task.', need.corp ? 'The areas of care and price table requests go out as soon as you save the corporate.' : '', 'Email 3 goes to the wound rep and regional as soon as this task is done.'].filter(Boolean).join(' ')) });
-      const tg = newTask('GDD', { fac: f.id, assignee: roleEmail('gdd') });
+      if (!preDone(f, 'fc')) { const tf = newTask('FASTCARE', { fac: f.id, assignee: am, amTask: true, need }); todo(tf, 'FastCare for ' + f.name, 'Look up <b>' + esc(f.name) + '</b> in FastCare.'); }
+      if (!preDone(f, 'gdd')) { const tg = newTask('GDD', { fac: f.id, assignee: roleEmail('gdd') });
       queue('E10', tg.assignee, f, tg, (fs, ts) => fs.length === 1
         ? { code: 'E10', to: [ts[0].assignee], fac: fs[0].id, task: ts[0].key, buttons: ['No'], cond: { task: ts[0].key }, subject: 'GDD orders for ' + fs[0].name + '?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did <b>${esc(fs[0].name)}</b> (${esc(fs[0].group || 'corporate not known yet')}) get orders from GDD? If yes, open the task and pick the warehouse.</p>` }
-        : { code: 'E10', to: [ts[0].assignee], link: 'none', subject: 'GDD orders for ' + fs.length + ' facilities?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did any of these get orders from GDD? Click "No" or open the task to pick the warehouse.</p>${taskList(fs.map((x, i) => ['<b>' + esc(x.name) + '</b>', ts[i].key]), ['No'])}` });
-      const tb = newTask('BRIGHTREE', { fac: f.id, assignee: am, amTask: true });
-      mail({ key: 'm:E13:' + tb.key, code: 'E13', to: [am], fac: f.id, task: tb.key, cond: { task: tb.key }, subject: 'To do: Brightree report for ' + f.name, body: '<p>Run the GNS Lakewood Report and enter what you find.</p>' + note('Dates calculate from it.') });
+        : { code: 'E10', to: [ts[0].assignee], link: 'none', subject: 'GDD orders for ' + fs.length + ' facilities?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did any of these get orders from GDD? Click "No" or open the task to pick the warehouse.</p>${taskList(fs.map((x, i) => ['<b>' + esc(x.name) + '</b>', ts[i].key]), ['No'])}` }); }
+      if (!preDone(f, 'e1')) { const tb = newTask('BRIGHTREE', { fac: f.id, assignee: am, amTask: true }); todo(tb, 'Brightree report for ' + f.name, 'Run the Brightree report for <b>' + esc(f.name) + '</b>.'); }
     }
 
     // corporate not known yet: Malka picks reps per facility; corporate asks wait for the FastCare task
@@ -500,12 +538,12 @@ function run() {
         const t = newTask('AREAS', { group: g.name, assignee: f.requester || fallbackOwner() });
         mail({ key: 'm:E4:' + t.key, code: 'E4', to: [t.assignee], task: t.key, cond: { task: t.key }, subject: 'Areas of care for ' + g.name, body: `<p>Which areas of care are we taking for <b>${esc(g.name)}</b>? Still needed: ${AREAS.filter(x => !(g.cov || {})[x]).join(', ')}. Pick 1 per area in the task.</p>` });
       }
-      if (!g.price && !gTask(g.name, 'PRICE')) {
+      if (!hasPrice(g) && !gTask(g.name, 'PRICE')) {
         const t = newTask('PRICE', { group: g.name, assignee: roleEmail('price') });
         mail({ key: 'm:E5:' + t.key, code: 'E5', to: [t.assignee], task: t.key, cond: { task: t.key }, subject: 'Price table for ' + g.name, body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>Which price table does <b>${esc(g.name)}</b> go on? Facilities: ${facsOfGroup(g.name).map(x => esc(x.name)).join(', ')}.</p>` });
       }
       const gf = facsOfGroup(g.name).filter(x => !x.hold);
-      if (!g.emr && !gTask(g.name, 'EMR') && gf.length && gf.every(x => x.inPortal)) {
+      if (!g.emr && !g.existing && !gTask(g.name, 'EMR') && gf.length && gf.every(x => x.inPortal)) {
         const t = newTask('EMR', { group: g.name, assignee: roleEmail('emr') });
         mail({ key: 'm:E7:' + t.key, code: 'E7', to: [t.assignee], cc: [am], task: t.key, cond: { task: t.key }, subject: 'EMR access: ' + g.name, body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>We need EMR access for <b>${esc(g.name)}</b>. These are in the portal: ${gf.map(x => esc(facName(x))).join(', ')}.</p><p>Please enter "Emr", "Emr Username" and "Emr Password" on each one and save the QR code on the server in the "Authenticator" folder, named the username. Then mark the task done.</p>` });
       }
@@ -513,12 +551,12 @@ function run() {
     // dates (frozen once Email 1 went out)
     { const d = calcDates(f); if (d && !f.email1) { f.rec = d; f.dates = f.dosChosen ? Object.assign(derive(f, f.dosChosen), { why: [...d.why, 'Changed by ' + (f.dosBy || 'someone') + ' from the recommended ' + fmtS(d.dos)], changed: true }) : d; } }
     // Amy adds it to Brightree once the price table is in
-    if (g.price && f.address && !fTask(f, 'PORTAL_ADD') && !f.inPortal) addAmy(f);
+    if (hasPrice(g) && f.address && !fTask(f, 'PORTAL_ADD') && !f.inPortal) addAmy(f);
     // existing EMR login: ask corporate to add this facility
     const main = mainCorp(g);
-    if (g.emr && !g.emrNew && !fTask(f, 'EMR_ADD')) {
+    if ((g.emr || g.existing) && !g.emrNew && !fTask(f, 'EMR_ADD') && !preDone(f, 'emr')) {
       const t = newTask('EMR_ADD', { fac: f.id, assignee: am, amTask: true });
-      if (main) mail({ key: 'm:E7b:' + t.key, code: 'E7b', to: [main.email], cc: [am], fac: f.id, link: 'none', subject: 'Add ' + f.name + ' to your EMR login', body: `<p>Hi ${esc(main.first)},</p><p>Can you add <b>${esc(f.name)}</b> to the existing EMR login <b>${esc(g.emr)}</b>? Thank you!<br>${esc(nameOf(am))}</p>` });
+      if (main) mail({ key: 'm:E7b:' + t.key, code: 'E7b', to: [main.email], cc: [am], fac: f.id, link: 'none', subject: 'Add ' + f.name + ' to your EMR login', body: `<p>Hi ${esc(main.first)},</p><p>Can you add <b>${esc(f.name)}</b> to the existing EMR login${g.emr ? ' <b>' + esc(g.emr) + '</b>' : ''}? Thank you!<br>${esc(nameOf(am))}</p>` });
     }
     if (f.inPortal && !fTask(f, 'PUMPS') && !f.pumps) {
       const tp = newTask('PUMPS', { fac: f.id, assignee: roleEmail('pumps') });
@@ -527,24 +565,24 @@ function run() {
         : { code: 'E9', to: [ts[0].assignee], link: 'none', subject: 'Pumps: ' + fs.length + ' facilities', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>These are in the portal now. Please check if GNS Chicago sent them pumps and add any to "Pump Tracking". Click "Checked" next to each one when you're done.</p>${taskList(fs.map((x, i) => ['<b>' + esc(facName(x)) + '</b>', ts[i].key]), ['Checked'])}` });
     }
     // portal setup: rep + price table + all areas of care + in the portal + dates
-    if (!fTask(f, 'PORTAL_SETUP') && f.rep && g.price && covKnown(FG(f)) && f.inPortal && f.dates && f.bt) {
+    if (!fTask(f, 'PORTAL_SETUP') && !preDone(f, 'ps') && f.rep && hasPrice(g) && covKnown(FG(f)) && f.inPortal && f.dates && f.bt) {
       const t = newTask('PORTAL_SETUP', { fac: f.id, assignee: am, amTask: true });
-      mail({ key: 'm:E13:' + t.key, code: 'E13', to: [am], fac: f.id, task: t.key, cond: { task: t.key }, subject: 'To do: portal setup for ' + f.name, body: '<p>Every value is ready in the task. Type them in and save.</p>' });
+      todo(t, 'portal setup for ' + facName(f), 'Set up <b>' + esc(facName(f)) + '</b> in the portal.');
     }
-    if (!fTask(f, 'EMR_PORTAL') && g.emr && !g.emrNew && f.inPortal && done(fTask(f, 'EMR_ADD'))) {
+    if (!fTask(f, 'EMR_PORTAL') && (g.emr || g.existing) && !g.emrNew && !preDone(f, 'emr') && f.inPortal && done(fTask(f, 'EMR_ADD'))) {
       const t = newTask('EMR_PORTAL', { fac: f.id, assignee: am, amTask: true });
-      mail({ key: 'm:E13:' + t.key, code: 'E13', to: [am], fac: f.id, task: t.key, cond: { task: t.key }, subject: 'To do: EMR info for ' + f.name, body: '<p>Fill "Emr", "Emr Username", "Emr Password". Save the QR code in "Authenticator" named the username.</p>' });
+      todo(t, 'EMR info for ' + facName(f), 'Put the EMR info for <b>' + esc(facName(f)) + '</b> in the portal.');
     }
     {
       const fc = fTask(f, 'FASTCARE'), openCP = tasksOf(f, 'CONTACTS_PORTAL').some(t => !done(t));
       if (!openCP && f.inPortal && done(fc) && f.contacts.some(c => !c.inPortal)) {
         const t = newTask('CONTACTS_PORTAL', { fac: f.id, assignee: am, amTask: true });
-        mail({ key: 'm:E13:' + t.key, code: 'E13', to: [am], fac: f.id, task: t.key, cond: { task: t.key }, subject: 'To do: add contacts for ' + facName(f), body: '<p>"Add Contact" in the portal for each one listed in the task.</p>' });
+        todo(t, 'add contacts for ' + facName(f), 'Add the contacts for <b>' + esc(facName(f)) + '</b> to the portal.');
       }
     }
-    if (!fTask(f, 'SCHEDULE') && done(fTask(f, 'PORTAL_SETUP'))) {
+    if (!fTask(f, 'SCHEDULE') && !f.email1 && f.dates && (done(fTask(f, 'PORTAL_SETUP')) || preDone(f, 'ps'))) {
       const t = newTask('SCHEDULE', { fac: f.id, assignee: am, amTask: true });
-      mail({ key: 'm:E13:' + t.key, code: 'E13', to: [am], fac: f.id, task: t.key, cond: { task: t.key }, subject: 'To do: schedule ' + facName(f), body: '<p>Facility Schedule, Generate Dates, check the Ordering Calendar.</p>' + note('"Mark done" sends Email 1 to Chicago.') });
+      todo(t, 'schedule ' + facName(f), 'Schedule <b>' + esc(facName(f)) + '</b>.');
     }
     // Email 3 to the wound rep + regional: as soon as the FastCare task is done
     if (!f.email3 && done(fTask(f, 'FASTCARE')) && f.wound && f.regional) sendEmail3(f);
@@ -561,10 +599,10 @@ function run() {
       mail({ key: 'm:risk:' + f.id + ':' + f.dates.ord, code: 'E18', to: [am], fac: f.id, link: 'fac', day: day > st.today ? day : st.today, cond: { fac: f.id, untilEmail1: true, ord: f.dates.ord }, subject: 'At risk: ' + facName(f) + ' orders ' + fmt(f.dates.ord) + ' and Chicago hasn\'t been emailed', body: '<p>Finish the open tasks so Email 1 can go out.</p>' });
     }
     // complete
-    if (f.email2 && done(fTask(f, 'GDD')) && (!f.email3 || f.e3Done)) {
+    if (f.email2 && (done(fTask(f, 'GDD')) || preDone(f, 'gdd')) && (!f.email3 || f.e3Done)) {
       f.complete = st.today;
       tasksOf(f).forEach(t => { if (!done(t) && ['CHICAGO_FOLLOW'].includes(t.type)) t.status = 'Not needed'; });
-      mail({ key: 'm:E24:' + f.id, code: 'E24', to: [am, f.requester], fac: f.id, link: 'fac', subject: 'Transition complete: ' + facName(f), body: `<p><b>${esc(facName(f))}</b> is done. First DOS ${fmt(f.dates.dos)}, ordering ${fmt(f.dates.ord)}, delivery ${fmt(f.dates.del)}. Intake rep: ${esc(nameOf(f.rep))}.</p>` });
+      mail({ key: 'm:E24:' + f.id, code: 'E24', to: [am, f.requester], fac: f.id, link: 'fac', subject: 'Transition complete: ' + facName(f), fyi: true, body: `<p><b>${esc(facName(f))}</b> is done.${f.dates ? ` First DOS ${fmt(f.dates.dos)}, ordering ${fmt(f.dates.ord)}, delivery ${fmt(f.dates.del)}.` : ''} Intake rep: ${esc(nameOf(f.rep)) || '-'}.</p>` });
     }
   });
   // the "no corporate yet" rep task closes itself once every facility on it has a rep or a corporate
