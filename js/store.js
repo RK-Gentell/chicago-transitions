@@ -17,7 +17,7 @@
 
 const LISTS = {
   data: { name: 'CT Data', cols: [['Key', 'text', 1, 1], ['Kind', 'text', 1], ['Data', 'note'], ['Ct', 'text', 1], ['Am', 'text'], ['Archived', 'text', 1]] },
-  outbox: { name: 'CT Outbox', cols: [['Key', 'text', 1, 1], ['Code', 'text'], ['ToList', 'note'], ['CcList', 'note'], ['Subject', 'text'], ['HtmlBody', 'note'], ['SendOn', 'date', 1], ['SendStatus', 'text', 1], ['Facility', 'text', 1], ['TaskKey', 'text'], ['Cond', 'note'], ['ErrorText', 'note']] },
+  outbox: { name: 'CT Outbox', cols: [['Key', 'text', 1, 1], ['Code', 'text'], ['ToList', 'note'], ['CcList', 'note'], ['Subject', 'text'], ['HtmlBody', 'note'], ['SendOn', 'date', 1], ['SendStatus', 'text', 1], ['Facility', 'text', 1], ['TaskKey', 'text'], ['Cond', 'note'], ['ErrorText', 'note'], ['Importance', 'text']] },
   inbox: { name: 'CT Inbox', cols: [['FromAddress', 'text'], ['ToAddresses', 'note'], ['CcAddresses', 'note'], ['Received', 'date', 1], ['Preview', 'note'], ['FilePath', 'note'], ['Processed', 'text'], ['Facility', 'text']] },
   numbers: { name: 'CT Numbers', cols: [] }
 };
@@ -33,8 +33,9 @@ function dataRecords() {
   st.reqs.forEach(r => out.push({ key: r.key, kind: 'req', obj: r }));
   return out;
 }
-const mailCols = m => ({ Title: m.key.slice(0, 250), Key: m.key, Code: m.code, ToList: m.to.join(';'), CcList: m.cc.join(';'), Subject: m.subject.slice(0, 250), HtmlBody: m.body, SendOn: m.sendOn, SendStatus: m.status, Facility: m.fac ? String(m.fac) : '', TaskKey: m.task || '', Cond: m.cond ? JSON.stringify(m.cond) : '', ErrorText: m.error || '' });
-const mailFrom = (id, f) => ({ _id: id, key: f.Key, code: f.Code, to: (f.ToList || '').split(';').filter(Boolean), cc: (f.CcList || '').split(';').filter(Boolean), subject: f.Subject || '', body: f.HtmlBody || '', sendOn: f.SendOn, day: f.SendOn ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(f.SendOn)) : '', status: f.SendStatus, fac: f.Facility ? +f.Facility : null, task: f.TaskKey || null, cond: f.Cond ? JSON.parse(f.Cond) : null, error: f.ErrorText || '' });
+let hasImportance = false; // the Importance column was added later; old lists get it on first sign-in
+const mailCols = m => Object.assign({ Title: m.key.slice(0, 250), Key: m.key, Code: m.code, ToList: m.to.join(';'), CcList: m.cc.join(';'), Subject: m.subject.slice(0, 250), HtmlBody: m.body, SendOn: m.sendOn, SendStatus: m.status, Facility: m.fac ? String(m.fac) : '', TaskKey: m.task || '', Cond: m.cond ? JSON.stringify(m.cond) : '', ErrorText: m.error || '' }, hasImportance ? { Importance: m.importance || 'Normal' } : {});
+const mailFrom = (id, f) => ({ _id: id, importance: f.Importance || 'Normal', key: f.Key, code: f.Code, to: (f.ToList || '').split(';').filter(Boolean), cc: (f.CcList || '').split(';').filter(Boolean), subject: f.Subject || '', body: f.HtmlBody || '', sendOn: f.SendOn, day: f.SendOn ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(f.SendOn)) : '', status: f.SendStatus, fac: f.Facility ? +f.Facility : null, task: f.TaskKey || null, cond: f.Cond ? JSON.parse(f.Cond) : null, error: f.ErrorText || '' });
 const inboxFrom = (id, f) => ({ _id: id, subject: f.Title || '', from: f.FromAddress || '', to: (f.ToAddresses || '').split(/[;,]/).map(s => s.trim()).filter(Boolean), cc: (f.CcAddresses || '').split(/[;,]/).map(s => s.trim()).filter(Boolean), received: f.Received || '', preview: f.Preview || '', path: f.FilePath || '', processed: f.Processed === 'Yes', fac: f.Facility ? +f.Facility : null });
 function emptyState(today, me) { return { today, me, settings: null, groups: {}, facs: [], tasks: [], reqs: [], mails: [], inbox: [], names: {} }; }
 function applyRecords(rows) {
@@ -172,6 +173,14 @@ function SPStore() {
       const lists = await gfetch('/sites/' + siteId + '/lists?$select=id,displayName&$top=200');
       for (const k in LISTS) { const l = lists.value.find(x => x.displayName === LISTS[k].name); if (l) listIds[k] = l.id; }
       this.needsSetup = Object.keys(LISTS).some(k => !listIds[k]);
+      if (listIds.outbox) {
+        const cols = (await gfetch(listUrl('outbox') + '/columns?$select=name&$top=200')).value.map(c => c.name);
+        hasImportance = cols.includes('Importance');
+        if (!hasImportance) {
+          try { await gfetch(listUrl('outbox') + '/columns', { method: 'POST', body: JSON.stringify({ name: 'Importance', text: {} }) }); hasImportance = true; }
+          catch (e) { console.error('Could not add the Importance column', e); this.warning = 'Couldn\'t add the "Importance" column to CT Outbox (' + (e.message || e) + '). Emails still go out, all as normal importance. Ask a site owner to open the app once.'; }
+        }
+      }
       const me = await gfetch('/me?$select=displayName,mail,userPrincipalName');
       st = emptyState(todayET(), { email: lc(me.mail || me.userPrincipalName), name: me.displayName });
       return true;
@@ -192,6 +201,7 @@ function SPStore() {
           await gfetch(listUrl(k) + '/columns', { method: 'POST', body: JSON.stringify(col) });
         }
       }
+      hasImportance = true;
       // the folder the "CT - Mailbox" flow saves incoming emails to
       try { await gfetch('/sites/' + siteId + '/drive/root/children', { method: 'POST', body: JSON.stringify({ name: 'CT Mailbox', folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }) }); } catch (e) { if (e.status !== 409) throw e; }
       this.needsSetup = false;

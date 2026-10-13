@@ -15,7 +15,7 @@ A task app that runs the Chicago → Lakewood facility transition process from t
 
 ## Data (SharePoint lists, created by the app's first-run setup)
 - **CT Data**: 1 row per record. Columns `Key` (unique), `Kind` (settings/grp/fac/task/req), `Data` (JSON), `Ct` (CT-0001, facilities only), `Am` (AM email, facilities only, used by the mailbox flow), `Archived` (Yes/No).
-- **CT Outbox**: 1 row per email. `Key` (unique), `Code`, `ToList`, `CcList` (semicolon-separated), `Subject`, `HtmlBody`, `SendOn` (UTC), `SendStatus` (Queued/Sent/Failed/Cancelled), `Facility`, `TaskKey`, `Cond` (JSON: when to cancel), `ErrorText`.
+- **CT Outbox**: 1 row per email. `Key` (unique), `Code`, `ToList`, `CcList` (semicolon-separated), `Subject`, `HtmlBody`, `SendOn` (UTC), `SendStatus` (Queued/Sent/Failed/Cancelled), `Facility`, `TaskKey`, `Cond` (JSON: when to cancel), `ErrorText`, `Importance` (Normal/High; the send flow uses it. Added on sign-in to lists made before it existed).
 - **CT Inbox**: written by the "CT - Mailbox" flow. `Title` (subject), `FromAddress`, `ToAddresses`, `CcAddresses`, `Received`, `Preview`, `FilePath` (.eml saved in Documents/CT Mailbox), `Processed`, `Facility`.
 - **CT Numbers**: 1 row per facility; the item ID is the facility's CT number.
 
@@ -27,6 +27,9 @@ Never rename these lists or columns: the flows use them.
 - Saving merges top-level fields with the latest saved version (see `mergeChanged`), so 2 people editing the same facility don't overwrite each other.
 - Failures must show (banner, Failed email status). Never fail silently.
 - Changing a list/column the flows read means Raizy has to change the flow too: tell her exactly what to click.
+
+## Email 3 "Done"
+Email 3 asks the wound rep + regional to reply with one word, "Done". `processInbox` spots it (`isDoneReply` on the reply's own text, subject has the facility name + "transfer from gns chicago", sender isn't the mailbox or GNS Chicago) and sets `f.e3Done`. Until then `chaseEmail3` queues 1 step at a time: follow-up at +3 business days, another at +3, then an alert to the AM. Cancelled the moment Done comes in. Manual: "Email 3 is taken care of" on the facility page. Completion waits on `e3Done`. Follow-ups (E15, E16F, E16A, E17) go out as High importance.
 
 ## Cache
 `index.html` loads the css/js with `?v=N`. Bump N on every push that changes css or js, or people keep the old version for up to 10 minutes.

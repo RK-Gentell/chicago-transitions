@@ -218,6 +218,8 @@ function emailHtml(body, m) {
    key  must be unique and the same every time the same email would be made, so it is never sent twice.
    day  YYYY-MM-DD to send later (8 am Eastern). Leave out to send now.
    cond when to cancel a later email (see mailStillValid). */
+// follow-ups go out as high importance; everything else normal (the "CT - Send emails" flow reads the Importance column)
+const HIGH_CODES = new Set(['E15', 'E16F', 'E16A', 'E17']);
 function mail(m) {
   if (st.mails.some(x => x.key === m.key)) return null;
   const clean = a => [...new Set((a || []).filter(Boolean).map(lc))];
@@ -230,7 +232,7 @@ function mail(m) {
   const rec = {
     key: m.key, code: m.code, to, cc, subject, body: emailHtml(m.body, m), fac: m.fac || null, task: m.task || null, day,
     sendOn: day > st.today ? day + 'T12:00:00Z' : new Date(Date.now() - 60000).toISOString(),
-    status: 'Queued', cond: m.cond || null, by: st.me ? st.me.email : ''
+    status: 'Queued', cond: m.cond || null, by: st.me ? st.me.email : '', importance: m.importance || (HIGH_CODES.has(m.code) ? 'High' : 'Normal')
   };
   if (!to.length) { rec.status = 'Failed'; rec.error = 'Nobody to send it to' + (bad.length ? ' (bad address: ' + bad.join(', ') + ')' : '') + '. Fix the address on this email in the Outbox and click "Send it again".'; }
   else if (bad.length) rec.error = 'Skipped (no valid email): ' + bad.join(', ');
@@ -262,6 +264,7 @@ function mailStillValid(m) {
     const f = facById(c.fac); if (!f || f.hold || f.complete || f.deleted) return false;
     if (c.untilEmail1 && f.email1) return false;
     if (c.untilEmail2 && f.email2) return false;
+    if (c.untilE3Done && f.e3Done) return false;
     if (c.ord && (!f.dates || f.dates.ord !== c.ord)) return false;
   }
   return true;
@@ -350,23 +353,49 @@ function sendEmail1(f, correction) {
   mail({ key: 'm:E15:' + f.id, code: 'E15', to: s.e1To, cc: [am], fac: f.id, noTag: true, link: 'none', day: addBiz(st.today, 3), cond: { fac: f.id, untilEmail2: true }, subject: 'RE: ' + subj, body: `<p>Hi ${esc(s.chicagoGreeting)},</p><p>Checking in, has the facility email for <b>${esc(facName(f))}</b> gone out? Please CC ${esc(CFG.mailbox)} on it.</p><p>Thank you!<br>${esc(nameOf(am))}</p>` });
   newTask('CHICAGO_FOLLOW', { fac: f.id, assignee: am, amTask: true, opensOn: addBiz(st.today, 5) });
 }
-function sendEmail3(f) {
+// Email 3 goes to the wound rep and regional. They reply with one word, "Done", when it's all taken care of.
+// No "Done" yet: follow-ups go out 3 and 6 business days later, then the AM gets told (see chaseEmail3).
+const E3_SUBJECT = f => facName(f) + '- Transfer from GNS Chicago to Lakewood';
+const e3Names = f => [...new Set([f.wound && f.wound.name, f.regional && f.regional.name].filter(Boolean).map(n => String(n).split(' ')[0]))];
+const e3Hi = f => '<p>Hi ' + esc(e3Names(f).join(' and ')) + ',</p>';
+const E3_DONE_ASK = '<p><b>Once everything is taken care of (the in-service is booked and you\'ve sent us the contacts or confirmed the ones above), please reply to this email with one word: "Done".</b> That\'s how we know it\'s all set.</p>';
+function email3Body(f) {
   const g = FG(f), d = f.dates, am = amOf(f), areas = covKnown(g) ? areasPhrase(g)[0] : '';
-  const first = n => String(n || '').split(' ')[0];
-  f.email3 = st.today;
-  mail({
-    key: 'm:E16:' + f.id, code: 'E16', to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [f.rep, roleEmail('rules'), am], fac: f.id, noTag: true, link: 'none',
-    subject: facName(f) + '- Transfer from GNS Chicago to Lakewood',
-    body: `<p>Hi ${esc(first(f.wound && f.wound.name))} and ${esc(first(f.regional && f.regional.name))},</p>
+  return `${e3Hi(f)}
 <p>I hope all is well!</p>
 <p>I would like to update you that <b>${esc(facName(f))}</b> from the <b>${esc(f.group)}</b> group is transitioning to the Lakewood branch${areas ? ' for <b>' + areas + '</b>' : ''}${d ? ', and is scheduled to have their first order with Lakewood placed on <b>' + fmtS(d.dos) + '</b> for <b>' + fmtS(d.del) + '</b> delivery' : ''}. It would be very helpful for us and the facility if the facility can schedule an in-service prior to their first scheduled order, so they can be aware of the updated ordering process and how to obtain supplies in between monthly orders if needed. Would you be able to be in touch with the facility to ensure they book an in-service? We typically want the admin, DON and central supply on the in-service call, so they can all be on the same page. Anyone else in the facility that is usually involved in the ordering and documentation is welcome to join as well.${st.settings.inserviceUrl ? ' Here is the link for them to book it: <a href="' + esc(st.settings.inserviceUrl) + '">Schedule an In-Service Call with GNS Lakewood</a>.' : ''}</p>
 <p>In addition, can you assist us with obtaining the following contact information?</p>
 <ul><li>Name and email of a medical provider that can sign forms via our e-sign platform, PandaDoc, so we can bill patients supplies to insurance (this can be a medical director, NP or PA).</li><li>Name and email of the speech therapist or director of rehab</li><li>Name and email of the dietician</li></ul>
 <p>The following are the contacts we have on file. Can you please review and advise if there are any discrepancies with the names or email addresses of these contacts?</p>
 <table border="1" cellpadding="4" style="border-collapse:collapse"><tr><th>First Name</th><th>Last Name</th><th>Department</th><th>Email</th></tr>${f.contacts.map(c => `<tr><td>${esc(c.first)}</td><td>${esc(c.last)}</td><td>${esc(c.dept === 'Other' && c.note ? c.note : c.dept)}</td><td>${esc(c.email)}</td></tr>`).join('') || '<tr><td colspan="4">None yet</td></tr>'}</table>
-<p>Thank you for your help!<br>${esc(nameOf(am))}</p>`
-  });
-  newTask('EMAIL3_FOLLOW', { fac: f.id, assignee: am, amTask: true, opensOn: addBiz(st.today, 5) });
+${E3_DONE_ASK}
+<p>Thank you for your help!<br>${esc(nameOf(am))}</p>`;
+}
+function sendEmail3(f) {
+  f.email3 = st.today;
+  mail({ key: 'm:E16:' + f.id, code: 'E16', to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [f.rep, roleEmail('rules'), amOf(f)], fac: f.id, noTag: true, link: 'none', subject: E3_SUBJECT(f), body: email3Body(f) });
+}
+// One step at a time: only the next follow-up is ever queued, and it's cancelled the moment "Done" comes in.
+function chaseEmail3(f) {
+  if (!f.email3 || f.e3Done) return;
+  const mine = st.mails.filter(m => m.fac === f.id && m.key.startsWith('m:E3F:'));
+  if (mine.some(m => m.status === 'Queued')) return;
+  const used = mine.filter(m => m.status !== 'Cancelled');
+  const step = used.length + 1; if (step > 3) return;
+  const last = used.map(m => m.day).sort().pop() || f.email3;
+  const day = addBiz(last, 3), key = 'm:E3F:' + f.id + ':' + step + ':' + mine.length, am = amOf(f), cond = { fac: f.id, untilE3Done: true };
+  if (step < 3) mail({ key, code: 'E16F', day, cond, to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [am], fac: f.id, noTag: true, link: 'none', subject: 'RE: ' + E3_SUBJECT(f),
+    body: `${e3Hi(f)}<p>${step === 1 ? 'Just following up on my email below' : 'Following up again on my email below'} about <b>${esc(facName(f))}</b>. Once the in-service is booked and you've sent us the contacts (or confirmed the ones we have), please reply to this email with one word: <b>"Done"</b>.</p><p>Thank you!<br>${esc(nameOf(am))}</p><hr>${email3Body(f)}` });
+  else mail({ key, code: 'E16A', day, cond, to: [am], fac: f.id, link: 'fac', subject: 'No "Done" yet on Email 3: ' + facName(f),
+    body: `<p>${esc(e3Names(f).join(' and ') || 'The wound rep and regional')} didn't reply "Done" to Email 3, even after 2 follow-ups. Please reach out to them.</p>` + note('When it\'s taken care of, click "Email 3 is taken care of" on the facility page. The facility can\'t be marked complete until then.') });
+}
+function markE3Done(f, by, day) { if (f.e3Done) return; f.e3Done = day || st.today; f.e3DoneBy = by; }
+// a reply whose own text (above the quoted email) is just "Done"
+function isDoneReply(preview) {
+  let p = String(preview || ''); const cut = p.search(/(?:^|\s)(?:From:|-{2,}\s*Original Message|_{5,}|On [^\n]{0,150}? wrote:|Sent from my)/i);
+  if (cut >= 0) p = p.slice(0, cut);
+  p = p.replace(/\s+/g, ' ').trim();
+  return p.length > 0 && p.length <= 60 && /\bdone\b/i.test(p) && !/\bnot\b|n't\b|\?/i.test(p);
 }
 function addAmy(f) {
   const g = G(f), t = newTask('PORTAL_ADD', { fac: f.id, assignee: roleEmail('portal') });
@@ -409,6 +438,12 @@ function processInbox() {
     const mb = lc(CFG.mailbox), inTo = (m.to || []).map(lc).includes(mb), inCc = (m.cc || []).map(lc).includes(mb);
     const live = st.facs.filter(f => !f.archived);
     const match = f => ls.includes(lc(facName(f))) || ls.includes(lc(f.name));
+    // "Done" reply to Email 3 (or one of its follow-ups) from anyone but us or GNS Chicago
+    const chicago = [...(st.settings.e1To || []), ...(st.settings.e1Cc || [])].map(lc);
+    if (from !== mb && !chicago.includes(from) && ls.includes('transfer from gns chicago') && isDoneReply(m.preview)) {
+      const f = live.find(x => x.email3 && !x.e3Done && match(x));
+      if (f) { markE3Done(f, m.from, (m.received || '').slice(0, 10) || st.today); m.fac = f.id; m.isE3Done = true; return; }
+    }
     if (from !== mb && inCc && !inTo && ls.includes('transfer from gns chicago')) {
       const f = live.find(x => x.email1 && !x.email2 && match(x));
       if (f) { f.email2 = (m.received || '').slice(0, 10) || st.today; f.email2By = m.from + ' (seen in the mailbox)'; m.fac = f.id; m.isEmail2 = true; return; }
@@ -513,6 +548,11 @@ function run() {
     }
     // Email 3 to the wound rep + regional: as soon as the FastCare task is done
     if (!f.email3 && done(fTask(f, 'FASTCARE')) && f.wound && f.regional) sendEmail3(f);
+    // older facilities had an "Email 3 follow-up" task: carry over its answer, close it if still open
+    const e3t = fTask(f, 'EMAIL3_FOLLOW');
+    if (e3t && e3t.status === 'Done') markE3Done(f, e3t.doneBy, e3t.doneOn);
+    if (e3t && !done(e3t)) { e3t.status = 'Not needed'; e3t.doneOn = st.today; }
+    chaseEmail3(f);
     // after Email 2: the follow-up on Chicago isn't needed
     if (f.email2) { const cf = fTask(f, 'CHICAGO_FOLLOW'); if (cf && !done(cf)) { cf.status = 'Not needed'; cf.doneOn = st.today; } }
     // at risk: ordering date within 3 business days and Email 1 not out
@@ -521,7 +561,7 @@ function run() {
       mail({ key: 'm:risk:' + f.id + ':' + f.dates.ord, code: 'E18', to: [am], fac: f.id, link: 'fac', day: day > st.today ? day : st.today, cond: { fac: f.id, untilEmail1: true, ord: f.dates.ord }, subject: 'At risk: ' + facName(f) + ' orders ' + fmt(f.dates.ord) + ' and Chicago hasn\'t been emailed', body: '<p>Finish the open tasks so Email 1 can go out.</p>' });
     }
     // complete
-    if (f.email2 && done(fTask(f, 'GDD')) && (!f.email3 || done(fTask(f, 'EMAIL3_FOLLOW')))) {
+    if (f.email2 && done(fTask(f, 'GDD')) && (!f.email3 || f.e3Done)) {
       f.complete = st.today;
       tasksOf(f).forEach(t => { if (!done(t) && ['CHICAGO_FOLLOW'].includes(t.type)) t.status = 'Not needed'; });
       mail({ key: 'm:E24:' + f.id, code: 'E24', to: [am, f.requester], fac: f.id, link: 'fac', subject: 'Transition complete: ' + facName(f), body: `<p><b>${esc(facName(f))}</b> is done. First DOS ${fmt(f.dates.dos)}, ordering ${fmt(f.dates.ord)}, delivery ${fmt(f.dates.del)}. Intake rep: ${esc(nameOf(f.rep))}.</p>` });
