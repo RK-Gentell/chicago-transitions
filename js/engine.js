@@ -513,14 +513,14 @@ function run() {
     // dates (frozen once Email 1 went out)
     { const d = calcDates(f); if (d && !f.email1) { f.rec = d; f.dates = f.dosChosen ? Object.assign(derive(f, f.dosChosen), { why: [...d.why, 'Changed by ' + (f.dosBy || 'someone') + ' from the recommended ' + fmtS(d.dos)], changed: true }) : d; } }
     // Amy adds it to the portal once the price table is in
-    if (g.price && f.address && !fTask(f, 'PORTAL_ADD')) addAmy(f);
+    if (g.price && f.address && !fTask(f, 'PORTAL_ADD') && !f.inPortal) addAmy(f);
     // existing EMR login: ask corporate to add this facility
     const main = mainCorp(g);
     if (g.emr && !g.emrNew && !fTask(f, 'EMR_ADD')) {
       const t = newTask('EMR_ADD', { fac: f.id, assignee: am, amTask: true });
       if (main) mail({ key: 'm:E7b:' + t.key, code: 'E7b', to: [main.email], cc: [am], fac: f.id, link: 'none', subject: 'Add ' + f.name + ' to your EMR login', body: `<p>Hi ${esc(main.first)},</p><p>Can you add <b>${esc(f.name)}</b> to the existing EMR login <b>${esc(g.emr)}</b>? Thank you!<br>${esc(nameOf(am))}</p>` });
     }
-    if (f.inPortal && !fTask(f, 'PUMPS')) {
+    if (f.inPortal && !fTask(f, 'PUMPS') && !f.pumps) {
       const tp = newTask('PUMPS', { fac: f.id, assignee: roleEmail('pumps') });
       queue('E9', tp.assignee, f, tp, (fs, ts) => fs.length === 1
         ? { code: 'E9', to: [ts[0].assignee], fac: fs[0].id, task: ts[0].key, buttons: ['Checked'], cond: { task: ts[0].key }, subject: 'Pumps: ' + facName(fs[0]), body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p><b>${esc(facName(fs[0]))}</b> (${esc(fs[0].group)}) is in the portal now. Please check if GNS Chicago sent it pumps and add any to "Pump Tracking". Click "Checked" when you're done.</p>` }
