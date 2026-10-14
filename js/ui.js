@@ -190,7 +190,7 @@ function inboxHtml() {
 }
 const mailPill = m => m.status === 'Sent' ? '<span class="pill p-sent">Sent</span>' : m.status === 'Failed' ? '<span class="pill p-hold">Failed</span>' : m.status === 'Cancelled' ? '<span class="pill p-req">Cancelled</span>' : m.day > st.today ? '<span class="pill p-chi">Scheduled</span>' : '<span class="pill p-setup">Sending</span>';
 // emails show the contacts screenshot as an attachment (cid:); in the app, point it at the file instead
-const shotSrc = x => { const f = x.fac && facById(x.fac); return (f && f.contactsShot && f.contactsShot.name === x.attachName && f.contactsShot.data) || STORE.fileUrl(x.attachPath); };
+const shotSrc = x => { const f = x.fac && facById(x.fac); return (x.code === 'TEST' && ui.testData) || (f && f.contactsShot && f.contactsShot.name === x.attachName && f.contactsShot.data) || STORE.fileUrl(x.attachPath); };
 const mailBody = x => x.attachName ? x.body.split('cid:' + x.attachName).join(esc(shotSrc(x))) : x.body;
 function mailHtml(x, admin) {
   return `<details class="mail"><summary><span class="code">${esc(x.code)}</span><span class="subj">${esc(x.subject)}</span><span class="meta num">${x.importance === 'High' ? '<span class="pill p-hold">High</span> ' : ''}${mailPill(x)} ${fmtS(x.day)}</span></summary><div class="hdr"><span>To</span><span>${esc(x.to.join('; '))}</span>${x.cc.length ? `<span>CC</span><span>${esc(x.cc.join('; '))}</span>` : ''}${x.error ? `<span>Note</span><span class="err">${esc(x.error)}</span>` : ''}</div><div class="mailbody">${mailBody(x)}</div>${admin && (x.status === 'Failed' || x.status === 'Cancelled') ? `<div class="mailbtns" style="flex-direction:column;align-items:stretch"><div class="row">${fld('To (fix it here if it\'s wrong; separate with ;)', `<input type="text" data-rto="${esc(x.key)}" value="${esc(x.to.join('; '))}">`)}${fld('CC', `<input type="text" data-rcc="${esc(x.key)}" value="${esc(x.cc.join('; '))}">`)}</div><div><button class="btn sm pri" data-retry="${esc(x.key)}">Send it again</button></div></div>` : ''}${admin && x.status === 'Queued' ? `<div class="mailbtns"><button class="btn sm" data-cancelmail="${esc(x.key)}">Don't send</button></div>` : ''}</details>`;
@@ -304,7 +304,11 @@ function settingsHtml() {
   <div class="card"><b>GDD warehouses</b>${tip('1 per line. Chris picks from these.')}<textarea id="s_wh" class="plain" style="min-height:150px">${esc(s.warehouses.join('\n'))}</textarea></div>
   <div class="card"><b>Portal contact departments</b>${tip('1 per line: Name | Facility or Corporate')}<textarea id="s_depts" class="plain" style="min-height:150px">${esc(s.depts.map(d => d.name + ' | ' + d.type).join('\n'))}</textarea></div>
   <div class="card"><b>Ship points</b>${tip('1 per line: number: state codes')}<div class="row">${fld('Enteral / uro (the "Ship Point" field)', `<textarea id="s_shipent" class="plain">${esc(Object.entries(s.shipEnt).map(([k, v]) => k + ': ' + v).join('\n'))}</textarea>`)}${fld('"Ship Point- United Ostomy, Fordmed"', `<textarea id="s_shipost" class="plain">${esc(Object.entries(s.shipOst).map(([k, v]) => k + ': ' + v).join('\n'))}</textarea>`)}</div></div>
-  <div id="set_err"></div><div><button class="btn pri" type="submit">Save settings</button></div></form>`;
+  <div id="set_err"></div><div><button class="btn pri" type="submit">Save settings</button></div></form>
+  <div class="card" style="margin-top:14px;max-width:900px"><b>Test the in-service & contacts screenshot</b>${tip('Sends a test email only to you, through the real "CT - Send emails" flow, so you can check the screenshot shows up properly in Outlook. Nothing in any transition changes.')}
+    <p class="meta" style="margin:6px 0 8px">Paste any screenshot, then click "Send me a test". You get the contacts part of the email, exactly as the wound rep and regional would see it.</p>
+    <div class="drop shot" id="test_shot" tabindex="0">${testShotInner()}</div>
+    <div style="margin-top:8px"><button type="button" class="btn pri" id="sendtest">Send me a test</button></div></div>`;
 }
 function readSettingsForm() {
   const rows = [...document.querySelectorAll('.team tr[data-pi]')].map(r => ({ name: r.querySelector('.p-name').value.trim(), email: lc(r.querySelector('.p-email').value), am: r.querySelector('.p-am').checked, rep: r.querySelector('.p-rep').checked, ext: r.querySelector('.p-ext').value.trim(), admin: r.querySelector('.p-admin').checked })).filter(p => p.name || p.email);
@@ -585,16 +589,32 @@ document.addEventListener('mouseover', e => { const w = e.target.closest && e.ta
 document.addEventListener('focusin', e => { const w = e.target.closest && e.target.closest('.infow'); if (w) placeTip(w); });
 
 // ---------- FastCare screenshot: paste or pick, shrink to a reasonable JPEG, preview ----------
+const testShotInner = () => ui.testShot ? `<img src="${ui.testShot.url}" alt="Test screenshot"><div><button type="button" class="btn sm" id="test_shotx">Remove</button></div>` : '<b>Click here and press Ctrl+V</b> to paste a screenshot, or <label class="linkish" for="test_shotfile">choose an image</label><input type="file" id="test_shotfile" accept="image/*" hidden>';
 async function takeShot(file) {
-  const t = ui.openTask && taskByKey(ui.openTask); if (!t || t.type !== 'FASTCARE' || !file || !/^image\//.test(file.type)) return;
+  if (!file || !/^image\//.test(file.type)) return;
+  const t = ui.openTask && taskByKey(ui.openTask), forTest = (!t || t.type !== 'FASTCARE') && document.getElementById('test_shot');
+  if (!forTest && (!t || t.type !== 'FASTCARE')) return;
   const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
   const w = Math.min(1400, img.naturalWidth), h = Math.round(img.naturalHeight * w / img.naturalWidth), c = document.createElement('canvas'); c.width = w; c.height = h;
   const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); x.drawImage(img, 0, 0, w, h);
   const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
+  if (forTest) { ui.testShot = { blob, url: URL.createObjectURL(blob) }; document.getElementById('test_shot').innerHTML = testShotInner(); return; }
   ui.shot = { task: t.key, blob, url: URL.createObjectURL(blob) };
   const z = document.getElementById('fc_shot'); if (z) z.outerHTML = shotZone(t);
   const n = document.getElementById('fc_nocts'); if (n) n.checked = false;
 }
-document.addEventListener('paste', e => { const it = [...((e.clipboardData && e.clipboardData.items) || [])].find(i => i.type.startsWith('image/')); if (it && document.getElementById('fc_shot')) { e.preventDefault(); takeShot(it.getAsFile()); } });
-document.addEventListener('change', e => { if (e.target.id === 'fc_shotfile') takeShot(e.target.files[0]); });
-document.addEventListener('click', e => { if (e.target.id === 'fc_shotx') { const t = taskByKey(ui.openTask); ui.shot = null; const z = document.getElementById('fc_shot'); if (z && t) z.outerHTML = shotZone(t); } });
+document.addEventListener('paste', e => { const it = [...((e.clipboardData && e.clipboardData.items) || [])].find(i => i.type.startsWith('image/')); if (it && (document.getElementById('fc_shot') || document.getElementById('test_shot'))) { e.preventDefault(); takeShot(it.getAsFile()); } });
+document.addEventListener('change', e => { if (e.target.id === 'fc_shotfile' || e.target.id === 'test_shotfile') takeShot(e.target.files[0]); });
+document.addEventListener('click', async e => {
+  if (e.target.id === 'test_shotx') { ui.testShot = null; document.getElementById('test_shot').innerHTML = testShotInner(); return; }
+  if (e.target.id === 'sendtest') {
+    if (!ui.testShot) { toast('Paste a screenshot first.'); return; }
+    e.target.disabled = true; let r;
+    try { r = await STORE.uploadFile('TEST', new File([ui.testShot.blob], 'test-contacts.jpg', { type: 'image/jpeg' })); }
+    catch (err) { e.target.disabled = false; toast('The screenshot didn\'t upload: ' + (err.message || err)); return; }
+    const fake = { id: 0, name: 'Test Facility', group: '', contacts: [{ first: 'Sample', last: 'Contact', dept: 'Administrator', email: 'sample.contact@example.com' }], contactsShot: { name: 'test-contacts.jpg', path: r.path, data: r.data || '' } };
+    const ok = await act(() => { mail({ key: 'm:TEST:' + uid(), code: 'TEST', to: [me()], link: 'none', subject: 'TEST: in-service & contacts screenshot', body: '<p>This is a test. Below is the contacts part of the in-service & contacts request, the way the wound rep and regional see it. If the screenshot shows here, it works.</p><hr>' + e3Contacts(fake), attachPath: r.path, attachName: 'test-contacts.jpg' }); }, 'Test queued. It goes to you within about 5 minutes.');
+    if (ok) { ui.testShot = null; ui.testData = r.data || ''; }
+    return;
+  }
+  if (e.target.id === 'fc_shotx') { const t = taskByKey(ui.openTask); ui.shot = null; const z = document.getElementById('fc_shot'); if (z && t) z.outerHTML = shotZone(t); } });
