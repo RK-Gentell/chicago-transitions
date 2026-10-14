@@ -49,9 +49,13 @@ function ceErr(id) {
   return '';
 }
 function setContacts(id, rows) { const box = document.getElementById(id); if (!box) return; box.innerHTML = rows.map(r => ceRow(box.dataset.kind, !!box.dataset.withfac, r)).join(''); }
-// the FastCare task's screenshot box: paste (Ctrl+V) or pick an image. Kept in ui.shot until "Mark done" uploads it.
-const shotFor = t => (typeof ui !== 'undefined' && ui.shot && ui.shot.task === t.key) ? ui.shot : null;
-const shotZone = t => { const s = shotFor(t); return `<div class="drop shot" id="fc_shot" tabindex="0">${s ? `<img src="${s.url}" alt="Contacts screenshot"><div><button type="button" class="btn sm" id="fc_shotx">Remove</button></div>` : '<b>Click here and press Ctrl+V</b> to paste a screenshot, or <label class="linkish" for="fc_shotfile">choose an image</label>'}<input type="file" id="fc_shotfile" accept="image/*" hidden></div>`; };
+// screenshot boxes (FastCare task: facility + corporate contacts; Settings test). Paste (Ctrl+V) or pick an image.
+// Kept in ui.shots until "Mark done" / "Send me a test" uploads them. which = 'fac' | 'corp'.
+const shotFor = (t, which) => { const s = typeof ui !== 'undefined' && ui.shots && ui.shots['fc_' + which]; return s && s.task === t.key ? s : null; };
+function shotZone(ctx, which, s) {
+  const id = 'shot_' + ctx + '_' + which;
+  return `<div class="drop shot" id="${id}" data-shot="${ctx}_${which}" tabindex="0">${s ? `<img src="${s.url}" alt="Screenshot"><div><button type="button" class="btn sm" data-shotx="${ctx}_${which}">Remove</button></div>` : `<b>Click here and press Ctrl+V</b> to paste a screenshot, or <label class="linkish" for="${id}_file">choose an image</label>`}<input type="file" id="${id}_file" data-shotfile="${ctx}_${which}" accept="image/*" hidden></div>`;
+}
 const contactTable = list => `<div class="tablewrap"><table><tr><th>First</th><th>Last</th><th>Department</th><th>Email</th><th>From</th></tr>${list.map(c => `<tr><td>${esc(c.first) || '<span class="meta">no first name</span>'}</td><td>${esc(c.last)}</td><td>${esc(c.dept)}${c.note ? ' → "Note": ' + esc(c.note) : ''}</td><td>${esc(c.email)}</td><td>${esc(c.src)}</td></tr>`).join('')}</table></div>`;
 
 // ---------- the task types ----------
@@ -139,7 +143,8 @@ const TT = {
       ${n.corp ? `<div class="row">${fld('Corporate', sel('fc_grp', corpOpts, '', true))}<div class="field" id="fc_newbox" hidden><label>New corporate name</label>${txt('fc_new', '')}</div></div>` : ''}
       ${n.addr ? fld('Address', txt('fc_addr', '', '123 Main St, City, ST 12345'), 'State comes from the 2 letters before the zip.') : ''}
       <div class="row">${fld('Wound and Product Specialist', personPick('w', f.wound), 'Pick from the list; it fills their Gentell email.')}${fld('Regional Manager', personPick('r', f.regional))}</div>
-      <div class="field"><label>Contacts${tip('Put the FastCare contacts straight into the portal, then paste a screenshot of them here. It goes into the in-service & contacts request so the wound rep and regional can check them.')}</label>${shotZone(t)}</div>
+      <div class="sect">Contacts${tip('Put the FastCare contacts straight into the portal, then paste a screenshot of them here: facility contacts, corporate contacts, or both. They go into the in-service & contacts request so the wound rep and regional can check them.')}</div>
+      <div class="row"><div class="field"><label>Facility contacts</label>${shotZone('fc', 'fac', shotFor(t, 'fac'))}</div><div class="field"><label>Corporate contacts</label>${shotZone('fc', 'corp', shotFor(t, 'corp'))}</div></div>
       ${chk('fc_nocts', 'No FastCare contacts available')}
       ${e3List(f).length ? `<div class="note">These also go in the email (added on the request, facility page or corporate): ${e3List(f).map(c => esc((c.first + ' ' + c.last).trim() || c.email)).join(', ')}</div>` : ''}`;
     },
@@ -151,7 +156,7 @@ const TT = {
       if (n.addr && addressProblem(V('fc_addr'))) return addressProblem(V('fc_addr'));
       if (!readPerson('w')) return 'Pick the wound rep from the list (start typing their name).';
       if (!readPerson('r')) return 'Pick the regional from the list (start typing their name).';
-      if (!shotFor(t) && !V('fc_nocts')) return 'Paste a screenshot of the contacts, or tick "No FastCare contacts available".';
+      if (!shotFor(t, 'fac') && !shotFor(t, 'corp') && !V('fc_nocts')) return 'Paste a screenshot of the facility or corporate contacts (or both), or tick "No FastCare contacts available".';
       return '';
     },
     done: t => {
@@ -162,7 +167,8 @@ const TT = {
         if (v === 'No corporate (Independent HQ)') makeStandalone(f);
         else { const g = ensureGroup(v === 'New corporate…' ? V('fc_new') : v); f.group = g.name; if (f.pendingCov) g.cov = Object.assign({}, f.pendingCov, g.cov || {}); }
       }
-      f.contactsShot = (shotFor(t) && ui.shotSaved) || null; f.noFcContacts = !f.contactsShot && !!V('fc_nocts');
+      const sv = (typeof ui !== 'undefined' && ui.shotSaved) || {};
+      f.contactsShot = sv.fac || null; f.corpShot = sv.corp || null; f.noFcContacts = !f.contactsShot && !f.corpShot && !!V('fc_nocts');
       f.wound = readPerson('w'); f.regional = readPerson('r');
     }
   },

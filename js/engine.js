@@ -274,7 +274,7 @@ function mail(m) {
   const rec = {
     key: m.key, code: m.code, to, cc, subject, body: emailHtml(m.body, m), fac: m.fac || null, task: m.task || null, day,
     sendOn: day > st.today ? day + 'T12:00:00Z' : new Date(Date.now() - 60000).toISOString(),
-    status: 'Queued', cond: m.cond || null, by: st.me ? st.me.email : '', attachPath: m.attachPath || '', attachName: m.attachName || '', importance: m.importance || (HIGH_CODES.has(m.code) ? 'High' : 'Normal')
+    status: 'Queued', cond: m.cond || null, by: st.me ? st.me.email : '', attachPath: m.attachPath || '', attachName: m.attachName || '', attachPath2: m.attachPath2 || '', attachName2: m.attachName2 || '', importance: m.importance || (HIGH_CODES.has(m.code) ? 'High' : 'Normal')
   };
   if (!to.length) { rec.status = 'Failed'; rec.error = 'Nobody to send it to' + (bad.length ? ' (bad address: ' + bad.join(', ') + ')' : '') + '. Fix the address on this email in the Outbox and click "Send it again".'; }
   else if (bad.length) rec.error = 'Skipped (no valid email): ' + bad.join(', ');
@@ -404,20 +404,19 @@ const e3Hi = f => '<p>Hi ' + esc(e3Names(f).join(' and ')) + ',</p>';
 // contacts part of the in-service & contacts request: the screenshot from the FastCare task and/or the contacts typed into the app
 // (request, facility page, corporate). Nothing at all → ask for them instead of asking them to review.
 const e3List = f => { const seen = new Set(); return [...(f.contacts || []), ...((f.group && G(f).contacts) || [])].filter(c => { const k = lc(c.email || (c.first + ' ' + c.last)); if (!k.trim() || seen.has(k)) return false; seen.add(k); return true; }); };
-const e3Shot = f => f.contactsShot && f.contactsShot.name ? f.contactsShot : null;
+// up to 2 screenshots from the FastCare task: facility contacts and corporate contacts
+const e3Shots = f => [['Facility contacts', f.contactsShot], ['Corporate contacts', f.corpShot]].filter(([, s]) => s && s.name);
 function contactsTableHtml(list) {
   return `<table border="1" cellpadding="4" style="border-collapse:collapse"><tr><th>First Name</th><th>Last Name</th><th>Department</th><th>Email</th></tr>${list.map(c => `<tr><td>${esc(c.first)}</td><td>${esc(c.last)}</td><td>${esc(c.dept === 'Other' && c.note ? c.note : c.dept)}</td><td>${esc(c.email)}</td></tr>`).join('')}</table>`;
 }
 function e3Contacts(f) {
-  const shot = e3Shot(f), list = e3List(f);
-  const img = shot ? `<p><img src="cid:${esc(shot.name)}" alt="Contacts on file for ${esc(facName(f))}" style="max-width:100%;width:700px;border:1px solid #cccccc"></p>` : '';
+  const shots = e3Shots(f), list = e3List(f);
   const ask = 'Can you please review and advise if there are any discrepancies with the names or email addresses of these contacts?';
-  if (shot && list.length) return `<p>The following are the contacts we have on file. ${ask}</p><p><b>From the portal:</b></p>${img}<p><b>And these, which we got separately:</b></p>${contactsTableHtml(list)}`;
-  if (shot) return `<p>The following are the contacts we have on file. ${ask}</p>${img}`;
-  if (list.length) return `<p>The following are the contacts we have on file. ${ask}</p>${contactsTableHtml(list)}`;
-  return '<p>We don\'t have any facility contacts on file yet. Can you please also send us the names and email addresses of the administrator, DON, central supply and anyone else involved in ordering?</p>';
+  if (!shots.length && !list.length) return '<p>We don\'t have any facility contacts on file yet. Can you please also send us the names and email addresses of the administrator, DON, central supply and anyone else involved in ordering?</p>';
+  const imgs = shots.map(([label, s]) => `<p><b>${label} (from the portal):</b></p><p><img src="cid:${esc(s.name)}" alt="${label} on file for ${esc(facName(f))}" style="max-width:100%;width:700px;border:1px solid #cccccc"></p>`).join('');
+  return `<p>The following are the contacts we have on file. ${ask}</p>${imgs}${list.length ? (shots.length ? '<p><b>And these, which we got separately:</b></p>' : '') + contactsTableHtml(list) : ''}`;
 }
-const e3Attach = f => { const s = e3Shot(f); return s ? { attachPath: s.path, attachName: s.name } : {}; };
+const e3Attach = f => { const [a, b] = e3Shots(f).map(x => x[1]); return Object.assign({}, a ? { attachPath: a.path, attachName: a.name } : {}, b ? { attachPath2: b.path, attachName2: b.name } : {}); };
 function email3Body(f) {
   const g = FG(f), d = f.dates, am = amOf(f), areas = covKnown(g) ? areasPhrase(g)[0] : '';
   return `${e3Hi(f)}

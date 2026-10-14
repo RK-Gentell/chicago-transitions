@@ -17,7 +17,7 @@
 
 const LISTS = {
   data: { name: 'CT Data', cols: [['Key', 'text', 1, 1], ['Kind', 'text', 1], ['Data', 'note'], ['Ct', 'text', 1], ['Am', 'text'], ['Archived', 'text', 1]] },
-  outbox: { name: 'CT Outbox', cols: [['Key', 'text', 1, 1], ['Code', 'text'], ['ToList', 'note'], ['CcList', 'note'], ['Subject', 'text'], ['HtmlBody', 'note'], ['SendOn', 'date', 1], ['SendStatus', 'text', 1], ['Facility', 'text', 1], ['TaskKey', 'text'], ['Cond', 'note'], ['ErrorText', 'note'], ['Importance', 'text'], ['AttachPath', 'note'], ['AttachName', 'text']] },
+  outbox: { name: 'CT Outbox', cols: [['Key', 'text', 1, 1], ['Code', 'text'], ['ToList', 'note'], ['CcList', 'note'], ['Subject', 'text'], ['HtmlBody', 'note'], ['SendOn', 'date', 1], ['SendStatus', 'text', 1], ['Facility', 'text', 1], ['TaskKey', 'text'], ['Cond', 'note'], ['ErrorText', 'note'], ['Importance', 'text'], ['AttachPath', 'note'], ['AttachName', 'text'], ['AttachPath2', 'note'], ['AttachName2', 'text']] },
   inbox: { name: 'CT Inbox', cols: [['FromAddress', 'text'], ['ToAddresses', 'note'], ['CcAddresses', 'note'], ['Received', 'date', 1], ['Preview', 'note'], ['FilePath', 'note'], ['Processed', 'text'], ['Facility', 'text']] },
   numbers: { name: 'CT Numbers', cols: [] }
 };
@@ -35,8 +35,8 @@ function dataRecords() {
 }
 let hasImportance = false; // the Importance column was added later; old lists get it on first sign-in
 let hasAttach = false;     // same for AttachPath / AttachName (the contacts screenshot in the in-service & contacts request)
-const mailCols = m => Object.assign({ Title: m.key.slice(0, 250), Key: m.key, Code: m.code, ToList: m.to.join(';'), CcList: m.cc.join(';'), Subject: m.subject.slice(0, 250), HtmlBody: m.body, SendOn: m.sendOn, SendStatus: m.status, Facility: m.fac ? String(m.fac) : '', TaskKey: m.task || '', Cond: m.cond ? JSON.stringify(m.cond) : '', ErrorText: m.error || '' }, hasImportance ? { Importance: m.importance || 'Normal' } : {}, hasAttach ? { AttachPath: m.attachPath || '', AttachName: m.attachName || '' } : {});
-const mailFrom = (id, f) => ({ _id: id, importance: f.Importance || 'Normal', attachPath: f.AttachPath || '', attachName: f.AttachName || '', key: f.Key, code: f.Code, to: (f.ToList || '').split(';').filter(Boolean), cc: (f.CcList || '').split(';').filter(Boolean), subject: f.Subject || '', body: f.HtmlBody || '', sendOn: f.SendOn, day: f.SendOn ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(f.SendOn)) : '', status: f.SendStatus, fac: f.Facility ? +f.Facility : null, task: f.TaskKey || null, cond: f.Cond ? JSON.parse(f.Cond) : null, error: f.ErrorText || '' });
+const mailCols = m => Object.assign({ Title: m.key.slice(0, 250), Key: m.key, Code: m.code, ToList: m.to.join(';'), CcList: m.cc.join(';'), Subject: m.subject.slice(0, 250), HtmlBody: m.body, SendOn: m.sendOn, SendStatus: m.status, Facility: m.fac ? String(m.fac) : '', TaskKey: m.task || '', Cond: m.cond ? JSON.stringify(m.cond) : '', ErrorText: m.error || '' }, hasImportance ? { Importance: m.importance || 'Normal' } : {}, hasAttach ? { AttachPath: m.attachPath || '', AttachName: m.attachName || '', AttachPath2: m.attachPath2 || '', AttachName2: m.attachName2 || '' } : {});
+const mailFrom = (id, f) => ({ _id: id, importance: f.Importance || 'Normal', attachPath: f.AttachPath || '', attachName: f.AttachName || '', attachPath2: f.AttachPath2 || '', attachName2: f.AttachName2 || '', key: f.Key, code: f.Code, to: (f.ToList || '').split(';').filter(Boolean), cc: (f.CcList || '').split(';').filter(Boolean), subject: f.Subject || '', body: f.HtmlBody || '', sendOn: f.SendOn, day: f.SendOn ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(f.SendOn)) : '', status: f.SendStatus, fac: f.Facility ? +f.Facility : null, task: f.TaskKey || null, cond: f.Cond ? JSON.parse(f.Cond) : null, error: f.ErrorText || '' });
 const inboxFrom = (id, f) => ({ _id: id, subject: f.Title || '', from: f.FromAddress || '', to: (f.ToAddresses || '').split(/[;,]/).map(s => s.trim()).filter(Boolean), cc: (f.CcAddresses || '').split(/[;,]/).map(s => s.trim()).filter(Boolean), received: f.Received || '', preview: f.Preview || '', path: f.FilePath || '', processed: f.Processed === 'Yes', fac: f.Facility ? +f.Facility : null });
 function emptyState(today, me) { return { today, me, settings: null, groups: {}, facs: [], tasks: [], reqs: [], mails: [], inbox: [], names: {} }; }
 function applyRecords(rows) {
@@ -182,13 +182,13 @@ function SPStore() {
       if (listIds.outbox) {
         // columns added after the first release: lists made before them get them here, on sign-in
         const cols = (await gfetch(listUrl('outbox') + '/columns?$select=name&$top=200')).value.map(c => c.name), missing = [];
-        for (const [name, type] of [['Importance', 'text'], ['AttachPath', 'note'], ['AttachName', 'text']]) {
+        for (const [name, type] of [['Importance', 'text'], ['AttachPath', 'note'], ['AttachName', 'text'], ['AttachPath2', 'note'], ['AttachName2', 'text']]) {
           if (cols.includes(name)) continue;
           try { await gfetch(listUrl('outbox') + '/columns', { method: 'POST', body: JSON.stringify(type === 'note' ? { name, text: { allowMultipleLines: true, textType: 'plain' } } : { name, text: {} }) }); cols.push(name); }
           catch (e) { console.error('Could not add the ' + name + ' column', e); missing.push(name); }
         }
-        hasImportance = cols.includes('Importance'); hasAttach = cols.includes('AttachPath') && cols.includes('AttachName');
-        if (missing.length) this.warning = 'Couldn\'t add the ' + missing.map(n => '"' + n + '"').join(', ') + ' column(s) to CT Outbox. Emails still go out, but ' + (missing.includes('Importance') ? 'all as normal importance' : '') + (missing.length > 1 && missing.includes('Importance') ? ' and ' : '') + (missing.some(n => n.startsWith('Attach')) ? 'without the contacts screenshot' : '') + '. Ask a site owner to open the app once.';
+        hasImportance = cols.includes('Importance'); hasAttach = ['AttachPath', 'AttachName', 'AttachPath2', 'AttachName2'].every(c => cols.includes(c));
+        if (missing.length) this.warning = 'Couldn\'t add the ' + missing.map(n => '"' + n + '"').join(', ') + ' column(s) to CT Outbox. Emails still go out, but ' + (missing.includes('Importance') ? 'all as normal importance' : '') + (missing.length > 1 && missing.includes('Importance') ? ' and ' : '') + (missing.some(n => n.startsWith('Attach')) ? 'without the contacts screenshots' : '') + '. Ask a site owner to open the app once.';
         // the "CT - Send emails" flow reads this file when an email has no screenshot (so its "Get file content" step never fails)
         if (hasAttach) { try { await gfetch('/sites/' + siteId + '/drive/root:/CT Request files/none.txt'); } catch (e) { if (e.status === 404) { try { await gfetch('/sites/' + siteId + '/drive/root:/CT Request files/none.txt:/content', { method: 'PUT', body: 'placeholder for the CT - Send emails flow', headers: { 'Content-Type': 'text/plain' } }); } catch (_) { } } } }
       }

@@ -5,7 +5,7 @@
    ===================================================================== */
 
 let STORE = null; // the store (demo or SharePoint)
-const ui = { view: 'mytasks', openTask: null, openFac: null, openGroup: null, answer: null, sel: new Set(), busy: false, errors: [], forWho: null, trackerFilter: 'active', q: '', outFilter: 'active', dropped: [] };
+const ui = { shots: {}, view: 'mytasks', openTask: null, openFac: null, openGroup: null, answer: null, sel: new Set(), busy: false, errors: [], forWho: null, trackerFilter: 'active', q: '', outFilter: 'active', dropped: [] };
 const $ = s => document.querySelector(s);
 const me = () => st.me.email;
 const meName = () => st.me.name;
@@ -190,8 +190,8 @@ function inboxHtml() {
 }
 const mailPill = m => m.status === 'Sent' ? '<span class="pill p-sent">Sent</span>' : m.status === 'Failed' ? '<span class="pill p-hold">Failed</span>' : m.status === 'Cancelled' ? '<span class="pill p-req">Cancelled</span>' : m.day > st.today ? '<span class="pill p-chi">Scheduled</span>' : '<span class="pill p-setup">Sending</span>';
 // emails show the contacts screenshot as an attachment (cid:); in the app, point it at the file instead
-const shotSrc = x => { const f = x.fac && facById(x.fac); return (x.code === 'TEST' && ui.testData) || (f && f.contactsShot && f.contactsShot.name === x.attachName && f.contactsShot.data) || STORE.fileUrl(x.attachPath); };
-const mailBody = x => x.attachName ? x.body.split('cid:' + x.attachName).join(esc(shotSrc(x))) : x.body;
+const shotSrc = (x, name, path) => { const f = x.fac && facById(x.fac), mine = f && [f.contactsShot, f.corpShot].find(s => s && s.name === name); return (x.code === 'TEST' && ui.testData && ui.testData[name]) || (mine && mine.data) || STORE.fileUrl(path); };
+const mailBody = x => [[x.attachName, x.attachPath], [x.attachName2, x.attachPath2]].filter(([n]) => n).reduce((b, [n, p]) => b.split('cid:' + n).join(esc(shotSrc(x, n, p))), x.body);
 function mailHtml(x, admin) {
   return `<details class="mail"><summary><span class="code">${esc(x.code)}</span><span class="subj">${esc(x.subject)}</span><span class="meta num">${x.importance === 'High' ? '<span class="pill p-hold">High</span> ' : ''}${mailPill(x)} ${fmtS(x.day)}</span></summary><div class="hdr"><span>To</span><span>${esc(x.to.join('; '))}</span>${x.cc.length ? `<span>CC</span><span>${esc(x.cc.join('; '))}</span>` : ''}${x.error ? `<span>Note</span><span class="err">${esc(x.error)}</span>` : ''}</div><div class="mailbody">${mailBody(x)}</div>${admin && (x.status === 'Failed' || x.status === 'Cancelled') ? `<div class="mailbtns" style="flex-direction:column;align-items:stretch"><div class="row">${fld('To (fix it here if it\'s wrong; separate with ;)', `<input type="text" data-rto="${esc(x.key)}" value="${esc(x.to.join('; '))}">`)}${fld('CC', `<input type="text" data-rcc="${esc(x.key)}" value="${esc(x.cc.join('; '))}">`)}</div><div><button class="btn sm pri" data-retry="${esc(x.key)}">Send it again</button></div></div>` : ''}${admin && x.status === 'Queued' ? `<div class="mailbtns"><button class="btn sm" data-cancelmail="${esc(x.key)}">Don't send</button></div>` : ''}</details>`;
 }
@@ -305,9 +305,9 @@ function settingsHtml() {
   <div class="card"><b>Portal contact departments</b>${tip('1 per line: Name | Facility or Corporate')}<textarea id="s_depts" class="plain" style="min-height:150px">${esc(s.depts.map(d => d.name + ' | ' + d.type).join('\n'))}</textarea></div>
   <div class="card"><b>Ship points</b>${tip('1 per line: number: state codes')}<div class="row">${fld('Enteral / uro (the "Ship Point" field)', `<textarea id="s_shipent" class="plain">${esc(Object.entries(s.shipEnt).map(([k, v]) => k + ': ' + v).join('\n'))}</textarea>`)}${fld('"Ship Point- United Ostomy, Fordmed"', `<textarea id="s_shipost" class="plain">${esc(Object.entries(s.shipOst).map(([k, v]) => k + ': ' + v).join('\n'))}</textarea>`)}</div></div>
   <div id="set_err"></div><div><button class="btn pri" type="submit">Save settings</button></div></form>
-  <div class="card" style="margin-top:14px;max-width:900px"><b>Test the in-service & contacts screenshot</b>${tip('Sends a test email only to you, through the real "CT - Send emails" flow, so you can check the screenshot shows up properly in Outlook. Nothing in any transition changes.')}
-    <p class="meta" style="margin:6px 0 8px">Paste any screenshot, then click "Send me a test". You get the contacts part of the email, exactly as the wound rep and regional would see it.</p>
-    <div class="drop shot" id="test_shot" tabindex="0">${testShotInner()}</div>
+  <div class="card" style="margin-top:14px;max-width:900px"><b>Test the in-service & contacts screenshots</b>${tip('Sends a test email only to you, through the real "CT - Send emails" flow, so you can check the screenshot shows up properly in Outlook. Nothing in any transition changes.')}
+    <p class="meta" style="margin:6px 0 8px">Paste a screenshot in one or both boxes, then click "Send me a test". You get the contacts part of the email, exactly as the wound rep and regional would see it.</p>
+    <div class="row"><div class="field"><label>Facility contacts</label>${shotZone('test', 'fac', ui.shots.test_fac)}</div><div class="field"><label>Corporate contacts</label>${shotZone('test', 'corp', ui.shots.test_corp)}</div></div>
     <div style="margin-top:8px"><button type="button" class="btn pri" id="sendtest">Send me a test</button></div></div>`;
 }
 function readSettingsForm() {
@@ -482,15 +482,15 @@ document.addEventListener('submit', async e => {
   if (id === 'tf') {
     const key = ui.openTask, t = taskByKey(key), msg = TT[t.type].validate(t);
     if (msg) { $('#tf_err').innerHTML = '<div class="err">' + esc(msg) + '</div>'; return; }
-    // the FastCare screenshot is uploaded to SharePoint first; the task then saves where it is
-    ui.shotSaved = null;
-    if (t.type === 'FASTCARE' && shotFor(t)) {
-      $('#tf_err').innerHTML = '<div class="meta">Uploading the screenshot…</div>';
-      try { const f = facById(t.fac), name = 'contacts-CT-' + pad(f.id) + '.jpg'; const r = await STORE.uploadFile('CT-' + pad(f.id), new File([ui.shot.blob], name, { type: 'image/jpeg' })); ui.shotSaved = { name, path: r.path, url: r.url, data: r.data || '' }; }
-      catch (e) { $('#tf_err').innerHTML = '<div class="err">The screenshot didn\'t upload: ' + esc(e.message || e) + '. Try again.</div>'; return; }
+    // the FastCare screenshots are uploaded to SharePoint first; the task then saves where they are
+    ui.shotSaved = {};
+    if (t.type === 'FASTCARE' && (shotFor(t, 'fac') || shotFor(t, 'corp'))) {
+      $('#tf_err').innerHTML = '<div class="meta">Uploading the screenshots…</div>';
+      try { const f = facById(t.fac); for (const [w, pre] of [['fac', 'facility'], ['corp', 'corporate']]) { const s = shotFor(t, w); if (!s) continue; const name = pre + '-contacts-CT-' + pad(f.id) + '.jpg'; const r = await STORE.uploadFile('CT-' + pad(f.id), new File([s.blob], name, { type: 'image/jpeg' })); ui.shotSaved[w] = { name, path: r.path, url: r.url, data: r.data || '' }; } }
+      catch (e) { $('#tf_err').innerHTML = '<div class="err">A screenshot didn\'t upload: ' + esc(e.message || e) + '. Try again.</div>'; return; }
     }
     const ok = await act(() => { const t2 = taskByKey(key); if (!t2 || done(t2)) { toast('Someone already finished this task.'); return false; } TT[t2.type].done(t2, { by: me(), byName: meName() }); finishTask(t2, me(), meName()); }, 'Done. Recorded as done by ' + meName() + '.');
-    if (ok) { if (t.type === 'FASTCARE') ui.shot = null; ui.openTask = null; renderLayer(); }
+    if (ok) { if (t.type === 'FASTCARE') { delete ui.shots.fc_fac; delete ui.shots.fc_corp; } ui.openTask = null; renderLayer(); }
     return;
   }
   if (id === 'fdet') {
@@ -588,33 +588,38 @@ function placeTip(w) { const t = w.querySelector('.tip'); if (!t) return; t.styl
 document.addEventListener('mouseover', e => { const w = e.target.closest && e.target.closest('.infow'); if (w) placeTip(w); });
 document.addEventListener('focusin', e => { const w = e.target.closest && e.target.closest('.infow'); if (w) placeTip(w); });
 
-// ---------- FastCare screenshot: paste or pick, shrink to a reasonable JPEG, preview ----------
-const testShotInner = () => ui.testShot ? `<img src="${ui.testShot.url}" alt="Test screenshot"><div><button type="button" class="btn sm" id="test_shotx">Remove</button></div>` : '<b>Click here and press Ctrl+V</b> to paste a screenshot, or <label class="linkish" for="test_shotfile">choose an image</label><input type="file" id="test_shotfile" accept="image/*" hidden>';
-async function takeShot(file) {
+// ---------- screenshots (FastCare task, Settings test): paste or pick, shrink to a reasonable JPEG, preview ----------
+// boxes are data-shot="<ctx>_<which>"; a paste goes to the box last clicked/focused, else the first empty one
+let lastShotBox = null;
+document.addEventListener('focusin', e => { const z = e.target.closest && e.target.closest('[data-shot]'); if (z) lastShotBox = z.dataset.shot; });
+async function takeShot(file, key) {
   if (!file || !/^image\//.test(file.type)) return;
-  const t = ui.openTask && taskByKey(ui.openTask), forTest = (!t || t.type !== 'FASTCARE') && document.getElementById('test_shot');
-  if (!forTest && (!t || t.type !== 'FASTCARE')) return;
+  const boxes = [...document.querySelectorAll('[data-shot]')].map(z => z.dataset.shot); if (!boxes.length) return;
+  key = key || (boxes.includes(lastShotBox) ? lastShotBox : boxes.find(k => !ui.shots[k]) || boxes[0]);
+  const t = ui.openTask && taskByKey(ui.openTask);
   const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
   const w = Math.min(1400, img.naturalWidth), h = Math.round(img.naturalHeight * w / img.naturalWidth), c = document.createElement('canvas'); c.width = w; c.height = h;
   const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); x.drawImage(img, 0, 0, w, h);
   const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
-  if (forTest) { ui.testShot = { blob, url: URL.createObjectURL(blob) }; document.getElementById('test_shot').innerHTML = testShotInner(); return; }
-  ui.shot = { task: t.key, blob, url: URL.createObjectURL(blob) };
-  const z = document.getElementById('fc_shot'); if (z) z.outerHTML = shotZone(t);
-  const n = document.getElementById('fc_nocts'); if (n) n.checked = false;
+  ui.shots[key] = { task: t ? t.key : '', blob, url: URL.createObjectURL(blob) };
+  redrawShot(key);
+  if (key.startsWith('fc_')) { const n = document.getElementById('fc_nocts'); if (n) n.checked = false; }
 }
-document.addEventListener('paste', e => { const it = [...((e.clipboardData && e.clipboardData.items) || [])].find(i => i.type.startsWith('image/')); if (it && (document.getElementById('fc_shot') || document.getElementById('test_shot'))) { e.preventDefault(); takeShot(it.getAsFile()); } });
-document.addEventListener('change', e => { if (e.target.id === 'fc_shotfile' || e.target.id === 'test_shotfile') takeShot(e.target.files[0]); });
+function redrawShot(key) { const [ctx, which] = key.split('_'), z = document.getElementById('shot_' + key); if (z) z.outerHTML = shotZone(ctx, which, ui.shots[key]); }
+document.addEventListener('paste', e => { const it = [...((e.clipboardData && e.clipboardData.items) || [])].find(i => i.type.startsWith('image/')); if (it && document.querySelector('[data-shot]')) { e.preventDefault(); takeShot(it.getAsFile()); } });
+document.addEventListener('change', e => { const k = e.target.dataset && e.target.dataset.shotfile; if (k) takeShot(e.target.files[0], k); });
 document.addEventListener('click', async e => {
-  if (e.target.id === 'test_shotx') { ui.testShot = null; document.getElementById('test_shot').innerHTML = testShotInner(); return; }
+  const x = e.target.closest && e.target.closest('[data-shotx]'); if (x) { delete ui.shots[x.dataset.shotx]; redrawShot(x.dataset.shotx); return; }
   if (e.target.id === 'sendtest') {
-    if (!ui.testShot) { toast('Paste a screenshot first.'); return; }
-    e.target.disabled = true; let r;
-    try { r = await STORE.uploadFile('TEST', new File([ui.testShot.blob], 'test-contacts.jpg', { type: 'image/jpeg' })); }
-    catch (err) { e.target.disabled = false; toast('The screenshot didn\'t upload: ' + (err.message || err)); return; }
-    const fake = { id: 0, name: 'Test Facility', group: '', contacts: [{ first: 'Sample', last: 'Contact', dept: 'Administrator', email: 'sample.contact@example.com' }], contactsShot: { name: 'test-contacts.jpg', path: r.path, data: r.data || '' } };
-    const ok = await act(() => { mail({ key: 'm:TEST:' + uid(), code: 'TEST', to: [me()], link: 'none', subject: 'TEST: in-service & contacts screenshot', body: '<p>This is a test. Below is the contacts part of the in-service & contacts request, the way the wound rep and regional see it. If the screenshot shows here, it works.</p><hr>' + e3Contacts(fake), attachPath: r.path, attachName: 'test-contacts.jpg' }); }, 'Test queued. It goes to you within about 5 minutes.');
-    if (ok) { ui.testShot = null; ui.testData = r.data || ''; }
+    const picked = [['fac', 'test-facility-contacts.jpg'], ['corp', 'test-corporate-contacts.jpg']].filter(([w]) => ui.shots['test_' + w]);
+    if (!picked.length) { toast('Paste a screenshot first.'); return; }
+    e.target.disabled = true; const saved = {};
+    try { for (const [w, name] of picked) { const r = await STORE.uploadFile('TEST', new File([ui.shots['test_' + w].blob], name, { type: 'image/jpeg' })); saved[w] = { name, path: r.path, data: r.data || '' }; } }
+    catch (err) { e.target.disabled = false; toast('A screenshot didn\'t upload: ' + (err.message || err)); return; }
+    const fake = { id: 0, name: 'Test Facility', group: '', contacts: [{ first: 'Sample', last: 'Contact', dept: 'Administrator', email: 'sample.contact@example.com' }], contactsShot: saved.fac || null, corpShot: saved.corp || null };
+    const ok = await act(() => { mail(Object.assign({ key: 'm:TEST:' + uid(), code: 'TEST', to: [me()], link: 'none', subject: 'TEST: in-service & contacts screenshots', body: '<p>This is a test. Below is the contacts part of the in-service & contacts request, the way the wound rep and regional see it. If the screenshots show here, it works.</p><hr>' + e3Contacts(fake) }, e3Attach(fake))); }, 'Test queued. It goes to you within about 5 minutes.');
+    if (ok) { ui.testData = Object.assign(ui.testData || {}, ...Object.values(saved).map(v => ({ [v.name]: v.data }))); delete ui.shots.test_fac; delete ui.shots.test_corp; }
     return;
   }
-  if (e.target.id === 'fc_shotx') { const t = taskByKey(ui.openTask); ui.shot = null; const z = document.getElementById('fc_shot'); if (z && t) z.outerHTML = shotZone(t); } });
+});
+
