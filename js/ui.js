@@ -204,7 +204,7 @@ function mailSections(ms, admin, h) {
     ['Sent', live.filter(m => m.status === 'Sent')],
     ['Scheduled (not sent yet)', live.filter(m => m.status === 'Queued' && m.day > st.today).sort((x, y) => x.day.localeCompare(y.day))]
   ].filter(p => p[1].length);
-  return parts.map(([t, list]) => `<${h} class="mailsec">${t} <span class="meta">${list.length}</span></${h}><div class="list">${list.map(m => mailHtml(m, admin)).join('')}</div>`).join('') || '<div class="empty">Nothing here.</div>';
+  return parts.map(([t, list]) => `<${h} class="mailsec">${t} <span class="meta">${list.length}</span>${admin && t === 'Failed' && list.length > 1 ? ` <button class="btn sm pri" data-retryall="${esc(list.map(m => m.key).join('|'))}">Send all ${list.length} again</button>` : ''}</${h}><div class="list">${list.map(m => mailHtml(m, admin)).join('')}</div>`).join('') || '<div class="empty">Nothing here.</div>';
 }
 function outboxHtml() {
   return `<h1>Outbox</h1><p class="sub">Every email the app sent or will send (last ${OUTBOX_DAYS} days). The "CT - Send emails" flow sends them from ${esc(CFG.mailbox)} within about 5 minutes; scheduled ones go out early that morning (7 or 8 am Eastern). Scheduled ones that aren't needed anymore (the task got done first) are dropped automatically.</p>${mailSections(st.mails, isAdmin(me()), 'h2')}`;
@@ -460,6 +460,7 @@ document.addEventListener('click', async e => {
     const to = split(document.querySelector(`[data-rto="${CSS.escape(key)}"]`).value), cc = split(document.querySelector(`[data-rcc="${CSS.escape(key)}"]`).value);
     const bad = [...to, ...cc].filter(e => !validEmail(e)); if (!to.length || bad.length) { toast(!to.length ? 'Put at least 1 address in To.' : 'Not an email: ' + bad.join(', ')); return; }
     await act(() => { const m = st.mails.find(x => x.key === key); if (!m) return false; m.to = to; m.cc = cc.filter(e => !to.includes(e)); m.status = 'Queued'; m.error = ''; m.sendOn = new Date(Date.now() - 60000).toISOString(); }, 'It goes out within 5 minutes'); return; }
+  const ra = T.closest('[data-retryall]'); if (ra) { const keys = ra.dataset.retryall.split('|'); await act(() => { let n = 0; for (const m of st.mails) if (keys.includes(m.key) && m.status === 'Failed') { m.status = 'Queued'; m.error = ''; m.sendOn = new Date(Date.now() - 60000).toISOString(); n++; } return n ? undefined : false; }, 'They go out within 5 minutes'); return; }
   const cm = T.closest('[data-cancelmail]'); if (cm) { const key = cm.dataset.cancelmail; await act(() => { const m = st.mails.find(x => x.key === key); if (!m) return false; m.status = 'Cancelled'; }, 'Cancelled'); return; }
   if (T.id === 'addperson') { const tb = document.querySelector('.team tbody') || document.querySelector('.team'); tb.insertAdjacentHTML('beforeend', `<tr data-pi="n"><td><input type="text" class="p-name"></td><td><input type="text" class="p-email" placeholder="name@gentell.com"></td><td><input type="checkbox" class="p-am"></td><td><input type="checkbox" class="p-rep"></td><td><input type="text" class="p-ext" style="width:60px"></td><td><input type="checkbox" class="p-admin"></td><td><button type="button" class="btn sm" data-delperson>Remove</button></td></tr>`); return; }
   const dp = T.closest('[data-delperson]'); if (dp) { dp.closest('tr').remove(); return; }
