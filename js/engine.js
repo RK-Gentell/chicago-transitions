@@ -413,7 +413,7 @@ function e3Contacts(f) {
   const shots = e3Shots(f), list = e3List(f);
   const ask = 'Can you please review and advise if there are any discrepancies with the names or email addresses of these contacts?';
   if (!shots.length && !list.length) return '<p>We don\'t have any facility contacts on file yet. Can you please also send us the names and email addresses of the administrator, DON, central supply and anyone else involved in ordering?</p>';
-  const imgs = shots.map(([label, s]) => `<p><b>${label} (from FastCare):</b></p><p><img src="cid:${esc(s.name)}" alt="${label} on file for ${esc(facName(f))}" style="max-width:100%;width:700px;border:1px solid #cccccc"></p>`).join('');
+  const imgs = shots.map(([label, s]) => `<p><b>${label} (from FastCare):</b></p><p><img src="cid:${esc(s.name)}" alt="${label} on file for ${esc(facName(f))}" width="450" style="width:450px;max-width:100%;height:auto;border:1px solid #cccccc"></p>`).join('');
   return `<p>The following are the contacts we have on file. ${ask}</p>${imgs}${list.length ? (shots.length ? '<p><b>And these, which we got separately:</b></p>' : '') + contactsTableHtml(list) : ''}`;
 }
 const e3Attach = f => { const [a, b] = e3Shots(f).map(x => x[1]); return Object.assign({}, a ? { attachPath: a.path, attachName: a.name } : {}, b ? { attachPath2: b.path, attachName2: b.name } : {}); };
