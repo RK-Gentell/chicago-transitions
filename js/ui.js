@@ -623,3 +623,6 @@ document.addEventListener('click', async e => {
   }
 });
 
+// the sticky left menu sits right under the top bar, whatever its height
+function setTopH() { const t = document.querySelector('.top'); if (t) document.documentElement.style.setProperty('--topH', t.offsetHeight + 'px'); }
+window.addEventListener('resize', setTopH); window.addEventListener('load', setTopH); new ResizeObserver(setTopH).observe(document.querySelector('.top'));

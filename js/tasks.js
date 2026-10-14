@@ -143,7 +143,7 @@ const TT = {
       ${n.corp ? `<div class="row">${fld('Corporate', sel('fc_grp', corpOpts, '', true))}<div class="field" id="fc_newbox" hidden><label>New corporate name</label>${txt('fc_new', '')}</div></div>` : ''}
       ${n.addr ? fld('Address', txt('fc_addr', '', '123 Main St, City, ST 12345'), 'State comes from the 2 letters before the zip.') : ''}
       <div class="row">${fld('Wound and Product Specialist', personPick('w', f.wound), 'Pick from the list; it fills their Gentell email.')}${fld('Regional Manager', personPick('r', f.regional))}</div>
-      <div class="sect">Contacts${tip('Put the FastCare contacts straight into the portal, then paste a screenshot of them here: facility contacts, corporate contacts, or both. They go into the in-service & contacts request so the wound rep and regional can check them.')}</div>
+      <div class="sect">Contacts${tip('Take a screenshot of the contacts in FastCare and paste it here: facility contacts, corporate contacts, or both. They go into the in-service & contacts request so the wound rep and regional can check them.')}</div>
       <div class="row"><div class="field"><label>Facility contacts</label>${shotZone('fc', 'fac', shotFor(t, 'fac'))}</div><div class="field"><label>Corporate contacts</label>${shotZone('fc', 'corp', shotFor(t, 'corp'))}</div></div>
       ${chk('fc_nocts', 'No FastCare contacts available')}
       ${e3List(f).length ? `<div class="note">These also go in the email (added on the request, facility page or corporate): ${e3List(f).map(c => esc((c.first + ' ' + c.last).trim() || c.email)).join(', ')}</div>` : ''}`;
