@@ -30,6 +30,12 @@ async function boot() {
 }
 function fatal(e) {
   console.error(e);
+  if (e.noAccess) {
+    $('#sub').textContent = 'No access yet';
+    $('#main').innerHTML = `<div class="center card"><h1>You don't have access yet</h1><p>You're signed in as <b>${esc(e.who || 'your Microsoft account')}</b>. The app keeps its data on the Chicago Transitions SharePoint site, and this account isn't a member of it yet.</p><p>Ask Raizy to add you. Once she does, refresh this page.</p><p class="meta">Signed in with the wrong account? <button class="linkish" id="signout_na" style="background:none;border:0;padding:0">Sign out</button> and sign in with your @gentell.com email.</p><button class="btn pri" onclick="location.reload()">Refresh</button></div>`;
+    const so = document.getElementById('signout_na'); if (so) so.onclick = () => STORE.signOut();
+    return;
+  }
   $('#sub').textContent = 'Problem';
   $('#main').innerHTML = `<div class="center card"><h1>Something went wrong</h1><p class="err">${esc(e.message || e)}</p><p class="meta">Refresh the page. If it keeps happening, send Raizy a screenshot of this.</p><button class="btn pri" onclick="location.reload()">Refresh</button></div>`;
 }

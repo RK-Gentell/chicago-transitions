@@ -169,8 +169,13 @@ function SPStore() {
         msalApp.setActiveAccount(account);
       }
       const u = new URL(CFG.siteUrl); siteOrigin = u.origin; sitePath = u.pathname.replace(/\/$/, '');
-      siteId = (await gfetch('/sites/' + u.hostname + ':' + sitePath + '?$select=id')).id;
-      const lists = await gfetch('/sites/' + siteId + '/lists?$select=id,displayName&$top=200');
+      // no access to the SharePoint site (not a member of the Chicago Transitions team yet): say so plainly
+      const who = (account && account.username) || (window.CT_TEST && CT_TEST.email) || '';
+      let lists;
+      try {
+        siteId = (await gfetch('/sites/' + u.hostname + ':' + sitePath + '?$select=id')).id;
+        lists = await gfetch('/sites/' + siteId + '/lists?$select=id,displayName&$top=200');
+      } catch (e) { if (e.status === 403 || e.status === 404 || e.status === 401) { const x = new Error(e.message); x.noAccess = true; x.who = who; throw x; } throw e; }
       for (const k in LISTS) { const l = lists.value.find(x => x.displayName === LISTS[k].name); if (l) listIds[k] = l.id; }
       this.needsSetup = Object.keys(LISTS).some(k => !listIds[k]);
       if (listIds.outbox) {
