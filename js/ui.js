@@ -189,8 +189,11 @@ function inboxHtml() {
   return `<h1>Mailbox</h1><p class="sub">Emails that came into ${esc(CFG.mailbox)} in the last ${INBOX_DAYS} days, newest first. The app matches them to a facility by the [CT-0000] number or the facility name in the subject. Not matched? Pick the facility.</p><div class="tablewrap"><table><tr><th>Received</th><th>From</th><th>Subject</th><th>Facility</th><th></th></tr>${st.inbox.map(m => `<tr><td class="num">${esc((m.received || '').slice(0, 10))}</td><td>${esc(m.from)}</td><td>${esc(m.subject)}${m.isEmail2 ? ' <span class="pill p-sent">Transfer notice</span>' : ''}${m.isE3Reply ? ' <span class="pill p-sent">In-service & contacts reply</span>' : ''}<div class="meta">${esc((m.preview || '').slice(0, 160))}</div></td><td>${m.fac && facById(m.fac) ? `<span class="linkish" data-fac="${m.fac}">${esc(facName(facById(m.fac)))}</span>` : `<select data-linkin="${m._id}"><option value="">Pick a facility…</option>${facOpts.map(o => `<option value="${o[0]}">${esc(o[1])}</option>`).join('')}</select>`}</td><td>${m.path ? `<a href="${esc(STORE.fileUrl(m.path))}" target="_blank" rel="noopener">Open email</a>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="meta">Nothing yet.</td></tr>'}</table></div>`;
 }
 const mailPill = m => m.status === 'Sent' ? '<span class="pill p-sent">Sent</span>' : m.status === 'Failed' ? '<span class="pill p-hold">Failed</span>' : m.status === 'Cancelled' ? '<span class="pill p-req">Cancelled</span>' : m.day > st.today ? '<span class="pill p-chi">Scheduled</span>' : '<span class="pill p-setup">Sending</span>';
+// emails show the contacts screenshot as an attachment (cid:); in the app, point it at the file instead
+const shotSrc = x => { const f = x.fac && facById(x.fac); return (f && f.contactsShot && f.contactsShot.name === x.attachName && f.contactsShot.data) || STORE.fileUrl(x.attachPath); };
+const mailBody = x => x.attachName ? x.body.split('cid:' + x.attachName).join(esc(shotSrc(x))) : x.body;
 function mailHtml(x, admin) {
-  return `<details class="mail"><summary><span class="code">${esc(x.code)}</span><span class="subj">${esc(x.subject)}</span><span class="meta num">${x.importance === 'High' ? '<span class="pill p-hold">High</span> ' : ''}${mailPill(x)} ${fmtS(x.day)}</span></summary><div class="hdr"><span>To</span><span>${esc(x.to.join('; '))}</span>${x.cc.length ? `<span>CC</span><span>${esc(x.cc.join('; '))}</span>` : ''}${x.error ? `<span>Note</span><span class="err">${esc(x.error)}</span>` : ''}</div><div class="mailbody">${x.body}</div>${admin && (x.status === 'Failed' || x.status === 'Cancelled') ? `<div class="mailbtns" style="flex-direction:column;align-items:stretch"><div class="row">${fld('To (fix it here if it\'s wrong; separate with ;)', `<input type="text" data-rto="${esc(x.key)}" value="${esc(x.to.join('; '))}">`)}${fld('CC', `<input type="text" data-rcc="${esc(x.key)}" value="${esc(x.cc.join('; '))}">`)}</div><div><button class="btn sm pri" data-retry="${esc(x.key)}">Send it again</button></div></div>` : ''}${admin && x.status === 'Queued' ? `<div class="mailbtns"><button class="btn sm" data-cancelmail="${esc(x.key)}">Don't send</button></div>` : ''}</details>`;
+  return `<details class="mail"><summary><span class="code">${esc(x.code)}</span><span class="subj">${esc(x.subject)}</span><span class="meta num">${x.importance === 'High' ? '<span class="pill p-hold">High</span> ' : ''}${mailPill(x)} ${fmtS(x.day)}</span></summary><div class="hdr"><span>To</span><span>${esc(x.to.join('; '))}</span>${x.cc.length ? `<span>CC</span><span>${esc(x.cc.join('; '))}</span>` : ''}${x.error ? `<span>Note</span><span class="err">${esc(x.error)}</span>` : ''}</div><div class="mailbody">${mailBody(x)}</div>${admin && (x.status === 'Failed' || x.status === 'Cancelled') ? `<div class="mailbtns" style="flex-direction:column;align-items:stretch"><div class="row">${fld('To (fix it here if it\'s wrong; separate with ;)', `<input type="text" data-rto="${esc(x.key)}" value="${esc(x.to.join('; '))}">`)}${fld('CC', `<input type="text" data-rcc="${esc(x.key)}" value="${esc(x.cc.join('; '))}">`)}</div><div><button class="btn sm pri" data-retry="${esc(x.key)}">Send it again</button></div></div>` : ''}${admin && x.status === 'Queued' ? `<div class="mailbtns"><button class="btn sm" data-cancelmail="${esc(x.key)}">Don't send</button></div>` : ''}</details>`;
 }
 // Cancelled emails never show. Scheduled ones (not sent yet) get their own section.
 function mailSections(ms, admin, h) {
@@ -297,7 +300,7 @@ function settingsHtml() {
     <div class="row" style="margin-top:8px"><button type="button" class="btn sm" id="addperson">+ Add a person</button><button type="button" class="btn sm" id="findemails">Find missing emails</button></div></div>
   <div class="card"><b>Who does what</b><div class="row" style="margin-top:8px">${Object.entries(ROLES).map(([r, l]) => fld(esc(l), sel('role_' + r, personOpts, s.roles[r], true))).join('')}</div></div>
   <div class="card"><b>Chicago handoff email</b><div class="row" style="margin-top:8px">${fld('Greeting name', txt('s_greet', s.chicagoGreeting), '"Hi ___,"')}</div><div class="row">${fld('To (1 email per line)', `<textarea id="s_e1to" class="plain">${esc(s.e1To.join('\n'))}</textarea>`, 'The new intake rep is added automatically.')}${fld('CC (1 email per line)', `<textarea id="s_e1cc" class="plain">${esc(s.e1Cc.join('\n'))}</textarea>`, 'The transition lead and account manager are added automatically.')}</div></div>
-  <div class="card"><b>Values</b><div class="row" style="margin-top:8px">${fld('In-service booking link', txt('s_inservice', s.inserviceUrl, 'https://…'), 'The "Click Here to Schedule an In-Service Call" link in the Chicago handoff email and the in-service & contacts request.')}${fld('"Biller" in the portal', txt('s_biller', s.biller))}</div><div class="row">${fld('Business days to do a task: helpers', txt('s_hdays', String(s.helperDays)))}${fld('Business days to do a task: transition leads', txt('s_adays', String(s.amDays)))}</div></div>
+  <div class="card"><b>Values</b><div class="row" style="margin-top:8px">${fld('In-service booking link', txt('s_inservice', s.inserviceUrl, 'https://…'), 'The "Click Here to Schedule an In-Service Call" link in the Chicago handoff email and the in-service & contacts request.')}${fld('"Biller" in the portal', txt('s_biller', s.biller))}${fld('Default price table', txt('s_tier2', s.tier2Price || '2022 Tier 2'), 'Used when every area of care except wound care is Covered Only or Don\'t Supply.')}</div><div class="row">${fld('Business days to do a task: helpers', txt('s_hdays', String(s.helperDays)))}${fld('Business days to do a task: transition leads', txt('s_adays', String(s.amDays)))}</div></div>
   <div class="card"><b>GDD warehouses</b>${tip('1 per line. Chris picks from these.')}<textarea id="s_wh" class="plain" style="min-height:150px">${esc(s.warehouses.join('\n'))}</textarea></div>
   <div class="card"><b>Portal contact departments</b>${tip('1 per line: Name | Facility or Corporate')}<textarea id="s_depts" class="plain" style="min-height:150px">${esc(s.depts.map(d => d.name + ' | ' + d.type).join('\n'))}</textarea></div>
   <div class="card"><b>Ship points</b>${tip('1 per line: number: state codes')}<div class="row">${fld('Enteral / uro (the "Ship Point" field)', `<textarea id="s_shipent" class="plain">${esc(Object.entries(s.shipEnt).map(([k, v]) => k + ': ' + v).join('\n'))}</textarea>`)}${fld('"Ship Point- United Ostomy, Fordmed"', `<textarea id="s_shipost" class="plain">${esc(Object.entries(s.shipOst).map(([k, v]) => k + ': ' + v).join('\n'))}</textarea>`)}</div></div>
@@ -320,7 +323,7 @@ function readSettingsForm() {
   const hd = +V('s_hdays'), ad = +V('s_adays');
   if (!(hd >= 1 && hd <= 10) || !(ad >= 1 && ad <= 10)) errs.push('Business days must be between 1 and 10.');
   if (V('s_inservice') && !/^https?:\/\//.test(V('s_inservice'))) errs.push('The in-service link has to start with https://');
-  return { errs, val: { people: rows, roles, chicagoGreeting: V('s_greet'), e1To, e1Cc, inserviceUrl: V('s_inservice'), biller: V('s_biller'), helperDays: hd, amDays: ad, warehouses: lines('s_wh'), depts, shipEnt, shipOst } };
+  return { errs, val: { people: rows, roles, chicagoGreeting: V('s_greet'), e1To, e1Cc, inserviceUrl: V('s_inservice'), biller: V('s_biller'), tier2Price: V('s_tier2') || '2022 Tier 2', helperDays: hd, amDays: ad, warehouses: lines('s_wh'), depts, shipEnt, shipOst } };
 }
 
 // ---------- drawers ----------
@@ -475,8 +478,15 @@ document.addEventListener('submit', async e => {
   if (id === 'tf') {
     const key = ui.openTask, t = taskByKey(key), msg = TT[t.type].validate(t);
     if (msg) { $('#tf_err').innerHTML = '<div class="err">' + esc(msg) + '</div>'; return; }
+    // the FastCare screenshot is uploaded to SharePoint first; the task then saves where it is
+    ui.shotSaved = null;
+    if (t.type === 'FASTCARE' && shotFor(t)) {
+      $('#tf_err').innerHTML = '<div class="meta">Uploading the screenshot…</div>';
+      try { const f = facById(t.fac), name = 'contacts-CT-' + pad(f.id) + '.jpg'; const r = await STORE.uploadFile('CT-' + pad(f.id), new File([ui.shot.blob], name, { type: 'image/jpeg' })); ui.shotSaved = { name, path: r.path, url: r.url, data: r.data || '' }; }
+      catch (e) { $('#tf_err').innerHTML = '<div class="err">The screenshot didn\'t upload: ' + esc(e.message || e) + '. Try again.</div>'; return; }
+    }
     const ok = await act(() => { const t2 = taskByKey(key); if (!t2 || done(t2)) { toast('Someone already finished this task.'); return false; } TT[t2.type].done(t2, { by: me(), byName: meName() }); finishTask(t2, me(), meName()); }, 'Done. Recorded as done by ' + meName() + '.');
-    if (ok) { ui.openTask = null; renderLayer(); }
+    if (ok) { if (t.type === 'FASTCARE') ui.shot = null; ui.openTask = null; renderLayer(); }
     return;
   }
   if (id === 'fdet') {
@@ -494,7 +504,7 @@ document.addEventListener('submit', async e => {
     const name = ui.openGroup, vals = { rep: V('ge_rep'), clin: V('ge_clin'), am: V('ge_am'), acct: V('ge_acct'), price: V('ge_price'), emr: V('ge_emr'), contacts: readContacts('ge_corp'), note: V('ge_note'), sa: V('ge_sa'), apply: V('ge_apply'), cov: {} };
     AREAS.forEach(a => vals.cov[a] = V('ge_cov_' + a));
     const ok = await act(() => {
-      const g = grp(name); g.rep = vals.rep; g.clin = vals.clin || vals.rep; g.am = vals.am; g.acct = vals.acct; g.cov = g.cov || {}; AREAS.forEach(a => { if (vals.cov[a]) g.cov[a] = vals.cov[a]; }); g.price = vals.price; g.emr = vals.emr; g.contacts = vals.contacts.map(c => ({ first: c.first, last: c.last, dept: c.dept, note: c.note, email: c.email })); g.noteDone = vals.note; g.standalone = vals.sa;
+      const g = grp(name); g.rep = vals.rep; g.clin = vals.clin || vals.rep; g.am = vals.am; g.acct = vals.acct; g.cov = g.cov || {}; AREAS.forEach(a => { if (vals.cov[a]) g.cov[a] = vals.cov[a]; }); if (vals.price !== g.price) g.priceAuto = false; g.price = vals.price; g.emr = vals.emr; g.contacts = vals.contacts.map(c => ({ first: c.first, last: c.last, dept: c.dept, note: c.note, email: c.email })); g.noteDone = vals.note; g.standalone = vals.sa;
       if (vals.apply) facsOfGroup(g.name).filter(f => !f.complete).forEach(f => { if (g.rep) { f.rep = g.rep; f.clin = g.clin; f.am = g.am || f.am; f.acct = g.acct || f.acct; } f.cov = {}; });
       st.tasks.filter(t => !t.fac && lc(t.group) === lc(g.name) && !done(t)).forEach(t => { if ((t.type === 'AREAS' && covKnown(g)) || (t.type === 'PRICE' && g.price) || (t.type === 'EMR' && g.emr) || (t.type === 'RULE' && g.rep && !facsOfGroup(g.name).some(f => !f.rep))) finishTask(t, me(), meName() + ' (edited the corporate)'); });
     }, 'Saved ' + name);
@@ -573,3 +583,18 @@ new MutationObserver(() => { infoize(document.getElementById('main')); infoize(d
 function placeTip(w) { const t = w.querySelector('.tip'); if (!t) return; t.style.left = ''; const r = t.getBoundingClientRect(); if (r.width && r.right > innerWidth - 8) t.style.left = (-8 - (r.right - innerWidth + 8)) + 'px'; }
 document.addEventListener('mouseover', e => { const w = e.target.closest && e.target.closest('.infow'); if (w) placeTip(w); });
 document.addEventListener('focusin', e => { const w = e.target.closest && e.target.closest('.infow'); if (w) placeTip(w); });
+
+// ---------- FastCare screenshot: paste or pick, shrink to a reasonable JPEG, preview ----------
+async function takeShot(file) {
+  const t = ui.openTask && taskByKey(ui.openTask); if (!t || t.type !== 'FASTCARE' || !file || !/^image\//.test(file.type)) return;
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
+  const w = Math.min(1400, img.naturalWidth), h = Math.round(img.naturalHeight * w / img.naturalWidth), c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); x.drawImage(img, 0, 0, w, h);
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
+  ui.shot = { task: t.key, blob, url: URL.createObjectURL(blob) };
+  const z = document.getElementById('fc_shot'); if (z) z.outerHTML = shotZone(t);
+  const n = document.getElementById('fc_nocts'); if (n) n.checked = false;
+}
+document.addEventListener('paste', e => { const it = [...((e.clipboardData && e.clipboardData.items) || [])].find(i => i.type.startsWith('image/')); if (it && document.getElementById('fc_shot')) { e.preventDefault(); takeShot(it.getAsFile()); } });
+document.addEventListener('change', e => { if (e.target.id === 'fc_shotfile') takeShot(e.target.files[0]); });
+document.addEventListener('click', e => { if (e.target.id === 'fc_shotx') { const t = taskByKey(ui.openTask); ui.shot = null; const z = document.getElementById('fc_shot'); if (z && t) z.outerHTML = shotZone(t); } });

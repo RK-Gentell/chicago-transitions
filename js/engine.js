@@ -55,6 +55,7 @@ function defaultSettings() {
     e1To: ['darlene.kusek@gentell.com', 'christian.brandt@gentell.com', 'danielle.butler@gentell.com', 'bbarrows@gentell.com'],
     e1Cc: ['kyle.king@gentell.com', 'dproulx@gentell.com', 'bschorn@gentell.com', 'jvidal@gentell.com', 'linda.anwaya@gentell.com', 'aliyah.price@gentell.com'],
     inserviceUrl: '',
+    tier2Price: '2022 Tier 2',
     biller: 'Sreejith Sreekumar',
     helperDays: 2, amDays: 1,
     warehouses: ['GDD Boca Raton', 'GDD Bristol', 'GDD Chicago', 'GDD Chicopee', 'GDD Cleveland', 'GDD Dallas', 'GDD Evansville', 'GDD Minneapolis', 'GDD Ocala'],
@@ -145,6 +146,9 @@ const isWaiting = t => !done(t) && !!t.opensOn && t.opensOn > st.today;
 function amOf(f) { return f.am || G(f).am || fallbackOwner(); }
 function acctOf(f) { return f.acct || (f.group ? G(f).acct : '') || ''; }
 function FG(f) { const g = G(f); return Object.assign({}, g, { cov: Object.assign({}, g.cov || {}, f.cov || {}) }); }
+// every area except wound care is "Covered Only" or "Don't Supply" → the default Tier 2 price table, nobody has to pick one
+function isTier2(g) { return AREAS.filter(a => a !== 'Wound Care').every(a => ['Covered Only', "Don't Supply"].includes((g.cov || {})[a])); }
+function areasTableHtml(g) { return `<table border="1" cellpadding="4" style="border-collapse:collapse"><tr><th>Area of care</th><th>We supply</th></tr>${AREAS.map(a => `<tr><td>${a}</td><td>${esc((g.cov || {})[a] || 'Not decided yet')}</td></tr>`).join('')}</table>`; }
 function covKnown(g) { return !!g.cov && AREAS.every(a => g.cov[a]); }
 function partB(g) { return AREAS.every(a => ['Covered Only', "Don't Supply", 'Purchase Order', 'Facility Bulk Order'].includes(g.cov[a])); }
 function areasPhrase(g) {
@@ -270,7 +274,7 @@ function mail(m) {
   const rec = {
     key: m.key, code: m.code, to, cc, subject, body: emailHtml(m.body, m), fac: m.fac || null, task: m.task || null, day,
     sendOn: day > st.today ? day + 'T12:00:00Z' : new Date(Date.now() - 60000).toISOString(),
-    status: 'Queued', cond: m.cond || null, by: st.me ? st.me.email : '', importance: m.importance || (HIGH_CODES.has(m.code) ? 'High' : 'Normal')
+    status: 'Queued', cond: m.cond || null, by: st.me ? st.me.email : '', attachPath: m.attachPath || '', attachName: m.attachName || '', importance: m.importance || (HIGH_CODES.has(m.code) ? 'High' : 'Normal')
   };
   if (!to.length) { rec.status = 'Failed'; rec.error = 'Nobody to send it to' + (bad.length ? ' (bad address: ' + bad.join(', ') + ')' : '') + '. Fix the address on this email in the Outbox and click "Send it again".'; }
   else if (bad.length) rec.error = 'Skipped (no valid email): ' + bad.join(', ');
@@ -310,7 +314,7 @@ function mailStillValid(m) {
 }
 
 // ---------- tasks ----------
-const REPEATABLE = new Set(['RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS']);
+const REPEATABLE = new Set(['PRICE', 'RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS']);
 function newTask(type, o) {
   const base = 't:' + type + ':' + (o.fac ? 'f' + o.fac : 'g' + lc(o.group));
   let key = base;
@@ -397,6 +401,23 @@ function sendEmail1(f, correction) {
 const E3_SUBJECT = f => facName(f) + '- Transfer from GNS Chicago to Lakewood';
 const e3Names = f => [...new Set([f.wound && f.wound.name, f.regional && f.regional.name].filter(Boolean).map(n => String(n).split(' ')[0]))];
 const e3Hi = f => '<p>Hi ' + esc(e3Names(f).join(' and ')) + ',</p>';
+// contacts part of the in-service & contacts request: the screenshot from the FastCare task and/or the contacts typed into the app
+// (request, facility page, corporate). Nothing at all → ask for them instead of asking them to review.
+const e3List = f => { const seen = new Set(); return [...(f.contacts || []), ...((f.group && G(f).contacts) || [])].filter(c => { const k = lc(c.email || (c.first + ' ' + c.last)); if (!k.trim() || seen.has(k)) return false; seen.add(k); return true; }); };
+const e3Shot = f => f.contactsShot && f.contactsShot.name ? f.contactsShot : null;
+function contactsTableHtml(list) {
+  return `<table border="1" cellpadding="4" style="border-collapse:collapse"><tr><th>First Name</th><th>Last Name</th><th>Department</th><th>Email</th></tr>${list.map(c => `<tr><td>${esc(c.first)}</td><td>${esc(c.last)}</td><td>${esc(c.dept === 'Other' && c.note ? c.note : c.dept)}</td><td>${esc(c.email)}</td></tr>`).join('')}</table>`;
+}
+function e3Contacts(f) {
+  const shot = e3Shot(f), list = e3List(f);
+  const img = shot ? `<p><img src="cid:${esc(shot.name)}" alt="Contacts on file for ${esc(facName(f))}" style="max-width:100%;width:700px;border:1px solid #cccccc"></p>` : '';
+  const ask = 'Can you please review and advise if there are any discrepancies with the names or email addresses of these contacts?';
+  if (shot && list.length) return `<p>The following are the contacts we have on file. ${ask}</p><p><b>From the portal:</b></p>${img}<p><b>And these, which we got separately:</b></p>${contactsTableHtml(list)}`;
+  if (shot) return `<p>The following are the contacts we have on file. ${ask}</p>${img}`;
+  if (list.length) return `<p>The following are the contacts we have on file. ${ask}</p>${contactsTableHtml(list)}`;
+  return '<p>We don\'t have any facility contacts on file yet. Can you please also send us the names and email addresses of the administrator, DON, central supply and anyone else involved in ordering?</p>';
+}
+const e3Attach = f => { const s = e3Shot(f); return s ? { attachPath: s.path, attachName: s.name } : {}; };
 function email3Body(f) {
   const g = FG(f), d = f.dates, am = amOf(f), areas = covKnown(g) ? areasPhrase(g)[0] : '';
   return `${e3Hi(f)}
@@ -404,13 +425,12 @@ function email3Body(f) {
 <p>I would like to update you that <b>${esc(facName(f))}</b> from the <b>${esc(f.group)}</b> group is transitioning to the Lakewood branch${areas ? ' for <b>' + areas + '</b>' : ''}${d ? ', and is scheduled to have their first order with Lakewood placed on <b>' + fmtS(d.dos) + '</b> for <b>' + fmtS(d.del) + '</b> delivery' : ''}. It would be very helpful for us and the facility if the facility can schedule an in-service prior to their first scheduled order, so they can be aware of the updated ordering process and how to obtain supplies in between monthly orders if needed. Would you be able to be in touch with the facility to ensure they book an in-service? We typically want the admin, DON and central supply on the in-service call, so they can all be on the same page. Anyone else in the facility that is usually involved in the ordering and documentation is welcome to join as well.${st.settings.inserviceUrl ? ' Here is the link for them to book it: <a href="' + esc(st.settings.inserviceUrl) + '">Schedule an In-Service Call with GNS Lakewood</a>.' : ''}</p>
 <p>In addition, can you assist us with obtaining the following contact information?</p>
 <ul><li>Name and email of a medical provider that can sign forms via our e-sign platform, PandaDoc, so we can bill patients supplies to insurance (this can be a medical director, NP or PA).</li><li>Name and email of the speech therapist or director of rehab</li><li>Name and email of the dietician</li></ul>
-<p>The following are the contacts we have on file. Can you please review and advise if there are any discrepancies with the names or email addresses of these contacts?</p>
-<table border="1" cellpadding="4" style="border-collapse:collapse"><tr><th>First Name</th><th>Last Name</th><th>Department</th><th>Email</th></tr>${f.contacts.map(c => `<tr><td>${esc(c.first)}</td><td>${esc(c.last)}</td><td>${esc(c.dept === 'Other' && c.note ? c.note : c.dept)}</td><td>${esc(c.email)}</td></tr>`).join('') || '<tr><td colspan="4">None yet</td></tr>'}</table>
+${e3Contacts(f)}
 <p>Thank you for your help!<br>${esc(nameOf(am))}</p>`;
 }
 function sendEmail3(f) {
   f.email3 = st.today;
-  mail({ key: 'm:E16:' + f.id, code: 'E16', to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [f.rep, acctOf(f), roleEmail('rules'), amOf(f)], fac: f.id, noTag: true, link: 'none', subject: E3_SUBJECT(f), body: email3Body(f) });
+  mail({ key: 'm:E16:' + f.id, code: 'E16', to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [f.rep, acctOf(f), roleEmail('rules'), amOf(f)], fac: f.id, noTag: true, link: 'none', subject: E3_SUBJECT(f), body: email3Body(f), ...e3Attach(f) });
 }
 // One step at a time: only the next follow-up is ever queued, and it's cancelled the moment "Done" comes in.
 function chaseEmail3(f) {
@@ -423,7 +443,7 @@ function chaseEmail3(f) {
   const step = used.length + 1; if (step > 3) return;
   const last = used.map(m => m.day).sort().pop() || (round ? f.e3RoundFrom : f.email3);
   const day = addBiz(last, 3), key = pre + step + ':' + mine.length, am = amOf(f), cond = { fac: f.id, e3Round: round };
-  if (step < 3) mail({ key, code: 'E16F', day, cond, to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [am], fac: f.id, noTag: true, link: 'none', subject: 'RE: ' + E3_SUBJECT(f),
+  if (step < 3) mail({ key, code: 'E16F', day, cond, ...e3Attach(f), to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [am], fac: f.id, noTag: true, link: 'none', subject: 'RE: ' + E3_SUBJECT(f),
       body: `${e3Hi(f)}<p>${step === 1 ? 'Just following up on my email below' : 'Following up again on my email below'} about <b>${esc(facName(f))}</b>. Can you please get the in-service booked and send over the contact info?</p><p>Thank you!<br>${esc(nameOf(am))}</p><hr>${email3Body(f)}` });
   else mail({ key, code: 'E16A', day, cond, to: [am], fac: f.id, link: 'fac', subject: 'No reply to the in-service & contacts request: ' + facName(f),
       body: `<p>${esc(e3Names(f).join(' and ') || 'The wound rep and regional')} didn't reply to the in-service & contacts request for <b>${esc(facName(f))}</b>, even after 2 follow-ups. Please reach out to them.</p>` + note('When it\'s taken care of, click "In-service & contacts: taken care of" on the facility page. The facility can\'t be marked complete until then.') });
@@ -549,9 +569,16 @@ function run() {
         const t = newTask('AREAS', { group: g.name, assignee: f.requester || fallbackOwner() });
         mail({ key: 'm:E4:' + t.key, code: 'E4', to: [t.assignee], task: t.key, cond: { task: t.key }, subject: 'Areas of care for ' + g.name, body: `<p>Which areas of care are we taking for <b>${esc(g.name)}</b>? Still needed: ${AREAS.filter(x => !(g.cov || {})[x]).join(', ')}. Pick 1 per area in the task.</p>` });
       }
-      if (!hasPrice(g) && !gTask(g.name, 'PRICE')) {
-        const t = newTask('PRICE', { group: g.name, assignee: roleEmail('price') });
-        mail({ key: 'm:E5:' + t.key, code: 'E5', to: [t.assignee], task: t.key, cond: { task: t.key }, subject: 'Price table for ' + g.name, body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>Which price table does <b>${esc(g.name)}</b> go on? Facilities: ${facsOfGroup(g.name).map(x => esc(x.name)).join(', ')}.</p>` });
+      // price table: wait for the areas of care. Only covered / don't supply (wound care doesn't count) → the Tier 2 default, no task.
+      if (!g.existing && covKnown(g)) {
+        const tier2 = isTier2(g), open = st.tasks.find(t => t.type === 'PRICE' && lc(t.group) === lc(g.name) && !done(t));
+        if (g.priceAuto && !tier2) { g.price = ''; g.priceAuto = false; }                       // areas changed: not Tier 2 any more
+        if (!g.price && tier2) { g.price = st.settings.tier2Price || '2022 Tier 2'; g.priceAuto = true; }
+        if (open && g.price) { open.status = 'Not needed'; open.doneOn = st.today; }
+        if (!g.price && !open) {
+          const t = newTask('PRICE', { group: g.name, assignee: roleEmail('price') });
+          mail({ key: 'm:E5:' + t.key, code: 'E5', to: [t.assignee], task: t.key, cond: { task: t.key }, subject: 'Price table for ' + g.name, body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>Which price table does <b>${esc(g.name)}</b> go on?</p>${areasTableHtml(g)}<p>Facilities: ${facsOfGroup(g.name).map(x => esc(x.name)).join(', ')}.</p>` });
+        }
       }
       const gf = facsOfGroup(g.name).filter(x => !x.hold);
       if (!g.emr && !g.existing && !gTask(g.name, 'EMR') && gf.length && gf.every(x => x.inPortal)) {

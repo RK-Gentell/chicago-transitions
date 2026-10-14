@@ -49,6 +49,9 @@ function ceErr(id) {
   return '';
 }
 function setContacts(id, rows) { const box = document.getElementById(id); if (!box) return; box.innerHTML = rows.map(r => ceRow(box.dataset.kind, !!box.dataset.withfac, r)).join(''); }
+// the FastCare task's screenshot box: paste (Ctrl+V) or pick an image. Kept in ui.shot until "Mark done" uploads it.
+const shotFor = t => (typeof ui !== 'undefined' && ui.shot && ui.shot.task === t.key) ? ui.shot : null;
+const shotZone = t => { const s = shotFor(t); return `<div class="drop shot" id="fc_shot" tabindex="0">${s ? `<img src="${s.url}" alt="Contacts screenshot"><div><button type="button" class="btn sm" id="fc_shotx">Remove</button></div>` : '<b>Click here and press Ctrl+V</b> to paste a screenshot, or <label class="linkish" for="fc_shotfile">choose an image</label>'}<input type="file" id="fc_shotfile" accept="image/*" hidden></div>`; };
 const contactTable = list => `<div class="tablewrap"><table><tr><th>First</th><th>Last</th><th>Department</th><th>Email</th><th>From</th></tr>${list.map(c => `<tr><td>${esc(c.first) || '<span class="meta">no first name</span>'}</td><td>${esc(c.last)}</td><td>${esc(c.dept)}${c.note ? ' → "Note": ' + esc(c.note) : ''}</td><td>${esc(c.email)}</td><td>${esc(c.src)}</td></tr>`).join('')}</table></div>`;
 
 // ---------- the task types ----------
@@ -83,7 +86,7 @@ const TT = {
   },
   PRICE: {
     title: t => 'Price table for ' + t.group,
-    form: () => fld('"Price Table"', txt('price', '', 'e.g. Infinity (GNS G/XCEL25)')),
+    form: t => { const g = grp(t.group); return `<div><b>Areas of care and what we're supplying</b>${areasTableHtml(g)}</div><div class="meta">Facilities: ${facsOfGroup(g.name).map(x => esc(x.name)).join(', ')}</div>${fld('"Price Table"', txt('price', '', 'e.g. Infinity (GNS G/XCEL25)'))}`; },
     example: () => ({ price: 'Infinity (GNS G/XCEL25)' }),
     validate: () => V('price') ? '' : 'Enter the price table.',
     done: t => { grp(t.group).price = V('price'); }
@@ -135,11 +138,12 @@ const TT = {
       return `<div class="instr">fastcare.gentell.com → "Facility" → "Search:" (1 word if the full name doesn't come up).${n.corp ? ' Corporate = "Ownership-Headquarters" / "Purchasing Group-Chain". "Independent HQ" means no corporate.' : ''} "Actions" → "Edit Facility" for the wound rep + regional, "Actions" → "Contacts" for contacts.</div>
       ${n.corp ? `<div class="row">${fld('Corporate', sel('fc_grp', corpOpts, '', true))}<div class="field" id="fc_newbox" hidden><label>New corporate name</label>${txt('fc_new', '')}</div></div>` : ''}
       ${n.addr ? fld('Address', txt('fc_addr', '', '123 Main St, City, ST 12345'), 'State comes from the 2 letters before the zip.') : ''}
-      <div><b>Contacts we already have</b>${f.contacts.length ? contactTable(f.contacts) : '<div class="meta">None yet.</div>'}</div>
       <div class="row">${fld('Wound and Product Specialist', personPick('w', f.wound), 'Pick from the list; it fills their Gentell email.')}${fld('Regional Manager', personPick('r', f.regional))}</div>
-      <div class="field"><label>Other contacts from FastCare${tip('Skip the ones above.')}</label>${contactEditor('cts', '', false)}</div>`;
+      <div class="field"><label>Contacts${tip('Put the FastCare contacts straight into the portal, then paste a screenshot of them here. It goes into the in-service & contacts request so the wound rep and regional can check them.')}</label>${shotZone(t)}</div>
+      ${chk('fc_nocts', 'No FastCare contacts available')}
+      ${e3List(f).length ? `<div class="note">These also go in the email (added on the request, facility page or corporate): ${e3List(f).map(c => esc((c.first + ' ' + c.last).trim() || c.email)).join(', ')}</div>` : ''}`;
     },
-    example: t => { const n = t.need || {}; const o = { w: 'Peter West <peter.west@demo.gentell.com>', r: 'Brian McCauley <brian.mccauley@demo.gentell.com>' }; if (n.corp) { o.fc_grp = 'New corporate…'; o.fc_new = 'Infinity Healthcare Management'; } if (n.addr) o.fc_addr = '123 Demo St, LaGrange, IN 46761'; o.cts = [{ first: 'Joan', last: 'Ruiz', dept: 'Central Supply', email: 'jruiz@demo.com' }, { first: '', last: 'Cole', dept: 'Other', note: 'MDS/unit manager', email: 'jcole@demo.com' }]; return o; },
+    example: t => { const n = t.need || {}; const o = { w: 'Peter West <peter.west@demo.gentell.com>', r: 'Brian McCauley <brian.mccauley@demo.gentell.com>' }; if (n.corp) { o.fc_grp = 'New corporate…'; o.fc_new = 'Infinity Healthcare Management'; } if (n.addr) o.fc_addr = '123 Demo St, LaGrange, IN 46761'; o.fc_nocts = true; return o; },
     validate: t => {
       const n = t.need || {};
       if (n.corp && !V('fc_grp')) return 'Pick the corporate (or "No corporate").';
@@ -147,7 +151,8 @@ const TT = {
       if (n.addr && addressProblem(V('fc_addr'))) return addressProblem(V('fc_addr'));
       if (!readPerson('w')) return 'Pick the wound rep from the list (start typing their name).';
       if (!readPerson('r')) return 'Pick the regional from the list (start typing their name).';
-      return ceErr('cts');
+      if (!shotFor(t) && !V('fc_nocts')) return 'Paste a screenshot of the contacts, or tick "No FastCare contacts available".';
+      return '';
     },
     done: t => {
       const f = facById(t.fac), n = t.need || {};
@@ -157,7 +162,7 @@ const TT = {
         if (v === 'No corporate (Independent HQ)') makeStandalone(f);
         else { const g = ensureGroup(v === 'New corporate…' ? V('fc_new') : v); f.group = g.name; if (f.pendingCov) g.cov = Object.assign({}, f.pendingCov, g.cov || {}); }
       }
-      addContacts(f, readContacts('cts'), 'FastCare');
+      f.contactsShot = (shotFor(t) && ui.shotSaved) || null; f.noFcContacts = !f.contactsShot && !!V('fc_nocts');
       f.wound = readPerson('w'); f.regional = readPerson('r');
     }
   },

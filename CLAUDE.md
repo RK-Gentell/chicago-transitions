@@ -15,7 +15,7 @@ A task app that runs the Chicago → Lakewood facility transition process from t
 
 ## Data (SharePoint lists, created by the app's first-run setup)
 - **CT Data**: 1 row per record. Columns `Key` (unique), `Kind` (settings/grp/fac/task/req), `Data` (JSON), `Ct` (CT-0001, facilities only), `Am` (AM email, facilities only, used by the mailbox flow), `Archived` (Yes/No).
-- **CT Outbox**: 1 row per email. `Key` (unique), `Code`, `ToList`, `CcList` (semicolon-separated), `Subject`, `HtmlBody`, `SendOn` (UTC), `SendStatus` (Queued/Sent/Failed/Cancelled), `Facility`, `TaskKey`, `Cond` (JSON: when to cancel), `ErrorText`, `Importance` (Normal/High; the send flow uses it. Added on sign-in to lists made before it existed).
+- **CT Outbox**: 1 row per email. `Key` (unique), `Code`, `ToList`, `CcList` (semicolon-separated), `Subject`, `HtmlBody`, `SendOn` (UTC), `SendStatus` (Queued/Sent/Failed/Cancelled), `Facility`, `TaskKey`, `Cond` (JSON: when to cancel), `ErrorText`, `Importance` (Normal/High), `AttachPath` ("/Shared Documents/CT Request files/CT-0001/contacts-CT-0001.jpg") and `AttachName` (the in-service & contacts request's screenshot, referenced in the body as `cid:<AttachName>`). These 3 were added later; the app adds them on sign-in. The flow reads the file with "Get file content using path" (falls back to `CT Request files/none.txt`) and attaches it only when AttachPath isn't empty.
 - **CT Inbox**: written by the "CT - Mailbox" flow. `Title` (subject), `FromAddress`, `ToAddresses`, `CcAddresses`, `Received`, `Preview`, `FilePath` (.eml saved in Documents/CT Mailbox), `Processed`, `Facility`.
 - **CT Numbers**: 1 row per facility; the item ID is the facility's CT number.
 
@@ -39,6 +39,10 @@ Email 3 goes to the wound rep + regional. `processInbox` treats any email to the
 
 ## Address and dates
 The state (from the address) picks the ship point, which sets the delivery date. `stateOK(f)` = a state with a ship point in Settings. No `stateOK` → `calcDates` returns null and `f.dates` is cleared (before the Chicago handoff email), so portal setup and scheduling can't happen. Once FastCare is done (or skipped), a missing/bad address makes an `ADDRESS` task for the transition lead; it closes itself when the address is fixed anywhere. Every address input uses `addressProblem()`. A state change after the handoff email emails the transition lead (dates stay as sent).
+
+## Price table and contacts
+PRICE waits for the corporate's areas of care. `isTier2(g)` (everything but wound care is Covered Only / Don't Supply) → `g.price = settings.tier2Price` ("2022 Tier 2"), `g.priceAuto`, no task; if the areas change so it's no longer Tier 2, the auto price is dropped and a PRICE task is made. The PRICE email and task show the areas table.
+FastCare contacts go straight into the portal; the FastCare task takes a pasted screenshot (`ui.shot` → uploaded on Mark done → `f.contactsShot`) or "No FastCare contacts available". `e3Contacts(f)` builds the 4 variants (screenshot + typed list / screenshot / typed list / none → ask for contacts).
 
 ## Request form
 Corporate is per line (no dropdown). "Already done" (`PRE_ITEMS` in engine.js, `applyPre`) sets what the skipped steps would have set and the engine skips their tasks; `g.existing` = corporate already in the portal (no price table / EMR access tasks). Info-only emails (`FYI_CODES`) get a "no action needed" line. To-do emails for tasks with steps use `todo()`: one line, details live in the task.
