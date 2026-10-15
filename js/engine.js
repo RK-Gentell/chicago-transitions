@@ -543,7 +543,39 @@ function addContacts(f, list, src) {
     if (!dup) f.contacts.push({ first: c.first || '', last: c.last || '', dept: c.dept || '', note: c.note || '', email: c.email || '', src, inPortal: false });
   });
 }
-function ruleFacs(t) { return st.facs.filter(f => !f.rep && !f.hold && !f.archived && (t.group === '__nocorp' ? !f.group : lc(f.group) === lc(t.group))); }
+// ---------- rep rule ----------
+// A corporate's rep rule can fill only some positions (Oct 2026). g.ruleIndiv lists the positions left blank in the rule:
+// those get picked per facility on the "Pick the reps" task. Corporates whose rule was saved before then have no ruleIndiv
+// and work exactly as before (blank account manager = none; the rule only applies when it has an intake rep).
+const RULE_POS = [['rep', 'intake rep'], ['clin', 'clinical rep'], ['acct', 'account manager'], ['am', 'transition lead']];
+const posName = p => (RULE_POS.find(x => x[0] === p) || [, p])[1];
+const partialRule = g => !!(g && Array.isArray(g.ruleIndiv));
+// what this facility still needs picked by hand. The intake rep always; the rule's blank positions until the Chicago handoff email.
+function ruleNeeds(f) {
+  const g = f.group ? G(f) : null, n = [];
+  if (!f.rep) n.push('rep');
+  if (partialRule(g) && !f.email1 && !f.complete) {
+    if (g.ruleIndiv.includes('clin') && !f.clin) n.push('clin');
+    if (g.ruleIndiv.includes('acct') && !f.acct) n.push('acct');
+    if (g.ruleIndiv.includes('am') && !f.am) n.push('am');
+  }
+  return n;
+}
+// fills a facility's empty positions from the corporate's rule (never overwrites what a facility already has)
+function applyRule(f, g) {
+  if (!partialRule(g)) { if (!f.rep && g.rep) { f.rep = g.rep; f.clin = g.clin || g.rep; if (!f.am && g.am) f.am = g.am; } return; } // older rules: unchanged
+  if (!f.rep && g.rep) f.rep = g.rep;
+  if (!f.clin && f.rep && (g.clin || g.clinSame)) f.clin = g.clinSame ? f.rep : g.clin;
+  if (!f.am && g.am) f.am = g.am;
+}
+// saves the rule from a form: blank = picked per facility; clin '__same' = same as each facility's intake rep
+function setRule(g, v) {
+  g.rep = v.rep || ''; g.acct = v.acct || ''; g.am = v.am || '';
+  g.clinSame = v.clin === '__same'; g.clin = g.clinSame ? g.rep : (v.clin || '');
+  g.ruleIndiv = RULE_POS.map(x => x[0]).filter(p => p === 'clin' ? !v.clin : !v[p]);
+}
+const ruleText = g => { if (!g.rep && !g.clin && !g.clinSame && !g.acct && !g.am) return ''; return RULE_POS.map(([p, l]) => { const v = p === 'clin' && g.clinSame ? 'same as intake' : g[p] ? nameOf(g[p]) : (partialRule(g) ? 'per facility' : (p === 'acct' ? 'none' : '-')); return l + ': ' + v; }).join(' · '); };
+function ruleFacs(t) { return st.facs.filter(f => !f.hold && !f.archived && (t.group === '__nocorp' ? !f.group && !f.rep : lc(f.group) === lc(t.group) && ruleNeeds(f).length)); }
 
 // ---------- inbox (emails that arrived in the shared mailbox) ----------
 function processInbox() {
@@ -619,10 +651,10 @@ function run() {
     }
     const g = G(f);
     // rep rule
-    if (!f.rep && g.rep) { f.rep = g.rep; f.clin = g.clin || g.rep; if (!f.am && g.am) f.am = g.am; }
-    if (!f.rep && !st.tasks.some(t => lc(t.group) === lc(g.name) && t.type === 'RULE' && !done(t))) {
+    applyRule(f, g);
+    if (ruleNeeds(f).length && !st.tasks.some(t => lc(t.group) === lc(g.name) && t.type === 'RULE' && !done(t))) {
       const t = newTask('RULE', { group: g.name, assignee: roleEmail('rules') });
-      queue('E3', t.assignee, f, t, (fs, ts) => ({ code: 'E3', to: [ts[0].assignee], task: ts[0].key, cond: { task: ts[0].key }, subject: 'Pick a rep: ' + g.name, body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>These facilities from <b>${esc(g.name)}</b> have no rep and the corporate has no rep rule:</p><ul>${facsOfGroup(g.name).filter(x => !x.rep).map(x => '<li>' + esc(x.name) + '</li>').join('')}</ul><p>Pick the intake rep, clinical rep, account manager and transition lead. Tick "Save as the corporate rule" so future facilities under this corporate get them automatically.</p>` }));
+      queue('E3', t.assignee, f, t, (fs, ts) => ({ code: 'E3', to: [ts[0].assignee], task: ts[0].key, cond: { task: ts[0].key }, subject: 'Pick a rep: ' + g.name, body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p>${partialRule(g) && (g.rep || g.clin || g.clinSame || g.acct || g.am) ? `<p>These facilities from <b>${esc(g.name)}</b> need reps the corporate rule leaves to each facility:</p><ul>${facsOfGroup(g.name).filter(x => ruleNeeds(x).length).map(x => '<li>' + esc(x.name) + ': ' + ruleNeeds(x).map(posName).join(', ') + '</li>').join('')}</ul><p>Pick them in the task. The rule fills the rest.</p>` : `<p>These facilities from <b>${esc(g.name)}</b> have no rep and the corporate has no rep rule:</p><ul>${facsOfGroup(g.name).filter(x => ruleNeeds(x).length).map(x => '<li>' + esc(x.name) + '</li>').join('')}</ul><p>Pick the intake rep, clinical rep, account manager and transition lead. Tick "Save as the corporate rule" so future facilities under this corporate get them automatically. Leave a position blank in the top row to keep picking it per facility.</p>`}` }));
     }
     // corporate asks, once per corporate
     if (!groupsSeen[lc(g.name)]) {
@@ -715,7 +747,8 @@ function run() {
     }
   });
   // the "no corporate yet" rep task closes itself once every facility on it has a rep or a corporate
-  st.tasks.filter(t => t.type === 'RULE' && t.group === '__nocorp' && !done(t) && !ruleFacs(t).length).forEach(t => { t.status = 'Not needed'; t.doneOn = st.today; });
+  // the "pick the reps" tasks close themselves once every facility on them has what it needs (filled on the facility page, a rule, …)
+  st.tasks.filter(t => t.type === 'RULE' && !done(t) && !ruleFacs(t).length).forEach(t => { t.status = 'Not needed'; t.doneOn = st.today; });
   // completed facilities are never archived (Oct 2026). Ones archived before that come back, with their done tasks.
   // Their open tasks stay put away, so nobody gets reminders on old work. (Deleted facilities stay archived.)
   st.facs.forEach(f => { if (f.archived && f.complete && !f.deleted) { f.archived = false; tasksOf(f).forEach(t => { if (t.archived && done(t)) t.archived = false; }); } });

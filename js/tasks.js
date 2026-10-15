@@ -24,6 +24,8 @@ const fld = (label, inner, hint) => `<div class="field"><label>${label}</label>$
 const chk = (id, label, v) => `<label class="chk"><input type="checkbox" id="${id}" ${v ? 'checked' : ''}><span>${label}</span></label>`;
 const V = id => { const e = document.getElementById(id); return e ? (e.type === 'checkbox' ? e.checked : e.value.trim()) : ''; };
 const peopleOpts = list => list.map(p => [lc(p.email), p.name]).sort((a, b) => String(a[1]).localeCompare(String(b[1]), undefined, { sensitivity: 'base' }));
+// a rule box where blank means "picked per facility"
+const selPer = (id, opts, v) => sel(id, opts, v, true).replace('<option  value="">Select…</option>', '<option value="">Per facility</option>').replace('<option value="">Select…</option>', '<option value="">Per facility</option>');
 // person picker: type a name, pick from the company address book
 const personPick = (id, val) => `<input type="text" id="${id}" class="pp" list="${id}_dl" autocomplete="off" placeholder="Start typing a name" value="${esc(val && val.name ? val.name + ' <' + val.email + '>' : '')}"><datalist id="${id}_dl"></datalist>`;
 function readPerson(id) { const v = V(id); const m = v.match(/^(.*?)\s*<([^>]+)>$/); if (m && validEmail(m[2])) return { name: m[1].trim(), email: lc(m[2]) }; return null; }
@@ -63,20 +65,42 @@ const TT = {
   RULE: {
     title: t => t.group === '__nocorp' ? 'Pick the reps (corporate not known yet)' : 'Pick the reps for ' + t.group,
     form: t => {
-      const fs = ruleFacs(t), R = peopleOpts(repList()), A = peopleOpts(amList());
-      return `<div class="instr">${fs.length} facilit${fs.length === 1 ? 'y' : 'ies'} with no rep. Same people for all? Fill the top row and click "Apply to all". Different reps per facility? Change the rows below.</div>
-      <div class="card" style="padding:10px"><b>All facilities</b><div class="row">${fld('Intake rep', sel('rep', R, '', true))}${fld('Clinical rep', sel('clin', R, '', true), 'Blank = same as intake')}${fld('Account manager', sel('acct', R, '', true))}${fld('Transition lead', sel('am', A, '', true))}</div><button type="button" class="btn sm" data-applyall="1">Apply to all ↓</button></div>
-      <div class="tablewrap"><table><tr><th>Facility</th><th>Intake rep</th><th>Clinical rep</th><th>Account manager</th><th>Transition lead</th></tr>${fs.map(f => `<tr><td>${esc(f.name)}</td><td>${sel('rep_' + f.id, R, f.rep, true)}</td><td>${sel('clin_' + f.id, R, f.clin, true)}</td><td>${sel('acct_' + f.id, R, f.acct, true)}</td><td>${sel('am_' + f.id, A, f.am, true)}</td></tr>`).join('')}</table></div>
+      const fs = ruleFacs(t), R = peopleOpts(repList()), A = peopleOpts(amList()), g = t.group === '__nocorp' ? null : grp(t.group);
+      const has = g && partialRule(g) && ruleText(g);
+      // a row's box: needed → a dropdown; already set (by the rule or on the facility) → shown, still changeable
+      const cell = (f, p) => { const opts = p === 'am' ? A : R, v = p === 'clin' ? f.clin : p === 'acct' ? f.acct : p === 'am' ? f.am : f.rep, need = ruleNeeds(f).includes(p) || (p === 'am' && !f.am && !(g && g.am)) || (p === 'rep' && !f.rep);
+        return `<td class="${need ? 'need' : ''}">${sel(p + '_' + f.id, opts, v, true)}${!v && !need ? `<div class="meta">${p === 'clin' ? 'same as intake' : p === 'acct' ? (g && g.acct ? 'from the rule' : 'none') : 'from the rule'}</div>` : ''}</td>`; };
+      return `<div class="instr">${fs.length} facilit${fs.length === 1 ? 'y needs' : 'ies need'} reps picked.${has ? ' The corporate rule fills some positions (' + esc(ruleText(g)) + '); pick the rest per facility.' : ''} Same people for all? Fill the top row and click "Apply to all" (blank boxes in the top row are skipped). Different per facility? Change the rows below. Boxes outlined in blue are the ones still needed.</div>
+      <div class="card" style="padding:10px"><b>All facilities</b><div class="row">${fld('Intake rep', selPer('rep', R, has ? g.rep : ''))}${fld('Clinical rep', selPer('clin', [['__same', 'Same as intake rep'], ...R], has ? (g.clinSame ? '__same' : g.clin) : '__same'))}${fld('Account manager', selPer('acct', R, has ? g.acct : ''))}${fld('Transition lead', selPer('am', A, has ? g.am : ''))}</div><button type="button" class="btn sm" data-applyall="1">Apply to all ↓</button></div>
+      <div class="tablewrap"><table class="ruletbl"><tr><th>Facility</th><th>Intake rep</th><th>Clinical rep</th><th>Account manager</th><th>Transition lead</th></tr>${fs.map(f => `<tr><td>${esc(f.name)}</td>${['rep', 'clin', 'acct', 'am'].map(p => cell(f, p)).join('')}</tr>`).join('')}</table></div>
       ${fld('Why these reps? (optional)', txt('why', '', 'Goes in the email to the transition lead'))}
-      ${t.group === '__nocorp' ? '' : chk('rule', 'Save the top row as the corporate rule (future facilities under this corporate get it automatically)', true)}`;
+      ${t.group === '__nocorp' ? '' : chk('rule', 'Save the top row as the corporate rule. Future facilities under this corporate get the positions filled in automatically; positions left blank are picked per facility each time.', true)}`;
     },
-    example: t => { const r = repList()[0], a = amList()[0], o = { rep: lc(r.email), am: lc(a.email) }; ruleFacs(t).forEach(f => { o['rep_' + f.id] = lc(r.email); o['am_' + f.id] = lc(a.email); }); return o; },
-    validate: t => { for (const f of ruleFacs(t)) { if (!V('rep_' + f.id) || !V('am_' + f.id)) return 'Pick an intake rep and transition lead for ' + f.name + ' (or use "Apply to all").'; } if (V('rule') && !(V('rep') && V('am'))) return 'To save a corporate rule, fill the top row.'; return ''; },
+    example: t => { const r = repList()[0], a = amList()[0], o = { rep: lc(r.email), am: lc(a.email), clin: '__same', acct: lc(r.email) }; ruleFacs(t).forEach(f => { o['rep_' + f.id] = lc(r.email); o['am_' + f.id] = lc(a.email); }); return o; },
+    validate: t => {
+      const g = t.group === '__nocorp' ? null : grp(t.group), top = p => { const v = V(p); return p === 'clin' && v === '__same' ? '' : v; };
+      if (V('rule') && !['rep', 'clin', 'acct', 'am'].some(p => top(p)) && V('clin') !== '__same') return 'To save a corporate rule, fill at least 1 position in the top row (or untick "Save the top row as the corporate rule").';
+      for (const f of ruleFacs(t)) {
+        // a blank row box takes the top row's value; a position the new rule fills counts as filled
+        const willRule = p => V('rule') && g && (p === 'clin' ? !!V('clin') : !!top(p));
+        const has = p => !!(V(p + '_' + f.id) || top(p) || willRule(p) || (p === 'clin' && V('clin') === '__same') || (p === 'am' && (f.am || (!V('rule') && g && g.am))) || (p !== 'am' && f[p]));
+        const need = [...new Set(['rep', 'am', ...(V('rule') && g ? ['rep', 'clin', 'acct', 'am'].filter(p => p === 'clin' ? !V('clin') : !top(p)) : ruleNeeds(f))])];
+        const miss = need.filter(p => !has(p));
+        if (miss.length) return f.name + ': pick the ' + miss.map(posName).join(', ') + ' (or fill the top row).';
+      }
+      return '';
+    },
     done: (t, ctx) => {
-      const g = grp(t.group);
-      if (g && V('rule')) { g.rep = V('rep'); g.clin = V('clin') || V('rep'); g.am = V('am'); g.acct = V('acct'); }
+      const g = grp(t.group), top = p => V(p) === '__same' ? '' : V(p);
+      if (g && V('rule')) setRule(g, { rep: V('rep'), clin: V('clin'), acct: V('acct'), am: V('am') });
       const byAm = {};
-      ruleFacs(t).forEach(f => { f.rep = V('rep_' + f.id); f.clin = V('clin_' + f.id) || f.rep; f.am = V('am_' + f.id); f.acct = V('acct_' + f.id) || f.acct; (byAm[f.am] = byAm[f.am] || []).push(f); });
+      ruleFacs(t).forEach(f => {
+        f.rep = V('rep_' + f.id) || top('rep') || f.rep || (g && g.rep) || '';
+        f.clin = V('clin_' + f.id) || top('clin') || f.clin || (g && g.clin && !g.clinSame ? g.clin : '') || f.rep;
+        f.acct = V('acct_' + f.id) || top('acct') || f.acct || '';
+        f.am = V('am_' + f.id) || top('am') || f.am || (g && g.am) || '';
+        const a = amOf(f); (byAm[a] = byAm[a] || []).push(f);
+      });
       // skip facilities this transition lead already got a "New transition" for when the request came in
       Object.entries(byAm).map(([am, list]) => [am, list.filter(f => !st.mails.some(m => m.key === 'm:E2:' + f.req + ':' + lc(am)))]).filter(([, list]) => list.length).forEach(([am, list]) => mail({ key: 'm:E2:' + t.key + ':' + am, code: 'E2', to: [am], link: 'none', subject: 'New transition: ' + list.map(f => f.name).join(', '), body: `<p>${esc(ctx.byName)} assigned you ${list.length} facilit${list.length > 1 ? 'ies' : 'y'}${t.group === '__nocorp' ? '' : ' from <b>' + esc(t.group) + '</b>'}: ${list.map(f => esc(f.name) + ' (intake rep ' + esc(nameOf(f.rep)) + ')').join(', ')}.</p>${V('why') ? '<p><b>Why these reps:</b> ' + esc(V('why')) + '</p>' : ''}<p><b>Background:</b> ${esc(list[0].why) || '-'}</p><p>All requests already went out.</p>${amFirstTasks(list)}` }));
     }

@@ -65,6 +65,11 @@ Saving no longer re-downloads everything: after a save, `SPStore.save` updates i
 - `js/combo.js` (loaded last) gives every `<select>` with 5+ non-blank options a type-to-search box. The real select stays in the page (hidden, `.combo-native`) and holds the value; picking sets it and fires `input` + `change`, so all reading/saving code is unchanged. Code that sets a select's value directly must fire `change` so the box shows it.
 - Dropdowns of people, facilities and corporates are A to Z (`byName`, `az`, `sortedPeople`, `peopleOpts`). The saved `settings.people` order is never changed.
 
+## Rep rule (partial, Oct 2026)
+- A corporate's rule can fill only some positions. `setRule` saves it: blank = picked per facility (`g.ruleIndiv` lists those), clinical can be "Same as intake rep" (`g.clinSame`). `applyRule` fills only a facility's empty positions; it never overwrites. `ruleNeeds(f)` = what a facility still needs (intake rep always; the rule's blanks until the Chicago handoff email). The "Pick the reps" task lists only facilities with needs and closes itself when none are left.
+- Corporates saved before this have no `ruleIndiv` and behave exactly as before. Saving the corporate page only rewrites the rule when a rule box changed, so other edits never convert an old rule.
+- Corporate page "Apply to open facilities": tick which of intake / clinical / account manager / transition lead / areas of care to overwrite on every open facility; the rest stay as each facility has them. Ticking a position that's blank in the rule is blocked.
+
 ## Completion
 A facility is never marked complete while its FastCare task is open (since Oct 15 2026). Facilities already complete stay as they are.
 
