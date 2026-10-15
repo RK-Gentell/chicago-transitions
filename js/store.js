@@ -39,7 +39,8 @@ let hasGraph = false;      // GraphMessage: the whole email as Microsoft Graph J
 const graphMessage = m => JSON.stringify({ subject: m.subject, importance: (m.importance || 'Normal').toLowerCase(), body: { contentType: 'HTML', content: m.body }, toRecipients: m.to.map(a => ({ emailAddress: { address: a } })), ccRecipients: m.cc.map(a => ({ emailAddress: { address: a } })), attachments: [m.attachName ? '@@A1@@' : null, m.attachName2 ? '@@A2@@' : null].filter(Boolean) });
 let hasAttach = false;     // same for AttachPath / AttachName (the contacts screenshot in the in-service & contacts request)
 const mailCols = m => Object.assign({ Title: m.key.slice(0, 250), Key: m.key, Code: m.code, ToList: m.to.join(';'), CcList: m.cc.join(';'), Subject: m.subject.slice(0, 250), HtmlBody: m.body, SendOn: m.sendOn, SendStatus: m.status, Facility: m.fac ? String(m.fac) : '', TaskKey: m.task || '', Cond: m.cond ? JSON.stringify(m.cond) : '', ErrorText: m.error || '' }, hasImportance ? { Importance: m.importance || 'Normal' } : {}, hasAttach ? { AttachPath: m.attachPath || '', AttachName: m.attachName || '', AttachPath2: m.attachPath2 || '', AttachName2: m.attachName2 || '' } : {}, hasGraph ? { GraphMessage: graphMessage(m) } : {});
-const mailFrom = (id, f) => ({ _id: id, graphMissing: !f.GraphMessage, importance: f.Importance || 'Normal', attachPath: f.AttachPath || '', attachName: f.AttachName || '', attachPath2: f.AttachPath2 || '', attachName2: f.AttachName2 || '', key: f.Key, code: f.Code, to: (f.ToList || '').split(';').filter(Boolean), cc: (f.CcList || '').split(';').filter(Boolean), subject: f.Subject || '', body: f.HtmlBody || '', sendOn: f.SendOn, day: f.SendOn ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(f.SendOn)) : '', status: f.SendStatus, fac: f.Facility ? +f.Facility : null, task: f.TaskKey || null, cond: f.Cond ? JSON.parse(f.Cond) : null, error: f.ErrorText || '' });
+// noGraph: the row was loaded without GraphMessage (quick loads), so it can't tell whether it's missing
+const mailFrom = (id, f, noGraph) => ({ _id: id, graphMissing: !noGraph && !f.GraphMessage, importance: f.Importance || 'Normal', attachPath: f.AttachPath || '', attachName: f.AttachName || '', attachPath2: f.AttachPath2 || '', attachName2: f.AttachName2 || '', key: f.Key, code: f.Code, to: (f.ToList || '').split(';').filter(Boolean), cc: (f.CcList || '').split(';').filter(Boolean), subject: f.Subject || '', body: f.HtmlBody || '', sendOn: f.SendOn, day: f.SendOn ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(f.SendOn)) : '', status: f.SendStatus, fac: f.Facility ? +f.Facility : null, task: f.TaskKey || null, cond: f.Cond ? JSON.parse(f.Cond) : null, error: f.ErrorText || '' });
 const inboxFrom = (id, f) => ({ _id: id, subject: f.Title || '', from: f.FromAddress || '', to: (f.ToAddresses || '').split(/[;,]/).map(s => s.trim()).filter(Boolean), cc: (f.CcAddresses || '').split(/[;,]/).map(s => s.trim()).filter(Boolean), received: f.Received || '', preview: f.Preview || '', path: f.FilePath || '', processed: f.Processed === 'Yes', fac: f.Facility ? +f.Facility : null });
 function emptyState(today, me) { return { today, me, settings: null, groups: {}, facs: [], tasks: [], reqs: [], mails: [], inbox: [], names: {} }; }
 function applyRecords(rows) {
@@ -224,13 +225,17 @@ function SPStore() {
       const existing = await getAll(listUrl('data') + "/items?$expand=fields($select=Key)&$filter=fields/Key eq 'settings'");
       if (!existing.length) await gfetch(listUrl('data') + '/items', { method: 'POST', body: JSON.stringify({ fields: { Title: 'settings', Key: 'settings', Kind: 'settings', Data: JSON.stringify(defaultSettings()), Archived: 'No' } }) });
     },
+    // opts.archived: also archived rows (first load). opts.full: also the big GraphMessage column (first load and the 90-second refresh),
+    // so emails queued by an old version get it filled in. After a click the app skips it: it roughly halves the download.
     async load(opts = {}) {
-      const me = st.me, today = todayET();
+      const me = st.me, today = todayET(), full = !!(opts.archived || opts.full);
+      const outCols = ['Key', 'Code', 'ToList', 'CcList', 'Subject', 'HtmlBody', 'SendOn', 'SendStatus', 'Facility', 'TaskKey', 'Cond', 'ErrorText', ...(hasImportance ? ['Importance'] : []), ...(hasAttach ? ['AttachPath', 'AttachName', 'AttachPath2', 'AttachName2'] : [])];
+      const outExpand = full ? '&$expand=fields' : '&$expand=fields($select=' + outCols.join(',') + ')';
       const since = d => new Date(Date.now() - d * 864e5).toISOString();
       const [data, outbox, inbox] = await Promise.all([
         getAll(listUrl('data') + "/items?$top=999&$expand=fields($select=Key,Kind,Data,Ct,Am,Archived)" + (opts.archived ? '' : "&$filter=fields/Archived eq 'No'")),
         // 3 separate queries on indexed columns (an "or" across them can hit SharePoint's 5,000-item limit)
-        Promise.all(["fields/SendStatus eq 'Queued'", "fields/SendStatus eq 'Failed'", "fields/SendOn ge '" + since(OUTBOX_DAYS) + "'"].map(f => getAll(listUrl('outbox') + '/items?$top=999&$expand=fields&$filter=' + encodeURIComponent(f)))).then(rs => { const m = new Map(); rs.flat().forEach(it => m.set(it.id, it)); return [...m.values()]; }),
+        Promise.all(["fields/SendStatus eq 'Queued'", "fields/SendStatus eq 'Failed'", "fields/SendOn ge '" + since(OUTBOX_DAYS) + "'"].map(f => getAll(listUrl('outbox') + '/items?$top=999' + outExpand + '&$filter=' + encodeURIComponent(f)))).then(rs => { const m = new Map(); rs.flat().forEach(it => m.set(it.id, it)); return [...m.values()]; }),
         getAll(listUrl('inbox') + "/items?$top=999&$expand=fields&$filter=" + encodeURIComponent("fields/Received ge '" + since(INBOX_DAYS) + "'"))
       ]);
       st = emptyState(today, me);
@@ -239,13 +244,14 @@ function SPStore() {
       data.forEach(it => { const f = it.fields; if (!f.Key || !f.Data) return; ids.data[f.Key] = it.id; let o; try { o = JSON.parse(f.Data); } catch (_) { console.error('Bad row', f.Key); return; } base[f.Key] = f.Data; colBase[f.Key] = snap({ Ct: f.Ct || undefined, Am: f.Am || undefined, Archived: f.Archived || 'No' }); rows.push({ key: f.Key, kind: f.Kind, obj: o }); });
       applyRecords(rows);
       if (!st.settings) st.settings = defaultSettings();
-      st.mails = outbox.map(it => mailFrom(it.id, it.fields)).filter(m => m.key).sort((a, b) => (b.sendOn || '').localeCompare(a.sendOn || ''));
+      st.mails = outbox.map(it => mailFrom(it.id, it.fields, !full)).filter(m => m.key).sort((a, b) => (b.sendOn || '').localeCompare(a.sendOn || ''));
       st.mails.forEach(m => { ids.outbox[m.key] = m._id; mailBase[m.key] = snap([m.status, m.to, m.cc, m.sendOn]); });
       st.inbox = inbox.map(it => inboxFrom(it.id, it.fields)).sort((a, b) => (b.received || '').localeCompare(a.received || ''));
       st.inbox.forEach(m => inboxBase[m._id] = snap([m.processed, m.fac]));
     },
     async save() {
       const errors = [];
+      let reload = false; // true when what's on screen may not match SharePoint any more (then settle() loads again)
       // 1. CT Data rows: new ones are created, changed ones are merged with the latest saved version
       const recs = dataRecords();
       const creates = recs.filter(r => !ids.data[r.key]);
@@ -258,31 +264,50 @@ function SPStore() {
           if (latest[i].status === 200) { try { const l = JSON.parse(latest[i].body.fields.Data); if (snap(l) !== base[r.key]) merged = mergeChanged(JSON.parse(base[r.key]), r.obj, l); } catch (_) { } }
           return { method: 'PATCH', url: listUrl('data') + '/items/' + ids.data[r.key] + '/fields', headers: { 'Content-Type': 'application/json' }, body: Object.assign({ Data: JSON.stringify(merged) }, r.cols || {}) };
         });
-        (await batch(patches)).forEach((res, i) => { if (res.status >= 300) errors.push('Saving ' + changed[i].key + ': ' + errOf(res)); });
+        (await batch(patches)).forEach((res, i) => {
+          const r = changed[i];
+          if (res.status >= 300) { errors.push('Saving ' + r.key + ': ' + errOf(res)); reload = true; return; }
+          // what's saved now is the merged version: make the screen match it exactly, so nothing someone else saved gets lost
+          const saved = patches[i].body.Data, merged = JSON.parse(saved);
+          if (saved !== snap(r.obj)) { Object.keys(r.obj).forEach(k => { if (!(k in merged)) delete r.obj[k]; }); Object.assign(r.obj, merged); }
+          if (r.cols && colBase[r.key] !== colSnap(r) && (r.cols.Archived || 'No') !== JSON.parse(colBase[r.key] || '{}').Archived) reload = true; // archived/unarchived: let the next load sort it
+          base[r.key] = saved; colBase[r.key] = colSnap(r);
+        });
       }
       if (creates.length) {
         const res = await batch(creates.map(r => ({ method: 'POST', url: listUrl('data') + '/items', headers: { 'Content-Type': 'application/json' }, body: { fields: Object.assign({ Title: r.key.slice(0, 250), Key: r.key, Kind: r.kind, Data: JSON.stringify(r.obj), Archived: 'No' }, r.cols || {}) } })));
-        res.forEach((x, i) => { if (x.status >= 300 && !isDup(x)) errors.push('Creating ' + creates[i].key + ': ' + errOf(x)); });
+        res.forEach((x, i) => {
+          const r = creates[i];
+          if (x.status < 300 && x.body && x.body.id) { ids.data[r.key] = x.body.id; base[r.key] = snap(r.obj); colBase[r.key] = colSnap(r); return; }
+          reload = true; // someone else made the same row first (or it failed): load theirs
+          if (!isDup(x)) errors.push('Creating ' + r.key + ': ' + errOf(x));
+        });
       }
       // 2. emails: new ones are created; status / send-time changes only apply if the flow hasn't sent it yet
       const newMails = st.mails.filter(m => !ids.outbox[m.key]);
       if (newMails.length) {
         const res = await batch(newMails.map(m => ({ method: 'POST', url: listUrl('outbox') + '/items', headers: { 'Content-Type': 'application/json' }, body: { fields: mailCols(m) } })));
-        res.forEach((x, i) => { if (x.status >= 300 && !isDup(x)) errors.push('Email "' + newMails[i].subject + '": ' + errOf(x)); });
+        res.forEach((x, i) => {
+          const m = newMails[i];
+          if (x.status < 300 && x.body && x.body.id) { ids.outbox[m.key] = x.body.id; m._id = x.body.id; mailBase[m.key] = snap([m.status, m.to, m.cc, m.sendOn]); m.graphMissing = false; return; }
+          reload = true;
+          if (!isDup(x)) errors.push('Email "' + m.subject + '": ' + errOf(x));
+        });
       }
       const statusChanged = st.mails.filter(m => ids.outbox[m.key] && mailBase[m.key] !== snap([m.status, m.to, m.cc, m.sendOn]));
       if (statusChanged.length) {
         const latest = await batch(statusChanged.map(m => ({ method: 'GET', url: listUrl('outbox') + '/items/' + ids.outbox[m.key] + '?$expand=fields($select=SendStatus)' })));
         const patches = [];
-        statusChanged.forEach((m, i) => { const cur = latest[i].status === 200 ? latest[i].body.fields.SendStatus : null; if (cur === JSON.parse(mailBase[m.key])[0]) patches.push({ method: 'PATCH', url: listUrl('outbox') + '/items/' + ids.outbox[m.key] + '/fields', headers: { 'Content-Type': 'application/json' }, body: Object.assign({ SendStatus: m.status, SendOn: m.sendOn, ToList: m.to.join(';'), CcList: m.cc.join(';'), ErrorText: m.status === 'Queued' ? '' : (m.error || '') }, hasGraph ? { GraphMessage: graphMessage(m) } : {}) }); });
-        if (patches.length) (await batch(patches)).forEach(x => { if (x.status >= 300) errors.push('Email status: ' + errOf(x)); });
+        const patched = [];
+        statusChanged.forEach((m, i) => { const cur = latest[i].status === 200 ? latest[i].body.fields.SendStatus : null; if (cur !== JSON.parse(mailBase[m.key])[0]) { reload = true; return; } patched.push(m); patches.push({ method: 'PATCH', url: listUrl('outbox') + '/items/' + ids.outbox[m.key] + '/fields', headers: { 'Content-Type': 'application/json' }, body: Object.assign({ SendStatus: m.status, SendOn: m.sendOn, ToList: m.to.join(';'), CcList: m.cc.join(';'), ErrorText: m.status === 'Queued' ? '' : (m.error || '') }, hasGraph ? { GraphMessage: graphMessage(m) } : {}) }); });
+        if (patches.length) (await batch(patches)).forEach((x, i) => { const m = patched[i]; if (x.status >= 300) { errors.push('Email status: ' + errOf(x)); reload = true; } else mailBase[m.key] = snap([m.status, m.to, m.cc, m.sendOn]); });
       }
       // emails queued before GraphMessage existed: fill it in so the flow can send them
       if (hasGraph) { const old = st.mails.filter(m => ids.outbox[m.key] && m.graphMissing && m.status === 'Queued' && !statusChanged.includes(m)); if (old.length) (await batch(old.map(m => ({ method: 'PATCH', url: listUrl('outbox') + '/items/' + ids.outbox[m.key] + '/fields', headers: { 'Content-Type': 'application/json' }, body: { GraphMessage: graphMessage(m) } })))).forEach((x, i) => { if (x.status >= 300) errors.push('Email "' + old[i].subject + '": ' + errOf(x)); else old[i].graphMissing = false; }); }
       // 3. inbox rows the app matched to a facility
       const inb = st.inbox.filter(m => inboxBase[m._id] !== snap([m.processed, m.fac]));
-      if (inb.length) (await batch(inb.map(m => ({ method: 'PATCH', url: listUrl('inbox') + '/items/' + m._id + '/fields', headers: { 'Content-Type': 'application/json' }, body: { Processed: m.processed ? 'Yes' : 'No', Facility: m.fac ? String(m.fac) : '' } })))).forEach(x => { if (x.status >= 300) errors.push('Mailbox row: ' + errOf(x)); });
-      return { ok: !errors.length, errors, wrote: changed.length + creates.length + newMails.length + statusChanged.length + inb.length };
+      if (inb.length) (await batch(inb.map(m => ({ method: 'PATCH', url: listUrl('inbox') + '/items/' + m._id + '/fields', headers: { 'Content-Type': 'application/json' }, body: { Processed: m.processed ? 'Yes' : 'No', Facility: m.fac ? String(m.fac) : '' } })))).forEach((x, i) => { if (x.status >= 300) { errors.push('Mailbox row: ' + errOf(x)); reload = true; } else inboxBase[inb[i]._id] = snap([inb[i].processed, inb[i].fac]); });
+      return { ok: !errors.length, errors, reload, wrote: changed.length + creates.length + newMails.length + statusChanged.length + inb.length };
     },
     async allocateIds(n) {
       const made = [];

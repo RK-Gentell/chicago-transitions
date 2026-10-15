@@ -242,7 +242,10 @@ const note = s => '<p style="color:#6B6F75;font-size:9.5pt;margin:-4px 0 10px">'
 // one line per task in emails that cover several: facility name + its own buttons
 const taskList = (items, answers) => '<ul>' + items.map(([label, key]) => '<li style="margin:4px 0">' + label + ' &nbsp; ' + (answers || []).map(a => `<a href="${esc(taskUrl(key, a))}">${esc(a)}</a> &middot; `).join('') + `<a href="${esc(taskUrl(key))}">Open the task</a></li>`).join('') + '</ul>';
 // emails that only inform: they get a line at the bottom saying no action is needed
-const FYI_CODES = new Set(['E1', 'E11', 'E19', 'E23', 'E24']);
+const FYI_CODES = new Set(['E1', 'E11', 'E19', 'E23', 'E24', 'E25']);
+// said in the pumps email and task: from now on, every pump sent to the facility goes into the portal
+const PUMP_RULE = 'Once the pumps are in the portal, any pumps sent to this facility in the future must also be entered in the portal.';
+const PUMP_RULE_MANY = 'Once the pumps are in the portal, any pumps sent to these facilities in the future must also be entered in the portal.';
 function emailHtml(body, m) {
   let links = '';
   if (m.task && m.buttons) links = '<p>' + m.buttons.map(b => `<a href="${esc(appLink('task=' + encodeURIComponent(m.task) + '&answer=' + encodeURIComponent(b)))}" style="${btnStyle}">${esc(b)}</a>`).join('') + `<a href="${esc(appLink('task=' + encodeURIComponent(m.task)))}" style="${btnStyle};background:#6B6F75">Open the task</a></p>`;
@@ -661,8 +664,8 @@ function run() {
     if (f.inPortal && !fTask(f, 'PUMPS') && !f.pumps) {
       const tp = newTask('PUMPS', { fac: f.id, assignee: roleEmail('pumps') });
       queue('E9', tp.assignee, f, tp, (fs, ts) => fs.length === 1
-        ? { code: 'E9', to: [ts[0].assignee], fac: fs[0].id, task: ts[0].key, buttons: ['Checked'], cond: { task: ts[0].key }, subject: 'Pumps: ' + facName(fs[0]), body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p><b>${esc(facName(fs[0]))}</b> (${esc(fs[0].group)}) is in the portal now. Please check if GNS Chicago sent it pumps and add any to "Pump Tracking". Click "Checked" when you're done.</p>` }
-        : { code: 'E9', to: [ts[0].assignee], link: 'none', subject: 'Pumps: ' + fs.length + ' facilities', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>These are in the portal now. Please check if GNS Chicago sent them pumps and add any to "Pump Tracking". Click "Checked" next to each one when you're done.</p>${taskList(fs.map((x, i) => ['<b>' + esc(facName(x)) + '</b>', ts[i].key]), ['Checked'])}` });
+        ? { code: 'E9', to: [ts[0].assignee], fac: fs[0].id, task: ts[0].key, buttons: ['Checked'], cond: { task: ts[0].key }, subject: 'Pumps: ' + facName(fs[0]), body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p><b>${esc(facName(fs[0]))}</b> (${esc(fs[0].group)}) is in the portal now. Please check if GNS Chicago sent it pumps and add any to "Pump Tracking". Click "Checked" when you're done.</p><p><b>${PUMP_RULE}</b></p>` }
+        : { code: 'E9', to: [ts[0].assignee], link: 'none', subject: 'Pumps: ' + fs.length + ' facilities', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>These are in the portal now. Please check if GNS Chicago sent them pumps and add any to "Pump Tracking". Click "Checked" next to each one when you're done.</p><p><b>${PUMP_RULE_MANY}</b></p>${taskList(fs.map((x, i) => ['<b>' + esc(facName(x)) + '</b>', ts[i].key]), ['Checked'])}` });
     }
     // portal setup: rep + price table + all areas of care + in the portal + dates
     if (!fTask(f, 'PORTAL_SETUP') && !preDone(f, 'ps') && f.rep && hasPrice(g) && covKnown(FG(f)) && f.inPortal && f.dates && f.bt) {
@@ -731,4 +734,97 @@ function deleteFacility(f, byName) {
 }
 function markEmail2(f, byName) {
   f.email2 = st.today; f.email2By = byName;
+}
+
+// ---------- put a done task back in the queue (it was checked off by mistake) ----------
+// Nothing the task saved is erased: re-doing it shows what's on file, so the person only changes what was wrong.
+// Not for "Schedule" (it sent the Chicago handoff email: use "Dates changed: send correction") or "Chicago hasn't sent".
+const NO_REOPEN = new Set(['SCHEDULE', 'CHICAGO_FOLLOW', 'EMAIL3_FOLLOW']);
+function canReopen(t) {
+  if (!t || t.status !== 'Done' || NO_REOPEN.has(t.type)) return false;
+  const f = t.fac ? facById(t.fac) : null;
+  return !(f && (f.deleted || f.archived));
+}
+function reopenTask(t, to, by, byName) {
+  if (!canReopen(t)) return 'This task can\'t be put back.';
+  (t.history = t.history || []).push({ doneBy: t.doneBy, doneByName: t.doneByName, doneOn: t.doneOn, reopenedBy: by, reopenedByName: byName, reopenedOn: st.today });
+  t.status = 'Open'; t.doneBy = ''; t.doneByName = ''; t.doneOn = ''; t.reopened = st.today;
+  if (to) { t.assignee = to; t.amTask = false; }
+  t.due = addBiz(st.today, isAm(t.assignee) ? st.settings.amDays : st.settings.helperDays);
+  // the pumps answer is what the task recorded; undo it so the portal setup shows "not checked yet" again
+  if (t.type === 'PUMPS') { const f = facById(t.fac); if (f && f.pumps === 'checked') f.pumps = ''; }
+  mail({ key: 'm:E26:' + t.key + ':' + uid(), code: 'E26', to: [t.assignee], fac: t.fac, task: t.key, cond: { task: t.key },
+    subject: 'Back in your queue: ' + taskTitle(t), body: `<p>${esc(byName)} put this task back in the queue. It still needs to be done. Due ${fmt(t.due)}.</p>` });
+  return '';
+}
+
+// ---------- steps marked done from the facility page (same list as "Already done" on the request) ----------
+// which open tasks each step closes. Corporate-wide steps also close the corporate's own tasks.
+function stepTasks(f, k) {
+  const open = types => tasksOf(f).filter(t => types.includes(t.type) && !done(t) && !t.archived);
+  const g = f.group ? G(f) : null;
+  switch (k) {
+    case 'corp': return g ? st.tasks.filter(t => !t.fac && lc(t.group) === lc(g.name) && ['PRICE', 'EMR'].includes(t.type) && !done(t)) : [];
+    case 'added': return open(['PORTAL_ADD']);
+    case 'pumps': return open(['PUMPS']);
+    case 'gdd': return open(['GDD']);
+    case 'fc': return open(['FASTCARE', 'E3_REPLY', 'EMAIL3_FOLLOW']);
+    case 'ct': return open(['CONTACTS_PORTAL']);
+    case 'emr': return open(['EMR_ADD', 'EMR_PORTAL']);
+    case 'ps': return open(['PORTAL_SETUP']);
+    case 'e1': return open(['BRIGHTREE', 'SCHEDULE', 'ADDRESS']);
+    case 'e2': return open(['CHICAGO_FOLLOW']);
+  }
+  return [];
+}
+// is this step already taken care of? (then its box shows ticked and can't be changed)
+function stepIsDone(f, k) {
+  if (stepTasks(f, k).length) return false; // an open task (new, or put back in the queue) means it isn't done
+  if (preDone(f, k)) return true;
+  const g = G(f);
+  switch (k) {
+    case 'corp': return !!(g.existing || (g.price && g.emr));
+    case 'added': return !!f.inPortal;
+    case 'pumps': return !!f.pumps;
+    case 'gdd': return !!f.gdd;
+    case 'fc': return !!f.e3Done;
+    case 'ct': return (f.contacts || []).every(c => c.inPortal) && !stepTasks(f, 'ct').length && done(fTask(f, 'FASTCARE'));
+    case 'emr': return !!done(fTask(f, 'EMR_PORTAL')) || (!!g.emrNew && !!g.emr);
+    case 'ps': return !!done(fTask(f, 'PORTAL_SETUP'));
+    case 'e1': return !!f.email1;
+    case 'e2': return !!f.email2;
+  }
+  return false;
+}
+// later steps include the earlier ones (same as the request form)
+const stepChain = keys => { const p = new Set(keys); if (p.has('e2')) p.add('e1'); if (p.has('e1')) p.add('ps'); return [...p]; };
+function stepProblem(f, keys) {
+  if (!keys.length) return 'Tick at least 1 step.';
+  if (keys.includes('corp') && !f.group) return 'This facility has no corporate yet. Pick it under "Edit details" first.';
+  if (keys.includes('fc') && !f.group) return '"FastCare info gathered" needs the corporate. Pick it under "Edit details" first.';
+  return '';
+}
+// sets what the skipped steps would have set, closes their open tasks, and tells the people those tasks were sent to
+function markStepsDone(f, picked, by, byName) {
+  const keys = stepChain(picked).filter(k => !stepIsDone(f, k)), g = f.group ? G(f) : null;
+  const err = stepProblem(f, keys); if (err) return { err };
+  const closed = [];
+  keys.forEach(k => stepTasks(f, k).forEach(t => { if (!closed.includes(t)) closed.push(t); }));
+  f.pre = Object.assign({}, f.pre || {}); keys.forEach(k => f.pre[k] = true);
+  f.stepsDone = [...(f.stepsDone || []), { keys, by, byName, on: st.today }];
+  if (keys.includes('corp') && g && !g.price) g.existing = true;
+  if (keys.includes('added')) { f.inPortal = true; f.portalName = f.portalName || f.name; f.addedBefore = true; }
+  if (keys.includes('pumps') && !f.pumps) f.pumps = 'already done';
+  if (keys.includes('gdd') && !f.gdd) f.gdd = 'Already done';
+  if (keys.includes('fc')) { f.email3 = f.email3 || st.today; markE3Done(f, byName); }
+  if (keys.includes('ct')) (f.contacts || []).forEach(c => c.inPortal = true);
+  if (keys.includes('e1') && !f.email1) { f.email1 = st.today; f.email1By = byName + ' (marked on the facility page)'; }
+  if (keys.includes('e2') && !f.email2) { f.email2 = st.today; f.email2By = byName + ' (marked on the facility page)'; }
+  closed.forEach(t => { t.status = 'Done'; t.doneBy = by; t.doneByName = byName; t.doneOn = st.today; t.closedOnFac = true; });
+  // 1 email per person whose task was removed
+  const byWho = {}; closed.forEach(t => { if (t.assignee && t.assignee !== by) (byWho[t.assignee] = byWho[t.assignee] || []).push(t); });
+  Object.entries(byWho).forEach(([who, ts]) => mail({ key: 'm:E25:' + hash(ts.map(t => t.key).sort().join(',')) + ':' + uid(), code: 'E25', to: [who], fac: f.id, link: 'none',
+    subject: (ts.length === 1 ? 'Not needed anymore: ' + taskTitle(ts[0]) : 'Not needed anymore: ' + ts.length + ' tasks for ' + facName(f)),
+    body: `<p>Hi ${esc(first(nameOf(who)))},</p><p>${esc(byName)} marked ${ts.length === 1 ? 'this' : 'these'} as already done for <b>${esc(facName(f))}</b>, so it's been removed from your tasks. You don't need to do ${ts.length === 1 ? 'it' : 'them'}.</p><ul>${ts.map(t => '<li>' + esc(taskTitle(t)) + '</li>').join('')}</ul>` }));
+  return { keys, closed };
 }

@@ -90,14 +90,14 @@ const TT = {
   },
   PRICE: {
     title: t => 'Price table for ' + t.group,
-    form: t => { const g = grp(t.group); return `<div><b>Areas of care and what we're supplying</b>${areasTableHtml(g)}</div><div class="meta">Facilities: ${facsOfGroup(g.name).map(x => esc(x.name)).join(', ')}</div>${fld('"Price Table"', txt('price', '', 'e.g. Infinity (GNS G/XCEL25)'))}`; },
+    form: t => { const g = grp(t.group); return `<div><b>Areas of care and what we're supplying</b>${areasTableHtml(g)}</div><div class="meta">Facilities: ${facsOfGroup(g.name).map(x => esc(x.name)).join(', ')}</div>${fld('"Price Table"', txt('price', g.price || '', 'e.g. Infinity (GNS G/XCEL25)'))}`; },
     example: () => ({ price: 'Infinity (GNS G/XCEL25)' }),
     validate: () => V('price') ? '' : 'Enter the price table.',
     done: t => { grp(t.group).price = V('price'); }
   },
   EMR: {
     title: t => 'EMR access for ' + t.group,
-    form: t => { const gf = facsOfGroup(t.group).filter(x => !x.hold); return `<div class="instr">Enter "Emr", "Emr Username" and "Emr Password" in the portal on each facility below. Save the QR code on the server in the "Authenticator" folder, named the username.</div><div class="note">Only the username goes in here: the system needs it to ask corporate to add new facilities in this group to the same login.</div><ul>${gf.map(x => '<li>' + esc(facName(x)) + (x.inPortal ? '' : ' <b>(not in the portal yet)</b>') + '</li>').join('')}</ul>${fld('"Emr Username"', txt('user', '', 'e.g. ihcm.lakewood'))}${chk('ok', 'Entered in the portal on every facility above, and saved the QR code')}`; },
+    form: t => { const gf = facsOfGroup(t.group).filter(x => !x.hold); return `<div class="instr">Enter "Emr", "Emr Username" and "Emr Password" in the portal on each facility below. Save the QR code on the server in the "Authenticator" folder, named the username.</div><div class="note">Only the username goes in here: the system needs it to ask corporate to add new facilities in this group to the same login.</div><ul>${gf.map(x => '<li>' + esc(facName(x)) + (x.inPortal ? '' : ' <b>(not in the portal yet)</b>') + '</li>').join('')}</ul>${fld('"Emr Username"', txt('user', grp(t.group).emr || '', 'e.g. ihcm.lakewood'))}${chk('ok', 'Entered in the portal on every facility above, and saved the QR code')}`; },
     example: () => ({ user: 'ihcm.lakewood', ok: true }),
     validate: () => V('user') && V('ok') ? '' : 'Enter the username and confirm it\'s in the portal.',
     done: t => { const g = grp(t.group); g.emr = V('user'); g.emrNew = true; }
@@ -109,21 +109,21 @@ const TT = {
   },
   PORTAL_ADD: {
     title: t => 'Add ' + facById(t.fac).name + ' to Brightree',
-    form: t => { const f = facById(t.fac), g = G(f); return `<div class="kv"><div>Name</div><div>${esc(f.name)}</div><div>Address</div><div>${esc(f.address)}</div><div>Corporate</div><div>${g.standalone ? '<b>None. Set it up as its own corporate named "' + esc(f.group) + '"</b>' : esc(f.group)}</div><div>Price table</div><div>${esc(g.price || (g.existing ? 'Already set up for this corporate' : ''))}</div></div><div class="meta">Add it if it isn't there yet. Already there? Just mark done.</div>${fld('Facility name as Brightree shows it', txt('pn', '', 'Waters Of Lagrange- 211526'), 'Every email uses it.')}`; },
+    form: t => { const f = facById(t.fac), g = G(f); return `<div class="kv"><div>Name</div><div>${esc(f.name)}</div><div>Address</div><div>${esc(f.address)}</div><div>Corporate</div><div>${g.standalone ? '<b>None. Set it up as its own corporate named "' + esc(f.group) + '"</b>' : esc(f.group)}</div><div>Price table</div><div>${esc(g.price || (g.existing ? 'Already set up for this corporate' : ''))}</div></div><div class="meta">Add it if it isn't there yet. Already there? Just mark done.</div>${fld('Facility name as Brightree shows it', txt('pn', f.portalName || '', 'Waters Of Lagrange- 211526'), 'Every email uses it.')}`; },
     example: t => ({ pn: facById(t.fac).name + '- 2115' + (26 + t.fac) }),
     validate: () => V('pn') ? '' : 'Enter the name as Brightree shows it.',
     done: t => { const f = facById(t.fac); f.inPortal = true; f.portalName = V('pn'); }
   },
   PUMPS: {
     title: t => 'Pumps: ' + facName(facById(t.fac)),
-    form: () => `<div class="instr">Check if GNS Chicago sent this facility pumps, and add any to "Pump Tracking" in the portal.</div>${chk('c', 'Checked, and added any pumps')}`,
+    form: () => `<div class="instr">Check if GNS Chicago sent this facility pumps, and add any to "Pump Tracking" in the portal.</div><div class="note"><b>${esc(PUMP_RULE)}</b></div>${chk('c', 'Checked, and added any pumps')}`,
     example: () => ({ c: true }), validate: () => V('c') ? '' : 'Tick when you\'ve checked.',
     done: t => { facById(t.fac).pumps = 'checked'; },
     quick: (t, a) => a === 'Checked' ? (facById(t.fac).pumps = 'checked', true) : false
   },
   GDD: {
     title: t => 'GDD orders for ' + facById(t.fac).name + '?',
-    form: () => `${fld('Did it get orders from GDD?', sel('g', ['Yes', 'No']))}<div id="whbox" hidden>${fld('Which warehouse?', sel('wh', st.settings.warehouses, '', true), 'Missing from the list? Ask Raizy to add it in Settings.')}</div>`,
+    form: t => { const f = facById(t.fac); return `${fld('Did it get orders from GDD?', sel('g', ['Yes', 'No'], ['Yes', 'No'].includes(f.gdd) ? f.gdd : ''))}<div id="whbox" ${f.gdd === 'Yes' ? '' : 'hidden'}>${fld('Which warehouse?', sel('wh', st.settings.warehouses, f.gddWh || '', true), 'Missing from the list? Ask Raizy to add it in Settings.')}</div>`; },
     example: () => ({ g: 'No' }),
     validate: () => !V('g') ? 'Pick one.' : (V('g') === 'Yes' && !V('wh')) ? 'Which warehouse?' : '',
     done: t => gddAnswer(facById(t.fac), V('g'), V('wh')),
@@ -140,11 +140,12 @@ const TT = {
       const f = facById(t.fac), n = t.need || {};
       const corpOpts = [...Object.values(st.groups).filter(g => !g.standalone).map(g => g.name).sort(), 'New corporate…', 'No corporate (Independent HQ)'];
       return `<div class="instr">fastcare.gentell.com → "Facility" → "Search:" (1 word if the full name doesn't come up).${n.corp ? ' Corporate = "Ownership-Headquarters" / "Purchasing Group-Chain". "Independent HQ" means no corporate.' : ''} "Actions" → "Edit Facility" for the wound rep + regional, "Actions" → "Contacts" for contacts.</div>
-      ${n.corp ? `<div class="row">${fld('Corporate', sel('fc_grp', corpOpts, '', true))}<div class="field" id="fc_newbox" hidden><label>New corporate name</label>${txt('fc_new', '')}</div></div>` : ''}
-      ${n.addr ? fld('Address', txt('fc_addr', '', '123 Main St, City, ST 12345'), 'State comes from the 2 letters before the zip.') : ''}
+      ${n.corp ? `<div class="row">${fld('Corporate', sel('fc_grp', corpOpts, f.group && grp(f.group) && !grp(f.group).standalone ? grp(f.group).name : '', true))}<div class="field" id="fc_newbox" hidden><label>New corporate name</label>${txt('fc_new', '')}</div></div>` : ''}
+      ${n.addr ? fld('Address', txt('fc_addr', f.address || '', '123 Main St, City, ST 12345'), 'State comes from the 2 letters before the zip.') : ''}
       <div class="row">${fld('Wound and Product Specialist', personPick('w', f.wound), 'Pick from the list; it fills their Gentell email.')}${fld('Regional Manager', personPick('r', f.regional))}</div>
       <div class="sect">Contacts${tip('Take a screenshot of the contacts in FastCare and paste it here: facility contacts, corporate contacts, or both. They go into the in-service & contacts request so the wound rep and regional can check them.')}</div>
       <div class="row"><div class="field"><label>Facility contacts</label>${shotZone('fc', 'fac', shotFor(t, 'fac'))}</div><div class="field"><label>Corporate contacts</label>${shotZone('fc', 'corp', shotFor(t, 'corp'))}</div></div>
+      ${f.contactsShot || f.corpShot ? `<div class="note">Already saved: the ${[f.contactsShot && 'facility', f.corpShot && 'corporate'].filter(Boolean).join(' and ')} contacts screenshot. Paste a new one only to replace it.</div>` : ''}
       ${chk('fc_nocts', 'No FastCare contacts available')}
       ${e3List(f).length ? `<div class="note">These also go in the email (added on the request, facility page or corporate): ${e3List(f).map(c => esc((c.first + ' ' + c.last).trim() || c.email)).join(', ')}</div>` : ''}`;
     },
@@ -156,7 +157,8 @@ const TT = {
       if (n.addr && addressProblem(V('fc_addr'))) return addressProblem(V('fc_addr'));
       if (!readPerson('w')) return 'Pick the wound rep from the list (start typing their name).';
       if (!readPerson('r')) return 'Pick the regional from the list (start typing their name).';
-      if (!shotFor(t, 'fac') && !shotFor(t, 'corp') && !V('fc_nocts')) return 'Paste a screenshot of the facility or corporate contacts (or both), or tick "No FastCare contacts available".';
+      const f = facById(t.fac);
+      if (!shotFor(t, 'fac') && !shotFor(t, 'corp') && !V('fc_nocts') && !f.contactsShot && !f.corpShot) return 'Paste a screenshot of the facility or corporate contacts (or both), or tick "No FastCare contacts available".';
       return '';
     },
     done: t => {
@@ -168,15 +170,17 @@ const TT = {
         else { const g = ensureGroup(v === 'New corporate…' ? V('fc_new') : v); f.group = g.name; if (f.pendingCov) g.cov = Object.assign({}, f.pendingCov, g.cov || {}); }
       }
       const sv = (typeof ui !== 'undefined' && ui.shotSaved) || {};
-      f.contactsShot = sv.fac || null; f.corpShot = sv.corp || null; f.noFcContacts = !f.contactsShot && !f.corpShot && !!V('fc_nocts');
+      // done again after being put back: screenshots already saved stay unless a new one is pasted or "No FastCare contacts" is ticked
+      const keep = !V('fc_nocts');
+      f.contactsShot = sv.fac || (keep && f.contactsShot) || null; f.corpShot = sv.corp || (keep && f.corpShot) || null; f.noFcContacts = !f.contactsShot && !f.corpShot && !!V('fc_nocts');
       f.wound = readPerson('w'); f.regional = readPerson('r');
     }
   },
   BRIGHTREE: {
     title: t => 'Brightree report: ' + facById(t.fac).name,
     form: t => { const f = facById(t.fac); return `<div class="instr"><ol><li>GNS Chicago's Brightree: search the facility, copy "Name" exactly.</li><li>Star → "My Ad-Hoc Reports" → "GNS Lakewood Report". Error → log back in.</li><li>"Sales Order_Facility" "Equals" the name. "Delivery_Scheduled date" "Between" 01/01/2026 and <b>${fmtS(st.today)}</b>. "Request Report".</li><li>"My Scheduled Reports" → wait for "Completed" → open the CSV.</li><li>Sort by "Patient Full Name", then "Delivery Actual date" (column E, <b>never D</b>). Bottom row per area of care (column R).</li><li>"Save As" → "Excel Workbook" → Z: > GNS Chicago Transition > Sales Order Reports > ${esc(f.group || '(corporate)')} (create the folder if it's missing). Name it <span class="q">${esc(facName(f))} ${fmtS(st.today).replace(/\//g, '-')}</span>.</li></ol></div><div class="note">Only what the system needs goes in here: the dates (for scheduling), and how often enteral ships (the Chicago handoff email + schedule). Everything else on the report goes straight into the portal. Dates calculate from it.</div>
-      <div class="row">${fld('Last enteral (Delivery Actual date)', dt('le'))}${fld('Last uro / ostomy / trach', dt('lo'))}</div>
-      <div class="row">${fld('Enteral ships', sel('cad', ['Monthly', 'Weekly', 'Biweekly'], 'Monthly'))}</div>`; },
+      <div class="row">${fld('Last enteral (Delivery Actual date)', dt('le', (f.bt || {}).lastEnt))}${fld('Last uro / ostomy / trach', dt('lo', (f.bt || {}).lastOuts))}</div>
+      <div class="row">${fld('Enteral ships', sel('cad', ['Monthly', 'Weekly', 'Biweekly'], ({ 4: 'Monthly', 2: 'Biweekly', 1: 'Weekly' })[(f.bt || {}).cadence] || 'Monthly'))}</div>`; },
     example: () => ({ le: add(st.today, -19), lo: add(st.today, -23), cad: 'Monthly' }),
     validate: () => { if (!V('le') && !V('lo')) return 'Enter at least 1 last delivery date.'; if ((V('le') && V('le') > st.today) || (V('lo') && V('lo') > st.today)) return 'A last delivery date can\'t be in the future.'; if (!V('cad')) return 'Pick how often enteral ships.'; return ''; },
     done: t => { facById(t.fac).bt = { lastEnt: V('le'), lastOuts: V('lo'), cadence: ({ Monthly: '4', Biweekly: '2', Weekly: '1' })[V('cad')] || '4' }; }

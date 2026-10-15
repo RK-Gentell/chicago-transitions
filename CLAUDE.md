@@ -54,6 +54,13 @@ FastCare contacts go straight into the portal; the FastCare task takes pasted sc
 ## Request form
 Corporate is per line (no dropdown). "Already done" (`PRE_ITEMS` in engine.js, `applyPre`) sets what the skipped steps would have set and the engine skips their tasks; `g.existing` = corporate already in the portal (no price table / EMR access tasks). Info-only emails (`FYI_CODES`) get a "no action needed" line. To-do emails for tasks with steps use `todo()`: one line, details live in the task.
 
+## Put back in the queue / steps marked on the facility page
+- A Done task (not Not needed) can be "Put back in the queue" from its drawer, for the same person or someone else (`reopenTask`, `canReopen`). Not for SCHEDULE / CHICAGO_FOLLOW (they sent or recorded the Chicago emails). Nothing it saved is erased: `t.history` keeps who did it, and forms prefill what's on file so re-doing it doesn't blank anything (FastCare keeps its saved screenshots unless new ones are pasted or "No FastCare contacts" is ticked). PUMPS clears `f.pumps = 'checked'`. The person gets an E26 "Back in your queue" email. Some tasks close themselves again if what they ask for is filled in (price table, address); the UI says so.
+- Facility page "Mark steps done" uses `PRE_ITEMS` (same list as the request). `markStepsDone` sets what the request's "Already done" would, closes the open tasks in `stepTasks` as Done (`t.closedOnFac`), and sends 1 E25 "Not needed anymore" (FYI) email per assignee other than the person ticking. A step with an open task never shows as done.
+
+## Speed
+Saving no longer re-downloads everything: after a save, `SPStore.save` updates its own copy (ids, `base`, and the merged version of each row written in place into the screen's objects), and `settle()` only loads again when `r.reload` is set (a duplicate-key create, a failed write, an email the flow already changed, a row archived/unarchived). Quick loads after a click skip the big `GraphMessage` column; the first load and the 90-second refresh (`load({ full: true })`) include it, so old queued rows still get it filled in. Buttons that start a save show a spinner (`btnLoading`, `pressedBtn`).
+
 ## Cache
 `index.html` loads the css/js with `?v=N`. Bump N on every push that changes css or js, or people keep the old version for up to 10 minutes.
 

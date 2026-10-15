@@ -51,20 +51,35 @@ function renderSetup() {
     catch (e) { $('#setup_msg').innerHTML = `<p class="err">${esc(e.message)}</p><p class="meta">Most likely you're not an owner of the SharePoint site, or IT hasn't approved the app yet.</p>`; $('#do_setup').disabled = false; }
   };
 }
-// run the rules and save until nothing else changes
+// run the rules and save until nothing else changes.
+// After a save the screen already matches what was saved, so it only loads again when it might not
+// (a row someone else created at the same moment, a failed write, an email the flow already sent).
 async function settle() {
   for (let i = 0; i < 3; i++) {
     run();
     const r = await STORE.save();
     if (!r.ok) { ui.errors = r.errors; break; }
-    if (STORE.mode === 'demo') break;
-    await STORE.load();
-    if (!r.wrote) break;
+    if (STORE.mode === 'demo' || !r.wrote) break;
+    if (r.reload) await STORE.load();
   }
+}
+// the button that was clicked shows a spinner until the save is done (render() swaps it out afterwards)
+let pressedBtn = null;
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('button'); pressedBtn = b && !b.closest('.seg') ? b : null; }, true);
+document.addEventListener('submit', e => { pressedBtn = e.submitter || (e.target.querySelector && e.target.querySelector('button[type=submit]')) || null; }, true);
+function btnLoading(b, on, label) {
+  if (!b) return;
+  if (on) { if (!b.dataset.label) b.dataset.label = b.innerHTML; b.classList.add('loading'); b.disabled = true; b.setAttribute('aria-busy', 'true'); b.innerHTML = '<span class="spin" aria-hidden="true"></span>' + esc(label || 'Saving…'); }
+  else if (b.isConnected && b.dataset.label) { b.innerHTML = b.dataset.label; delete b.dataset.label; b.classList.remove('loading'); b.disabled = false; b.removeAttribute('aria-busy'); }
 }
 async function act(fn, okMsg) {
   if (ui.busy) { toast('Still saving the last change…'); return false; }
   ui.busy = true; setStatus('Saving…');
+  const btn = pressedBtn && pressedBtn.isConnected ? pressedBtn : null; pressedBtn = null;
+  btnLoading(btn, true);
+  try { return await act2(fn, okMsg); } finally { btnLoading(btn, false); }
+}
+async function act2(fn, okMsg) {
   try {
     await STORE.load();
     const r = await fn();
@@ -85,7 +100,7 @@ async function act(fn, okMsg) {
 }
 async function poll() {
   if (ui.busy || document.visibilityState !== 'visible' || ui.openTask || ui.openFac || ui.openGroup || ['new', 'settings'].includes(ui.view)) return;
-  try { ui.busy = true; await STORE.load(); await settle(); ui.busy = false; render(); } catch (e) { ui.busy = false; console.error(e); }
+  try { ui.busy = true; await STORE.load({ full: true }); await settle(); ui.busy = false; render(); } catch (e) { ui.busy = false; console.error(e); }
 }
 function readLink() {
   const q = new URLSearchParams(location.search);
@@ -151,7 +166,7 @@ function blockHtml(k, arr, showWho) {
 function taskLine(t, showWho, showFac) {
   const f = t.fac ? facById(t.fac) : null, wait = isWaiting(t), over = !wait && st.today > t.due;
   const where = f ? (showFac ? esc(facName(f)) : esc(f.group)) : esc(t.group === '__nocorp' ? '' : (showFac ? 'Whole corporate' : t.group));
-  return `<div class="task ${wait ? 'wait' : ''} ${over ? 'over' : ''}" data-task="${esc(t.key)}" tabindex="0"><div style="min-width:0"><div class="t">${esc(taskTitle(t))}</div><div class="m">${where}${showWho ? ' · <b>' + esc(nameOf(t.assignee)) + '</b>' : ''}${f ? ' · ' + facLink(f) : ''}</div></div><div class="r">${wait ? '<span class="pill p-chi">Starts ' + fmtS(t.opensOn) + '</span>' : over ? '<span class="pill p-hold">Overdue</span>' : ''}<div>Due ${fmtS(t.due)}</div>${showWho ? remindBtn(t) : ''}</div></div>`;
+  return `<div class="task ${wait ? 'wait' : ''} ${over ? 'over' : ''}" data-task="${esc(t.key)}" tabindex="0"><div style="min-width:0"><div class="t">${esc(taskTitle(t))}</div>${t.type === 'PUMPS' ? `<div class="m pumprule">${esc(PUMP_RULE)}</div>` : ''}<div class="m">${where}${showWho ? ' · <b>' + esc(nameOf(t.assignee)) + '</b>' : ''}${f ? ' · ' + facLink(f) : ''}</div></div><div class="r">${wait ? '<span class="pill p-chi">Starts ' + fmtS(t.opensOn) + '</span>' : over ? '<span class="pill p-hold">Overdue</span>' : ''}<div>Due ${fmtS(t.due)}</div>${showWho ? remindBtn(t) : ''}</div></div>`;
 }
 
 // ---------- page ----------
@@ -401,7 +416,8 @@ function taskDrawer(t) {
   const req = f && f.req ? st.reqs.find(r => r.key === f.req) : null;
   const quick = ui.answer && def.quick && !isDone ? `<div class="card" style="padding:12px;border-color:var(--accent)"><b>Record "${esc(ui.answer)}" for this task?</b><div class="meta">You clicked "${esc(ui.answer)}" in the email.</div><div class="row" style="margin-top:8px"><button class="btn pri" data-quick="${esc(ui.answer)}">Yes, record "${esc(ui.answer)}"</button><button class="btn" data-noquick>No, let me fill the form</button></div></div>` : '';
   return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="Task"><header><div style="min-width:0;flex:1"><div class="meta">${f ? `<span class="linkish" data-fac="${f.id}">${esc(facName(f))}</span> · CT-${pad(f.id)} · ${esc(f.group)} · ${facLink(f).replace('Facility page', 'Open facility page')}` : 'Corporate: ' + esc(t.group === '__nocorp' ? 'not known yet' : t.group)}</div><h1 style="font-size:17px">${esc(def.title(t))}</h1><div class="meta">Assigned to <b>${esc(nameOf(t.assignee))}</b> · due ${fmt(t.due)}${isWaiting(t) ? ' · starts ' + fmt(t.opensOn) : ''} · ${esc(t.status)}</div></div>${closeX}</header><div class="body">
-  ${isDone ? `<div class="okmsg">${t.status === 'Not needed' ? 'Not needed anymore' : 'Done by <b>' + esc(t.doneByName || nameOf(t.doneBy)) + '</b>'} on ${fmt(t.doneOn)}${t.doneBy && t.doneBy !== t.assignee ? ' (assigned to ' + esc(nameOf(t.assignee)) + ')' : ''}.</div>` : `
+  ${isDone ? `<div class="okmsg">${t.status === 'Not needed' ? 'Not needed anymore' : 'Done by <b>' + esc(t.doneByName || nameOf(t.doneBy)) + '</b>'} on ${fmt(t.doneOn)}${t.doneBy && t.doneBy !== t.assignee ? ' (assigned to ' + esc(nameOf(t.assignee)) + ')' : ''}${t.closedOnFac ? ', marked done on the facility page' : ''}.</div>${reopenCard(t, ppl)}` : `
+  ${t.reopened ? `<div class="note">Put back in the queue ${fmt(t.reopened)}${(t.history || []).length ? ' by ' + esc(t.history[t.history.length - 1].reopenedByName) : ''}. What was entered last time is filled in below: change only what was wrong.</div>` : ''}
   ${quick}
   ${me() !== t.assignee ? `<div class="instr">This is ${esc(nameOf(t.assignee))}'s task. You can finish it anyway. It'll say "Done by ${esc(meName())}" and ${esc(nameOf(t.assignee))} gets an FYI email.</div>` : ''}
   ${isWaiting(t) ? `<div class="note">Starts ${fmt(t.opensOn)}. You can do it now if it's ready.</div>` : ''}
@@ -410,6 +426,18 @@ function taskDrawer(t) {
   ${mayRemind(t) ? `<div class="card" style="padding:10px"><div class="row" style="align-items:center;justify-content:space-between"><span class="meta">${(() => { const l = lastReminder(t); return l ? 'Last reminder ' + esc(whenET(remAt(l))) + '.' : 'No reminder sent yet.'; })()} ${canRemind(t) ? '' : 'Next one possible ' + esc(whenET(nextReminderAt(t))) + '.'}</span>${remindBtn(t)}</div></div>` : ''}
   <div class="card" style="padding:10px"><div class="row" style="align-items:center"><label for="re" class="meta">Reassign to</label><select id="re">${ppl.map(([e, n]) => `<option value="${esc(e)}" ${e === t.assignee ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select><button class="btn sm" id="re_go">Reassign</button></div></div>`}
   </div></div>`;
+}
+// a done task checked off by mistake: put it back for the same person or someone else
+function reopenCard(t, ppl) {
+  if (t.status !== 'Done') return '';
+  if (!canReopen(t)) return t.type === 'SCHEDULE' ? '<div class="meta">This one sent the Chicago handoff email, so it can\'t be put back. Dates wrong? Use "Dates changed: send correction" on the facility page.</div>' : '';
+  return `<div class="card" style="padding:10px"><b>Checked off by mistake?</b><div class="meta" style="margin:2px 0 8px">Puts it back in the queue as an open task. Nothing that was entered is erased. The person gets an email that it's back.</div><div class="row" style="align-items:center"><label for="ro" class="meta">Assign to</label><select id="ro">${ppl.map(([e, n]) => `<option value="${esc(e)}" ${e === t.assignee ? 'selected' : ''}>${esc(n)}${e === t.assignee ? ' (same person)' : ''}</option>`).join('')}</select><button class="btn sm pri" id="ro_go">Put back in the queue</button></div></div>`;
+}
+// facility page: tick steps that are already done (same list as "Already done" on the request)
+function stepsCard(f) {
+  if (f.complete || f.deleted) return '';
+  const items = PRE_ITEMS.map(([k, l, h]) => { const d = stepIsDone(f, k), n = d ? 0 : stepTasks(f, k).length; return `<label class="chk ${d ? 'isdone' : ''}"><input type="checkbox" id="fs_pre_${k}" data-step="${k}" ${d ? 'checked disabled' : ''}><span>${esc(l)}${d ? ' <span class="tag">done</span>' : n ? ' <span class="meta">(closes ' + n + ' open task' + (n > 1 ? 's' : '') + ')</span>' : ''}${h ? tip(esc(h)) : ''}</span></label>`; }).join('');
+  return `<details class="card" style="padding:10px" id="fsteps"><summary><b>Mark steps done</b> <span class="meta">(already taken care of outside the app)</span></summary><div class="meta" style="margin:6px 0">Tick what's already done. Their open tasks close, and anyone those tasks were sent to gets an email that they don't need to do them.</div><div class="predone">${items}</div><div id="fs_err"></div><div style="margin-top:8px"><button class="btn sm pri" id="fs_go">Mark ticked steps done</button></div></details>`;
 }
 function corpDrawer(g) {
   const R = peopleOpts(repList()), A = peopleOpts(amList());
@@ -437,6 +465,7 @@ function facDrawer(f) {
     <div><button class="btn sm pri" type="submit">Save details</button></div></form></details>
   <div class="kv"><div>Sheet name</div><div>${esc(f.name)}</div><div>Address</div><div>${esc(f.address) || '-'} ${f.state ? '(' + esc(f.state) + ')' : ''}</div><div>Intake / clinical rep</div><div>${esc(nameOf(f.rep) || 'none')} / ${esc(nameOf(f.clin) || '-')}</div><div>Account manager</div><div>${esc(nameOf(acctOf(f)) || '-')}</div><div>Transition lead</div><div>${esc(nameOf(amOf(f)))}</div><div>Wound rep / regional</div><div>${esc(f.wound ? f.wound.name : '-')} / ${esc(f.regional ? f.regional.name : '-')}</div><div>Why</div><div>${esc(f.why) || '-'}</div>${(f.files || []).length ? `<div>Attachments</div><div>${f.files.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>`).join(', ')}</div>` : ''}<div>Pumps checked / GDD</div><div>${f.pumps === 'already done' ? 'Yes (already done when requested)' : f.pumps ? 'Yes' : 'not yet'} / ${esc(f.gdd || '?')}${f.gddWh ? ' (' + esc(f.gddWh) + ')' : ''}</div>${f.dates ? `<div>First DOS</div><div class="num">${fmt(f.dates.dos)}</div><div>Ordering</div><div class="num">${fmt(f.dates.ord)}</div><div>Delivery</div><div class="num">${fmt(f.dates.del)} · OS Days ${f.dates.os}</div>` : ''}<div>Chicago handoff email</div><div class="num">${fmtS(f.email1) || '-'}</div><div>Transfer notice to facility</div><div class="num">${fmtS(f.email2) || '-'}${f.email2By ? ' (' + esc(f.email2By) + ')' : ''}</div><div>In-service & contacts request</div><div class="num">${fmtS(f.email3) || '-'}</div>${f.email3 ? `<div>Their reply</div><div>${f.e3Done ? 'Taken care of ' + fmtS(f.e3Done) + (f.e3DoneBy ? ' (' + esc(nameOf(f.e3DoneBy) || f.e3DoneBy) + ')' : '') : f.e3Reply ? 'Replied ' + fmtS(f.e3Reply.at) + ', the transition lead is putting it in' : 'Waiting for their reply'}</div>` : ''}${f.pre ? `<div>Done before the request</div><div>${esc(preList(f).join(', '))}</div>` : ''}</div>
   <div class="row">${f.email1 && !f.email2 ? '<button class="btn pri sm" data-fact="e2">Chicago sent the transfer notice</button>' : ''}${f.email1 ? '<button class="btn sm" data-fact="corr">Dates changed: send correction</button>' : ''}${f.email3 && !f.e3Done ? '<button class="btn sm" data-fact="e3done">In-service & contacts: taken care of</button>' : ''}<button class="btn sm" data-fact="hold">${f.hold ? 'Take off hold' : 'Put on hold'}</button>${isAdmin(me()) ? '<button class="btn sm" data-fact="del" style="margin-left:auto">Delete (test or mistake)</button>' : ''}${demo && f.email1 && !f.email2 ? '<button class="btn sm" data-fact="sim_e2">Demo: Chicago CCs the mailbox on the transfer notice</button>' : ''}${demo && f.email3 && !f.e3Done && !f.e3Reply ? '<button class="btn sm" data-fact="sim_e3">Demo: wound rep replies to the in-service & contacts request</button>' : ''}</div>
+  ${stepsCard(f)}
   ${f.dates ? dateEditor(f) : ''}
   <div class="card" style="padding:10px"><b>Areas of care</b><div class="meta">From ${esc(f.group || 'the corporate')} unless changed here. A change here is for this facility only.${f.email1 ? ' The Chicago handoff email already went out: dates won\'t recalculate.' : ' Dates recalculate.'}</div><form id="fcov"><div class="row">${AREAS.map(a => fld(a + ((f.cov && f.cov[a]) ? ' <span class="tag">this facility</span>' : ''), sel('fc_' + a, covOpts(a), FG(f).cov[a], true))).join('')}</div><div class="row" style="margin-top:6px"><button class="btn sm pri" type="submit">Save areas of care</button><button class="btn sm" type="button" data-covreset="1">Use the corporate's</button></div></form></div>
   <div class="card" style="padding:10px"><b>Contacts</b>${f.contacts.length ? contactTable(f.contacts) : '<div class="meta">None yet.</div>'}<div class="sect" style="margin-top:8px">Add contacts${tip('Add contacts any time. They go on the next "Contacts into portal" task' + (f.email3 ? '' : ' and in the in-service & contacts request') + '.')}</div>${contactEditor('fac_cts', '', false)}<div class="row" style="margin-top:6px"><button class="btn sm pri" data-addcts="1">Add contacts</button></div><div id="fac_err"></div></div>
@@ -494,6 +523,20 @@ document.addEventListener('click', async e => {
   // email-button answers (GDD "No", pumps "Checked")
   const qk = T.closest('[data-quick]'); if (qk) { const key = ui.openTask, a = qk.dataset.quick; await act(() => { const t = taskByKey(key); if (!t || done(t)) { toast('Already done.'); return false; } if (!TT[t.type].quick(t, a)) return false; finishTask(t, me(), meName()); }, 'Recorded "' + a + '"'); ui.answer = null; ui.openTask = null; renderLayer(); return; }
   if (T.closest('[data-noquick]')) { ui.answer = null; renderLayer(); return; }
+  if (T.id === 'ro_go') { const key = ui.openTask, to = $('#ro').value; let why = '';
+    const ok = await act(() => { const t = taskByKey(key); why = reopenTask(t, to, me(), meName()); if (why) return false; });
+    if (why) { toast(why); return; }
+    if (ok) { const t = taskByKey(key); if (t && done(t)) toast('Put back, but it closed itself again: what it asks for is already filled in. Change it on the ' + (t.fac ? 'facility' : 'corporate') + ' page instead.'); else if (!ui.errors.length) toast('Back in the queue for ' + nameOf(t.assignee) + '.'); }
+    return; }
+  if (T.id === 'fs_go') { const id = ui.openFac, f0 = facById(id), keys = [...document.querySelectorAll('[data-step]:checked:not(:disabled)')].map(x => x.dataset.step);
+    const all = stepChain(keys).filter(k => !stepIsDone(f0, k)), err = stepProblem(f0, all);
+    if (err) { $('#fs_err').innerHTML = '<div class="err">' + esc(err) + '</div>'; return; }
+    const ts = [...new Set(all.flatMap(k => stepTasks(f0, k)))], others = [...new Set(ts.map(t => t.assignee).filter(a => a && a !== me()))];
+    if (!confirm('Mark ' + all.length + ' step' + (all.length > 1 ? 's' : '') + ' done for ' + facName(f0) + '?' + (ts.length ? '\n\nCloses: ' + ts.map(taskTitle).join('; ') + '.' : '\n\nNo open tasks to close.') + (others.length ? '\n\nEmails ' + others.map(nameOf).join(', ') + ' that ' + (ts.length > 1 ? 'they\'re' : 'it\'s') + ' not needed anymore.' : '') + (all.includes('corp') ? '\n\n"Corporate is already set up" applies to every facility in ' + f0.group + '.' : ''))) return;
+    let res = null;
+    await act(() => { res = markStepsDone(facById(id), keys, me(), meName()); if (res.err) return false; }, 'Marked done');
+    if (res && res.err) toast(res.err);
+    return; }
   if (T.id === 're_go') { const key = ui.openTask, to = $('#re').value; await act(() => { const t = taskByKey(key); if (!t || to === t.assignee) return false; reassign(t, to, meName()); }, 'Reassigned to ' + nameOf(to)); return; }
   if (T.id === 'bk_go') { const r = $('#bk_rep').value, a = $('#bk_am').value, sel = [...ui.sel]; if (!sel.length || (!r && !a)) { toast('Tick rows and pick a rep or transition lead.'); return; } await act(() => { sel.forEach(i => { const f = facById(i); if (!f) return; if (r) { f.rep = r; f.clin = r; } if (a) f.am = a; }); }, 'Updated ' + sel.length + ' facilities'); return; }
   if (T.id === 'bk_hgo') { const v2 = $('#bk_hold').value, sel = [...ui.sel]; if (!sel.length || !v2) { toast('Tick rows and pick a stage.'); return; } await act(() => { sel.forEach(i => { const f = facById(i); if (f && !!f.hold !== (v2 === 'On hold')) holdToggle(f, v2 === 'On hold', meName()); }); }, 'Updated ' + sel.length + ' facilities'); return; }
@@ -552,9 +595,10 @@ document.addEventListener('submit', async e => {
     // the FastCare screenshots are uploaded to SharePoint first; the task then saves where they are
     ui.shotSaved = {};
     if (t.type === 'FASTCARE' && (shotFor(t, 'fac') || shotFor(t, 'corp'))) {
+      const sb = $('#tf button[type=submit]'); btnLoading(sb, true, 'Uploading…'); pressedBtn = sb;
       $('#tf_err').innerHTML = '<div class="meta">Uploading the screenshots…</div>';
       try { const f = facById(t.fac); for (const [w, pre] of [['fac', 'facility'], ['corp', 'corporate']]) { const s = shotFor(t, w); if (!s) continue; const name = pre + '-contacts-CT-' + pad(f.id) + '.jpg'; const r = await STORE.uploadFile('CT-' + pad(f.id), new File([s.blob], name, { type: 'image/jpeg' })); ui.shotSaved[w] = { name, path: r.path, url: r.url, data: r.data || '' }; } }
-      catch (e) { $('#tf_err').innerHTML = '<div class="err">A screenshot didn\'t upload: ' + esc(e.message || e) + '. Try again.</div>'; return; }
+      catch (e) { btnLoading($('#tf button[type=submit]'), false); $('#tf_err').innerHTML = '<div class="err">A screenshot didn\'t upload: ' + esc(e.message || e) + '. Try again.</div>'; return; }
     }
     const ok = await act(() => { const t2 = taskByKey(key); if (!t2 || done(t2)) { toast('Someone already finished this task.'); return false; } TT[t2.type].done(t2, { by: me(), byName: meName() }); finishTask(t2, me(), meName()); }, 'Done. Recorded as done by ' + meName() + '.');
     if (ok) { if (t.type === 'FASTCARE') { delete ui.shots.fc_fac; delete ui.shots.fc_corp; } ui.openTask = null; renderLayer(); }
@@ -604,8 +648,10 @@ document.addEventListener('change', async e => {
   if (id === 'rq_files') addFiles(e.target.files);
   if (id.startsWith('rq_pre_')) setTimeout(() => { const n = document.querySelectorAll('.predone input:checked').length, c = $('#rq_precount'); if (c) c.textContent = n ? n + ' ticked' : ''; });
   // "Already done": later steps imply the earlier ones
-  const chain = ['rq_pre_ps', 'rq_pre_e1', 'rq_pre_e2'], ci = chain.indexOf(id);
-  if (ci >= 0) chain.forEach((c, j) => { const el = document.getElementById(c); if (el && (e.target.checked ? j < ci : j > ci)) el.checked = e.target.checked; });
+  for (const pre of ['rq_pre_', 'fs_pre_']) {
+    const chain = ['ps', 'e1', 'e2'].map(k => pre + k), ci = chain.indexOf(id);
+    if (ci >= 0) chain.forEach((c, j) => { const el = document.getElementById(c); if (el && !el.disabled && (e.target.checked ? j < ci : j > ci)) el.checked = e.target.checked; });
+  }
   if (id === 'fc_grp') { const b = $('#fc_newbox'); if (b) b.hidden = e.target.value !== 'New corporate…'; }
   if (['de_ord', 'de_dos', 'de_del'].includes(id)) deLive(id);
   if (e.target.type === 'hidden') segSync(id);
