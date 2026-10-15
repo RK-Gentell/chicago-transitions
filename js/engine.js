@@ -565,8 +565,23 @@ function processInbox() {
 }
 
 // ---------- the engine ----------
+const TEAM_2026_10_15 = 'Amy Crawford,amy@gentell.com,339|Vicky Custodio,vicky@isgmed.com,371|Bassie Kessner,bassie@gentell.com,376|Apol Escopin,apol@gentell.com,329|Cindy Lampert,cindyl@gentell.com,319|David Alan,david@gentell.com,394|Ester Newman,ester@gentell.com,335|Esti Kaminsky,esti@gentell.com,378|Fay Raider,fay@gentell.com,356|Hannah Goldstein,hannah@gentell.com,346|Leah Rosenshein,leah@gentell.com,341|Leya Sommer,leya@gentell.com,327|Malka Heiman,malka@gentell.com,303|Naomi Cohen,naomi@gentell.com,316|Rochel Schechter,rochel@gentell.com,358|Rochelle Reifman,rochelle@gentell.com,404|Rucky Berger,rucky@gentell.com,353|Shaindy Levin,shaindy@gentell.com,336|Shalini Srinivas,shalini@gentell.com,|Shani Craven,shani@gentell.com,345|Essie Teichman,essie@gentell.com,351|Malky Cohen,malky@gentell.com,387|Raye Gorelik,raye@gentell.com,317|Chani Paretzky,chani@gentell.com,344|Simi Shain,simi@gentell.com,328|Sheva Yeret,sheva@gentell.com,367|Yehuda Jacobs,yehuda@gentell.com,324|Zevi Hofstatter,zevi@gentell.com,343|Shayna Oppen,shayna@gentell.com,405|Jay Ringle,jay@gentell.com,|Tzipora Landau,tzipora@gentell.com,314|Kaila Mandelbaum,kaila@gentell.com,355|Linda Anwaya,linda.anwaya@gentell.com,|Aliyah Price,aliyah.price@gentell.com,|Rafael Banal,rafael.banal@gentell.com,|Shaindel Housman,shaindel@gentell.com,325|Priscilla Cordero,priscilla.cordero@gentell.com,|Etti Pam,etti@gentell.com,|Sori Stein,sori@gentell.com,354|Bessie Snyder,bessie@gentell.com,369|Darlene Kusek,darlene.kusek@gentell.com,|Chaya Hirsch,chaya@gentell.com,|Martha Stern,martha@gentell.com,';
+// One-time add (10/15/2026): everyone from the portal user list, as Rep / account manager.
+// Skips anyone already in Settings (same email or same name). Runs once, then remembers it ran.
+function importTeam20261015() {
+  const s = st.settings; if (!s || (s.imported || []).includes('team-2026-10-15')) return;
+  TEAM_2026_10_15.split('|').forEach(x => {
+    let [name, email, ext] = x.split(',');
+    if (st.demo) email = lc(name).replace(/[^a-z ]/g, '').trim().replace(/\s+/g, '.') + '@demo.gentell.com'; // demo never uses real addresses
+    if (s.people.some(p => lc(p.email) === email || lc(p.name) === lc(name))) return;
+    s.people.push({ name, email, rep: true, ext: ext || '' });
+  });
+  s.imported = [...(s.imported || []), 'team-2026-10-15'];
+}
+
 function run() {
   if (!st || !st.settings) return;
+  importTeam20261015();
   processInbox();
   const groupsSeen = {};
   st.facs.forEach(f => {
