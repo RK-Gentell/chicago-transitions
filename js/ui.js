@@ -22,7 +22,8 @@ async function boot() {
     const ok = await STORE.init();
     if (ok === false) return; // gone to the Microsoft sign-in page
     if (STORE.needsSetup) return renderSetup();
-    await STORE.load();
+    // the first load includes archived rows, so completed facilities archived by older versions come back (run() un-archives them)
+    await STORE.load({ archived: true });
     await settle();
     if (demo) { ui.view = 'new'; }
     readLink();
@@ -133,6 +134,14 @@ function taskLeads(t) {
   if (t.fac) { const f = facById(t.fac); return f ? [amOf(f)] : []; }
   const g = grp(t.group); return [...new Set([g && g.am, ...(g ? facsOfGroup(g.name).map(amOf) : [])].filter(Boolean))];
 }
+// "Send reminder" (transition leads and admins), on "All open tasks" and in the task. Never 2 reminders within 24 hours.
+const mayRemind = t => (isAm(me()) || isAdmin(me())) && t.assignee && t.assignee !== me() && !done(t) && !isWaiting(t);
+function remindBtn(t) {
+  if (!mayRemind(t)) return '';
+  if (canRemind(t)) return `<button class="btn sm remind" data-remind="${esc(t.key)}" title="Emails ${esc(nameOf(t.assignee))} a reminder now">Send reminder</button>`;
+  const l = lastReminder(t);
+  return `<div class="remind-wait" title="Next reminder possible ${esc(whenET(nextReminderAt(t)))}">Reminded ${l ? esc(whenET(remAt(l))) : ''}</div>`;
+}
 const facLink = f => `<a class="linkish faclink" href="?${STORE && STORE.mode === 'demo' ? 'demo&' : ''}fac=${f.id}" data-facpage="${f.id}">Facility page</a>`;
 function blockHtml(k, arr, showWho) {
   const f = k[0] === 'f' ? facById(+k.slice(1)) : null; const [s, c] = f ? stageOf(f) : ['Corporate task', 'p-req'];
@@ -142,7 +151,7 @@ function blockHtml(k, arr, showWho) {
 function taskLine(t, showWho, showFac) {
   const f = t.fac ? facById(t.fac) : null, wait = isWaiting(t), over = !wait && st.today > t.due;
   const where = f ? (showFac ? esc(facName(f)) : esc(f.group)) : esc(t.group === '__nocorp' ? '' : (showFac ? 'Whole corporate' : t.group));
-  return `<div class="task ${wait ? 'wait' : ''} ${over ? 'over' : ''}" data-task="${esc(t.key)}" tabindex="0"><div style="min-width:0"><div class="t">${esc(taskTitle(t))}</div><div class="m">${where}${showWho ? ' · <b>' + esc(nameOf(t.assignee)) + '</b>' : ''}${f ? ' · ' + facLink(f) : ''}</div></div><div class="r">${wait ? '<span class="pill p-chi">Starts ' + fmtS(t.opensOn) + '</span>' : over ? '<span class="pill p-hold">Overdue</span>' : ''}<div>Due ${fmtS(t.due)}</div></div></div>`;
+  return `<div class="task ${wait ? 'wait' : ''} ${over ? 'over' : ''}" data-task="${esc(t.key)}" tabindex="0"><div style="min-width:0"><div class="t">${esc(taskTitle(t))}</div><div class="m">${where}${showWho ? ' · <b>' + esc(nameOf(t.assignee)) + '</b>' : ''}${f ? ' · ' + facLink(f) : ''}</div></div><div class="r">${wait ? '<span class="pill p-chi">Starts ' + fmtS(t.opensOn) + '</span>' : over ? '<span class="pill p-hold">Overdue</span>' : ''}<div>Due ${fmtS(t.due)}</div>${showWho ? remindBtn(t) : ''}</div></div>`;
 }
 
 // ---------- page ----------
@@ -216,7 +225,7 @@ function trackerHtml() {
   const fs = st.facs.filter(f => !f.deleted && (F === 'all' || (F === 'active' && !f.complete && !f.hold) || (F === 'complete' && f.complete) || (F === 'hold' && f.hold)) && (!q || lc(facName(f) + ' ' + f.name + ' ' + f.group + ' CT-' + pad(f.id)).includes(q)));
   const R = peopleOpts(repList()), A = peopleOpts(amList());
   return `<h1>Tracker</h1><p class="sub">Replaces both Chicago tabs on the sheet. Click a row for the facility page. Tick rows to change the rep, transition lead or stage for all of them at once.</p>
-  <div class="filters"><input type="text" id="tq" placeholder="Search facility, corporate, CT number" value="${esc(ui.q)}">${[['active', 'Active'], ['hold', 'On hold'], ['complete', 'Complete'], ['all', 'All']].map(([v, l]) => `<button class="btn sm ${F === v ? 'pri' : ''}" data-tfilter="${v}">${l}</button>`).join('')}<button class="btn sm" id="csv">Download as Excel (CSV)</button>${STORE.mode === 'sp' ? '<button class="btn sm" id="loadarch" title="Facilities completed more than 30 days ago">Show archived</button>' : ''}</div>
+  <div class="filters"><input type="text" id="tq" placeholder="Search facility, corporate, CT number" value="${esc(ui.q)}">${[['active', 'Active'], ['hold', 'On hold'], ['complete', 'Complete'], ['all', 'All']].map(([v, l]) => `<button class="btn sm ${F === v ? 'pri' : ''}" data-tfilter="${v}">${l}</button>`).join('')}<button class="btn sm" id="csv">Download as Excel (CSV)</button></div>
   <div class="bulk"><span class="meta">${ui.sel.size} selected</span><select id="bk_rep"><option value="">Set intake rep…</option>${R.map(r => `<option value="${esc(r[0])}">${esc(r[1])}</option>`).join('')}</select><select id="bk_am"><option value="">Set transition lead…</option>${A.map(r => `<option value="${esc(r[0])}">${esc(r[1])}</option>`).join('')}</select><button class="btn sm" id="bk_go">Apply to selected</button><select id="bk_hold"><option value="">Stage…</option><option>On hold</option><option>Take off hold</option></select><button class="btn sm" id="bk_hgo">Apply</button></div>
   <div class="tablewrap"><table><tr><th></th><th>CT</th><th>Facility</th><th>Corporate</th><th>Stage</th><th>Intake rep</th><th>Account manager</th><th>Transition lead</th><th>First DOS</th><th>Ordering</th><th>Delivery</th></tr>${fs.map(f => { const [s, c] = stageOf(f); return `<tr class="click" data-fac="${f.id}"><td><input type="checkbox" data-selfac="${f.id}" ${ui.sel.has(f.id) ? 'checked' : ''} aria-label="select"></td><td class="num">${pad(f.id)}</td><td><b>${esc(facName(f))}</b></td><td>${esc(f.group)}</td><td><span class="pill ${c}">${s}</span>${atRisk(f) ? ' <span class="pill p-risk">At risk</span>' : ''}</td><td>${esc(nameOf(f.rep)) || '<span class="meta">none</span>'}</td><td>${esc(nameOf(acctOf(f)))}</td><td>${esc(nameOf(amOf(f)))}</td><td class="num">${f.dates ? fmtS(f.dates.dos) : ''}</td><td class="num">${f.dates ? fmtS(f.dates.ord) : ''}</td><td class="num">${f.dates ? fmtS(f.dates.del) : ''}</td></tr>`; }).join('') || '<tr><td colspan="11" class="meta">No facilities here.</td></tr>'}</table></div>`;
 }
@@ -398,6 +407,7 @@ function taskDrawer(t) {
   ${isWaiting(t) ? `<div class="note">Starts ${fmt(t.opensOn)}. You can do it now if it's ready.</div>` : ''}
   ${f && (f.why || (f.files || []).length) ? `<div class="meta">${f.why ? '<b>Why:</b> ' + esc(f.why) : ''}${(f.files || []).length ? ' · <b>Attachments:</b> ' + f.files.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>`).join(', ') : ''}</div>` : ''}
   <form id="tf" style="display:flex;flex-direction:column;gap:12px">${def.form(t)}<div id="tf_err"></div><div class="row" style="align-items:center"><button class="btn pri" type="submit">Mark done</button>${STORE.mode === 'demo' ? '<button class="btn" type="button" id="tf_ex">Fill example</button>' : ''}</div></form>
+  ${mayRemind(t) ? `<div class="card" style="padding:10px"><div class="row" style="align-items:center;justify-content:space-between"><span class="meta">${(() => { const l = lastReminder(t); return l ? 'Last reminder ' + esc(whenET(remAt(l))) + '.' : 'No reminder sent yet.'; })()} ${canRemind(t) ? '' : 'Next one possible ' + esc(whenET(nextReminderAt(t))) + '.'}</span>${remindBtn(t)}</div></div>` : ''}
   <div class="card" style="padding:10px"><div class="row" style="align-items:center"><label for="re" class="meta">Reassign to</label><select id="re">${ppl.map(([e, n]) => `<option value="${esc(e)}" ${e === t.assignee ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select><button class="btn sm" id="re_go">Reassign</button></div></div>`}
   </div></div>`;
 }
@@ -461,6 +471,9 @@ document.addEventListener('click', async e => {
   const cb = T.closest('[data-selfac]'); if (cb) { const i = +cb.dataset.selfac; cb.checked ? ui.sel.add(i) : ui.sel.delete(i); e.stopPropagation(); render(); return; }
   // "Facility page" link inside a task row: opens the facility, not the task (Ctrl/middle-click still opens a new tab)
   const fp = T.closest('[data-facpage]'); if (fp) { if (e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); ui.openFac = +fp.dataset.facpage; ui.openTask = ui.openGroup = null; ui.answer = null; renderLayer(); return; }
+  const rm = T.closest('[data-remind]'); if (rm) { e.stopPropagation(); const key = rm.dataset.remind; let why = '', who = ''; rm.disabled = true;
+    await act(() => { const t = taskByKey(key); who = t ? nameOf(t.assignee) : ''; why = sendReminder(t, me(), meName()); if (why) return false; });
+    if (why) toast(why); else if (!ui.errors.length) toast('Reminder sent to ' + who + '. No more reminders on this task for 24 hours.'); return; }
   const mb = T.closest('[data-mtby]'); if (mb) { ui.myF.by = mb.dataset.mtby; render(); return; }
   const cf = T.closest('[data-clearf]'); if (cf) { if (cf.dataset.clearf === 'my') Object.assign(ui.myF, { fac: '', corp: '' }); else ui.allF = { lead: '', who: '', fac: '', corp: '' }; render(); return; }
   const ds = T.closest('[data-donesort]'); if (ds) { const k = ds.dataset.donesort; ui.doneSort = ui.doneSort.k === k ? { k, dir: -ui.doneSort.dir } : { k, dir: k === 'on' ? -1 : 1 }; render(); return; }

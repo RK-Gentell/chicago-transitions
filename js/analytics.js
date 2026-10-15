@@ -82,8 +82,8 @@ function track(f) {
 function analyticsHtml() {
   const d = anData(), A = ui.an;
   const tabs = [['overview', 'Overview'], ['bottlenecks', 'Bottlenecks'], ['schedule', 'Schedule'], ['corporates', 'Corporates']];
-  const head = `<h1>Analytics</h1><p class="sub">Live from the app's own data: refreshes when the app does. Facilities completed 30+ days ago are archived and only count after "Show archived" (Tracker or here). Business days throughout.</p>
-  <div class="filters"><label class="meta" for="an_lead">Transition lead</label><select id="an_lead"><option value="">All transition leads</option>${d.leads.map(e => `<option value="${esc(e)}" ${e === A.lead ? 'selected' : ''}>${esc(leadName(e))}</option>`).join('')}</select>${STORE.mode === 'sp' ? '<button class="btn sm" id="loadarch">Show archived</button>' : ''}</div>`;
+  const head = `<h1>Analytics</h1><p class="sub">Live from the app's own data: refreshes when the app does. Business days throughout.</p>
+  <div class="filters"><label class="meta" for="an_lead">Transition lead</label><select id="an_lead"><option value="">All transition leads</option>${d.leads.map(e => `<option value="${esc(e)}" ${e === A.lead ? 'selected' : ''}>${esc(leadName(e))}</option>`).join('')}</select></div>`;
   const nav = `<div class="an-tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" class="an-tab" data-antab="${k}" aria-selected="${A.tab === k}">${l}</button>`).join('')}</div>`;
   const body = A.tab === 'bottlenecks' ? anBottlenecks(d) : A.tab === 'schedule' ? anSchedule(d) : A.tab === 'corporates' ? anCorporates(d) : anOverview(d);
   return head + anKpis(d) + nav + body;

@@ -366,6 +366,47 @@ function ensureTaskMails() {
   });
 }
 
+// ---------- reminders: never 2 on the same task within 24 hours ----------
+// A reminder is an E17 email on a task (the automatic ones above, or one a transition lead sends from "All open tasks").
+const REM_GAP = 24 * 3600 * 1000;
+const etDay = iso => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+// demo mode runs on a pretend date: 9 am Eastern on st.today
+const nowMs = () => st && st.demo ? Date.parse(st.today + 'T13:00:00Z') : Date.now();
+const isReminder = m => m.code === 'E17' && !!m.task && m.status !== 'Cancelled' && m.status !== 'Failed';
+const isManualRem = m => /:manual:/.test(m.key);
+// when a reminder goes (or went) out: its send time, or 8 am Eastern on its day for ones queued "now" on another day (demo)
+const remAt = m => m.sendOn && etDay(m.sendOn) === m.day ? Date.parse(m.sendOn) : Date.parse(m.day + 'T12:00:00Z');
+const remindersOf = t => st.mails.filter(m => m.task === t.key && isReminder(m)).sort((a, b) => remAt(a) - remAt(b));
+// the last reminder that went out or is going out now
+function lastReminder(t) { const now = nowMs(); return remindersOf(t).filter(m => m.status === 'Sent' || remAt(m) <= now).pop() || null; }
+function nextReminderAt(t) { const l = lastReminder(t); return l ? remAt(l) + REM_GAP : 0; }
+const canRemind = t => !done(t) && !t.archived && !isWaiting(t) && nowMs() >= nextReminderAt(t);
+// a weekend lands on 8 am Eastern the next business day
+function remSlot(ms) { const d = etDay(new Date(ms).toISOString()); return isWE(d) ? Date.parse(nextBizDay(d) + 'T12:00:00Z') : ms; }
+// scheduled reminders closer than 24 hours to the one before move later. Sent ones and ones a person sent never move.
+function spaceReminders(t) {
+  let last = -Infinity;
+  remindersOf(t).forEach(m => {
+    if (m.status === 'Queued' && !isManualRem(m) && remAt(m) < last + REM_GAP) { const iso = new Date(remSlot(last + REM_GAP)).toISOString(); m.sendOn = iso; m.day = etDay(iso); }
+    last = Math.max(last, remAt(m));
+  });
+}
+// a transition lead (or admin) reminds the person a task is assigned to. Returns '' or why it can't.
+function sendReminder(t, by, byName) {
+  if (!t || done(t)) return 'That task is done already.';
+  if (isWaiting(t)) return 'That task hasn\'t started yet.';
+  if (!canRemind(t)) return 'A reminder went out less than 24 hours ago. Next one possible ' + whenET(nextReminderAt(t)) + '.';
+  const iso = new Date(nowMs() - 60000).toISOString();
+  const m = mail({ key: 'm:E17:' + t.key + ':manual:' + etDay(iso), code: 'E17', to: [t.assignee], cc: [by !== t.assignee ? by : ''], fac: t.fac, task: t.key, cond: { task: t.key, assignee: t.assignee },
+    subject: 'Reminder from ' + byName + ': ' + taskTitle(t), body: `<p>${esc(byName)} sent you a reminder about this task. ${st.today > t.due ? 'It was due' : 'It\'s due'} ${fmt(t.due)}.</p>` });
+  if (!m) return 'A reminder for this task already went out today.';
+  m.sendOn = iso; m.day = etDay(iso);
+  t.lastRemind = { at: iso, by, byName };
+  spaceReminders(t);
+  return '';
+}
+const whenET = ms => new Date(ms).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
 // ---------- email templates ----------
 function repLine(f) { const r = person(f.rep) || {}; return { name: r.name || nameOf(f.rep), email: r.email || f.rep, ext: r.ext || '' }; }
 function email1Body(f) {
@@ -651,10 +692,12 @@ function run() {
   });
   // the "no corporate yet" rep task closes itself once every facility on it has a rep or a corporate
   st.tasks.filter(t => t.type === 'RULE' && t.group === '__nocorp' && !done(t) && !ruleFacs(t).length).forEach(t => { t.status = 'Not needed'; t.doneOn = st.today; });
-  // archive facilities completed 30+ days ago (they drop out of the daily load; Tracker can still show them)
-  st.facs.forEach(f => { if (f.complete && !f.archived && diff(f.complete, st.today) >= 30) { f.archived = true; tasksOf(f).forEach(t => t.archived = true); } });
+  // completed facilities are never archived (Oct 2026). Ones archived before that come back, with their done tasks.
+  // Their open tasks stay put away, so nobody gets reminders on old work. (Deleted facilities stay archived.)
+  st.facs.forEach(f => { if (f.archived && f.complete && !f.deleted) { f.archived = false; tasksOf(f).forEach(t => { if (t.archived && done(t)) t.archived = false; }); } });
   flush();
   ensureTaskMails();
+  st.tasks.forEach(t => { if (!done(t) && !t.archived) spaceReminders(t); });
   st.mails.forEach(m => { if (m.status === 'Queued' && !mailStillValid(m)) m.status = 'Cancelled'; });
 }
 

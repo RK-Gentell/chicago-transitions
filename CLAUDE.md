@@ -38,6 +38,12 @@ Never say "Email 1/2/3" in the UI or emails. Internally (code, `email1`/`email2`
 ## Email 3 replies
 Email 3 goes to the wound rep + regional. `processInbox` treats any email to the mailbox (in To) with the facility name + "transfer from gns chicago" in the subject, received on/after Email 3, as a reply, unless it's from the mailbox, GNS Chicago (Email 1 To/CC) or someone on the team who isn't the wound rep/regional. A reply sets `f.e3Reply` and makes an `E3_REPLY` task for the transition lead (put their info in; or "keep following up", which starts a new follow-up round `f.e3Round`). No reply: `chaseEmail3` queues 1 step at a time (+3 business days, +3, then an alert to the transition lead). Manual: "In-service & contacts: taken care of" on the facility page. Completion waits on `e3Done`. Follow-ups (E15, E16F, E16A, E17) go out as High importance.
 
+## Reminders
+Reminders are E17 emails on a task: automatic (1, 2, 4 business days after due, `ensureTaskMails`) or sent by a transition lead / admin with "Send reminder" (All open tasks, or in the task; key `m:E17:<task>:manual:<day>`). Never 2 on the same task within 24 hours: `canRemind` blocks a manual one, and `spaceReminders` (end of `run()`) moves any queued automatic one that's too close to the one before (weekend → 8 am Eastern next business day). Moved send times are saved (the Outbox snapshot includes SendOn). Demo mode uses a pretend clock: 9 am Eastern on the demo day.
+
+## Archiving
+Completed facilities are never archived (since Oct 2026). The first load after opening the app includes archived rows, and `run()` un-archives completed facilities an older version archived, plus their done tasks (open ones stay archived so no old reminders go out). Only deleted facilities stay archived.
+
 ## Address and dates
 The state (from the address) picks the ship point, which sets the delivery date. `stateOK(f)` = a state with a ship point in Settings. No `stateOK` → `calcDates` returns null and `f.dates` is cleared (before the Chicago handoff email), so portal setup and scheduling can't happen. Once FastCare is done (or skipped), a missing/bad address makes an `ADDRESS` task for the transition lead; it closes itself when the address is fixed anywhere. Every address input uses `addressProblem()`. A state change after the handoff email emails the transition lead (dates stay as sent).
 

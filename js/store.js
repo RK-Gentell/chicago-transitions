@@ -76,6 +76,7 @@ function DemoStore() {
     async init() {
       const today = '2026-10-08';
       st = emptyState(today, null);
+      st.demo = true; // reminders use a pretend clock (9 am on the demo day)
       st.settings = demoSettings();
       st.me = { email: lc(person('Raizy Kreiser').email), name: 'Raizy Kreiser' };
       const sak = ensureGroup('SAK Healthcare');
@@ -239,7 +240,7 @@ function SPStore() {
       applyRecords(rows);
       if (!st.settings) st.settings = defaultSettings();
       st.mails = outbox.map(it => mailFrom(it.id, it.fields)).filter(m => m.key).sort((a, b) => (b.sendOn || '').localeCompare(a.sendOn || ''));
-      st.mails.forEach(m => { ids.outbox[m.key] = m._id; mailBase[m.key] = snap([m.status, m.to, m.cc]); });
+      st.mails.forEach(m => { ids.outbox[m.key] = m._id; mailBase[m.key] = snap([m.status, m.to, m.cc, m.sendOn]); });
       st.inbox = inbox.map(it => inboxFrom(it.id, it.fields)).sort((a, b) => (b.received || '').localeCompare(a.received || ''));
       st.inbox.forEach(m => inboxBase[m._id] = snap([m.processed, m.fac]));
     },
@@ -263,13 +264,13 @@ function SPStore() {
         const res = await batch(creates.map(r => ({ method: 'POST', url: listUrl('data') + '/items', headers: { 'Content-Type': 'application/json' }, body: { fields: Object.assign({ Title: r.key.slice(0, 250), Key: r.key, Kind: r.kind, Data: JSON.stringify(r.obj), Archived: 'No' }, r.cols || {}) } })));
         res.forEach((x, i) => { if (x.status >= 300 && !isDup(x)) errors.push('Creating ' + creates[i].key + ': ' + errOf(x)); });
       }
-      // 2. emails: new ones are created; status changes only apply if the flow hasn't sent it yet
+      // 2. emails: new ones are created; status / send-time changes only apply if the flow hasn't sent it yet
       const newMails = st.mails.filter(m => !ids.outbox[m.key]);
       if (newMails.length) {
         const res = await batch(newMails.map(m => ({ method: 'POST', url: listUrl('outbox') + '/items', headers: { 'Content-Type': 'application/json' }, body: { fields: mailCols(m) } })));
         res.forEach((x, i) => { if (x.status >= 300 && !isDup(x)) errors.push('Email "' + newMails[i].subject + '": ' + errOf(x)); });
       }
-      const statusChanged = st.mails.filter(m => ids.outbox[m.key] && mailBase[m.key] !== snap([m.status, m.to, m.cc]));
+      const statusChanged = st.mails.filter(m => ids.outbox[m.key] && mailBase[m.key] !== snap([m.status, m.to, m.cc, m.sendOn]));
       if (statusChanged.length) {
         const latest = await batch(statusChanged.map(m => ({ method: 'GET', url: listUrl('outbox') + '/items/' + ids.outbox[m.key] + '?$expand=fields($select=SendStatus)' })));
         const patches = [];
