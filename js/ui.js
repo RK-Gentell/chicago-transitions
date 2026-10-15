@@ -5,7 +5,9 @@
    ===================================================================== */
 
 let STORE = null; // the store (demo or SharePoint)
-const ui = { shots: {}, view: 'mytasks', openTask: null, openFac: null, openGroup: null, answer: null, sel: new Set(), busy: false, errors: [], forWho: null, trackerFilter: 'active', q: '', outFilter: 'active', dropped: [] };
+const ui = { shots: {}, view: 'mytasks', openTask: null, openFac: null, openGroup: null, answer: null, sel: new Set(), busy: false, errors: [], forWho: null, trackerFilter: 'active', q: '', outFilter: 'active', dropped: [],
+  allF: { lead: '', who: '', fac: '', corp: '' }, myF: { fac: '', corp: '', by: 'fac' }, doneSort: { k: 'on', dir: -1 }, doneAll: false,
+  an: { tab: 'overview', lead: '', corp: null, step: null } };
 const $ = s => document.querySelector(s);
 const me = () => st.me.email;
 const meName = () => st.me.name;
@@ -108,21 +110,39 @@ function waitingOn(f) {
   if (f.email2 && !done(fTask(f, 'GDD'))) w.push('GDD answer (' + roleName('gdd') + ')');
   return w;
 }
-function groupedTasks(ts, showWho, allFacs) {
+// by = 'fac' (a block per facility; corporate tasks get their own block) or 'corp' (a block per corporate)
+// facOk(f): which facilities to list under allFacs (the ones with nothing to do right now)
+function groupedTasks(ts, showWho, allFacs, facOk, by) {
+  if (by === 'corp') return corpBlocks(ts, showWho);
   const g = {}; ts.forEach(t => { const k = t.fac ? 'f' + t.fac : 'g' + t.group; (g[k] = g[k] || []).push(t); });
   const blocks = Object.entries(g).map(([k, arr]) => [k, arr.sort(cmp)]).sort((a, b) => cmp(a[1][0], b[1][0]));
   let html = blocks.map(([k, arr]) => blockHtml(k, arr, showWho)).join('');
-  if (allFacs) html += st.facs.filter(f => !f.complete && !f.archived && !g['f' + f.id]).map(f => { const [s2, c2] = stageOf(f); const w = waitingOn(f); return `<div class="fgroup"><div class="fhead"><b class="linkish" data-fac="${f.id}">${esc(facName(f))}</b><span class="meta">${esc(f.group)}</span><span class="pill ${c2}">${s2}</span></div><div class="instr">Nothing to do on this facility right now.${w.length ? ' Waiting on: ' + w.map(esc).join(' · ') : ''}</div></div>`; }).join('');
+  if (allFacs) html += st.facs.filter(f => !f.complete && !f.archived && !g['f' + f.id] && (!facOk || facOk(f))).map(f => { const [s2, c2] = stageOf(f); const w = waitingOn(f); return `<div class="fgroup"><div class="fhead"><b class="linkish" data-fac="${f.id}">${esc(facName(f))}</b><span class="meta">${esc(f.group)}</span><span class="pill ${c2}">${s2}</span></div><div class="instr">Nothing to do on this facility right now.${w.length ? ' Waiting on: ' + w.map(esc).join(' · ') : ''}</div></div>`; }).join('');
   return html;
 }
+const corpKey = t => { const f = t.fac ? facById(t.fac) : null; return lc(f ? (f.group || '__nocorp') : t.group); };
+function corpBlocks(ts, showWho) {
+  const g = {}; ts.forEach(t => { const k = corpKey(t); (g[k] = g[k] || []).push(t); });
+  return Object.entries(g).map(([k, arr]) => [k, arr.sort(cmp)]).sort((a, b) => cmp(a[1][0], b[1][0])).map(([k, arr]) => {
+    const gr = grp(k), name = k === '__nocorp' ? 'No corporate yet' : (gr ? gr.name : arr[0].group || k), nf = new Set(arr.filter(t => t.fac).map(t => t.fac)).size;
+    return `<div class="fgroup"><div class="fhead"><b>${esc(name)}</b><span class="meta">${nf ? nf + ' facilit' + (nf > 1 ? 'ies' : 'y') : 'whole corporate'}</span><span class="meta" style="margin-left:auto">${arr.length} task${arr.length > 1 ? 's' : ''}</span></div>${arr.map(t => taskLine(t, showWho, true)).join('')}</div>`;
+  }).join('');
+}
+// the transition lead(s) running a task: the facility's, or for a corporate task the corporate's and its facilities'
+function taskLeads(t) {
+  if (t.fac) { const f = facById(t.fac); return f ? [amOf(f)] : []; }
+  const g = grp(t.group); return [...new Set([g && g.am, ...(g ? facsOfGroup(g.name).map(amOf) : [])].filter(Boolean))];
+}
+const facLink = f => `<a class="linkish faclink" href="?${STORE && STORE.mode === 'demo' ? 'demo&' : ''}fac=${f.id}" data-facpage="${f.id}">Facility page</a>`;
 function blockHtml(k, arr, showWho) {
   const f = k[0] === 'f' ? facById(+k.slice(1)) : null; const [s, c] = f ? stageOf(f) : ['Corporate task', 'p-req'];
   const w = f ? waitingOn(f) : [];
   return `<div class="fgroup"><div class="fhead"><b ${f ? `class="linkish" data-fac="${f.id}"` : ''}>${esc(f ? facName(f) : (arr[0].group === '__nocorp' ? 'No corporate yet' : arr[0].group))}</b><span class="meta">${f ? esc(f.group || 'corporate not known yet') : 'whole corporate'}</span><span class="pill ${c}">${s}</span>${f && atRisk(f) ? '<span class="pill p-risk">At risk</span>' : ''}<span class="meta" style="margin-left:auto">${arr.length} task${arr.length > 1 ? 's' : ''}</span></div>${arr.map(t => taskLine(t, showWho)).join('')}${w.length ? `<div class="meta" style="padding-left:4px">Also waiting on: ${w.map(esc).join(' · ')}</div>` : ''}</div>`;
 }
-function taskLine(t, showWho) {
+function taskLine(t, showWho, showFac) {
   const f = t.fac ? facById(t.fac) : null, wait = isWaiting(t), over = !wait && st.today > t.due;
-  return `<div class="task ${wait ? 'wait' : ''} ${over ? 'over' : ''}" data-task="${esc(t.key)}" tabindex="0"><div style="min-width:0"><div class="t">${esc(taskTitle(t))}</div><div class="m">${f ? esc(f.group) : esc(t.group === '__nocorp' ? '' : t.group)}${showWho ? ' · <b>' + esc(nameOf(t.assignee)) + '</b>' : ''}</div></div><div class="r">${wait ? '<span class="pill p-chi">Starts ' + fmtS(t.opensOn) + '</span>' : over ? '<span class="pill p-hold">Overdue</span>' : ''}<div>Due ${fmtS(t.due)}</div></div></div>`;
+  const where = f ? (showFac ? esc(facName(f)) : esc(f.group)) : esc(t.group === '__nocorp' ? '' : (showFac ? 'Whole corporate' : t.group));
+  return `<div class="task ${wait ? 'wait' : ''} ${over ? 'over' : ''}" data-task="${esc(t.key)}" tabindex="0"><div style="min-width:0"><div class="t">${esc(taskTitle(t))}</div><div class="m">${where}${showWho ? ' · <b>' + esc(nameOf(t.assignee)) + '</b>' : ''}${f ? ' · ' + facLink(f) : ''}</div></div><div class="r">${wait ? '<span class="pill p-chi">Starts ' + fmtS(t.opensOn) + '</span>' : over ? '<span class="pill p-hold">Overdue</span>' : ''}<div>Due ${fmtS(t.due)}</div></div></div>`;
 }
 
 // ---------- page ----------
@@ -142,16 +162,26 @@ function render() {
   // nav
   const mine = openTasksFor(forWho()).filter(t => !isWaiting(t)).length;
   const open = st.tasks.filter(t => !done(t) && !t.archived).length;
-  const nav = [['mytasks', 'My tasks', mine], ['tracker', 'Tracker', st.facs.filter(f => !f.complete).length], ['all', 'All open tasks', open], ['groups', 'Corporates', Object.keys(st.groups).length], ['sep'], ['inbox', 'Mailbox', st.inbox.length], ['outbox', 'Outbox', st.mails.filter(m => m.status === 'Queued').length || ''], ...(admin ? [['settings', 'Settings', '']] : []), ['sep'], ['new', '+ New transition request', '']];
+  const nav = [['mytasks', 'My tasks', mine], ['tracker', 'Tracker', st.facs.filter(f => !f.complete).length], ['all', 'All open tasks', open], ['groups', 'Corporates', Object.keys(st.groups).length], ['analytics', 'Analytics', ''], ['sep'], ['inbox', 'Mailbox', st.inbox.length], ['outbox', 'Outbox', st.mails.filter(m => m.status === 'Queued').length || ''], ...(admin ? [['settings', 'Settings', '']] : []), ['sep'], ['new', '+ New transition request', '']];
   $('#nav').innerHTML = nav.map(n => n[0] === 'sep' ? '<div class="sep"></div>' : `<button class="${ui.view === n[0] ? 'on' : ''}" data-view="${n[0]}"><span>${n[1]}</span><span class="count">${n[2]}</span></button>`).join('');
   const m = $('#main');
   if (ui.view === 'mytasks') {
-    const ts = openTasksFor(forWho());
-    const who = admin && !demo ? `<div class="filters"><label class="meta" for="forwho">Show tasks for</label><select id="forwho">${[...new Set([me(), ...people().map(p => lc(p.email)).filter(Boolean)])].map(e => `<option value="${esc(e)}" ${e === forWho() ? 'selected' : ''}>${esc(nameOf(e))}${e === me() ? ' (me)' : ''}</option>`).join('')}</select></div>` : '';
-    m.innerHTML = `<h1>My tasks</h1><p class="sub">${forWho() === me() ? 'Your' : esc(nameOf(forWho())) + '\'s'} open tasks, grouped by facility, most urgent first. Click one to do it. Each one also came by email.</p>${who}<div class="list">${groupedTasks(ts, false) || '<div class="empty">Nothing to do right now.</div>'}</div>`;
+    const all = openTasksFor(forWho()), F = ui.myF;
+    const ts = all.filter(t => (!F.fac || t.fac === +F.fac) && (!F.corp || corpKey(t) === F.corp));
+    const who = admin && !demo ? `<label class="meta" for="forwho">Show tasks for</label><select id="forwho">${[...new Set([me(), ...people().map(p => lc(p.email)).filter(Boolean)])].map(e => `<option value="${esc(e)}" ${e === forWho() ? 'selected' : ''}>${esc(nameOf(e))}${e === me() ? ' (me)' : ''}</option>`).join('')}</select>` : '';
+    const flt = `<div class="filters">${who}${facSel('mt_fac', all, F.fac)}${corpSel('mt_corp', all, F.corp)}<span class="meta" style="margin-left:6px">Group by</span><div class="seg" role="group">${[['fac', 'Facility'], ['corp', 'Corporate']].map(([v, l]) => `<button type="button" class="segb ${F.by === v ? 'on' : ''}" data-mtby="${v}" aria-pressed="${F.by === v}">${l}</button>`).join('')}</div>${F.fac || F.corp ? '<button class="btn sm" data-clearf="my">Clear filters</button>' : ''}</div>`;
+    m.innerHTML = `<h1>My tasks</h1><p class="sub">${forWho() === me() ? 'Your' : esc(nameOf(forWho())) + '\'s'} open tasks, grouped by ${F.by === 'corp' ? 'corporate' : 'facility'}, most urgent first. Click one to do it. Each one also came by email.</p>${flt}<div class="list">${groupedTasks(ts, false, false, null, F.by) || `<div class="empty">${all.length ? 'No tasks match these filters.' : 'Nothing to do right now.'}</div>`}</div>`;
   } else if (ui.view === 'all') {
-    const ts = st.tasks.filter(t => !done(t) && !t.archived && !(t.fac && facById(t.fac) && facById(t.fac).hold));
-    m.innerHTML = `<h1>All open tasks</h1><p class="sub">Anyone can open anyone's task and finish it. The app records who actually did it, and the person it was assigned to gets an FYI email.</p><div class="list">${groupedTasks(ts, true, true) || '<div class="empty">No open tasks.</div>'}</div>${doneTable()}`;
+    const all = st.tasks.filter(t => !done(t) && !t.archived && !(t.fac && facById(t.fac) && facById(t.fac).hold)), F = ui.allF;
+    const ts = all.filter(t => (!F.who || t.assignee === F.who) && (!F.lead || taskLeads(t).includes(F.lead)) && (!F.fac || t.fac === +F.fac) && (!F.corp || corpKey(t) === F.corp));
+    // facilities with nothing to do: only when no person filter is set (they have no tasks for anyone)
+    const facOk = F.who ? () => false : f => (!F.lead || amOf(f) === F.lead) && (!F.fac || f.id === +F.fac) && (!F.corp || lc(f.group || '__nocorp') === F.corp);
+    const leads = [...new Set([...all.flatMap(taskLeads), ...st.facs.filter(f => !f.complete && !f.archived).map(amOf)].filter(Boolean))].sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+    const whos = [...new Set(all.map(t => t.assignee).filter(Boolean))].sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+    const open = st.facs.filter(f => !f.complete && !f.archived && !f.hold);
+    const flt = `<div class="filters"><select id="at_lead" aria-label="Transition lead"><option value="">All transition leads</option>${leads.map(e => `<option value="${esc(e)}" ${e === F.lead ? 'selected' : ''}>${esc(nameOf(e))}</option>`).join('')}</select><select id="at_who" aria-label="Assigned to"><option value="">Anyone's tasks</option>${whos.map(e => `<option value="${esc(e)}" ${e === F.who ? 'selected' : ''}>${esc(nameOf(e))}${e === me() ? ' (me)' : ''}</option>`).join('')}</select>${facSel('at_fac', all, F.fac, open)}${corpSel('at_corp', all, F.corp, open)}${F.lead || F.who || F.fac || F.corp ? '<button class="btn sm" data-clearf="all">Clear filters</button>' : ''}<span class="meta">${ts.length} of ${all.length} tasks</span></div>`;
+    m.innerHTML = `<h1>All open tasks</h1><p class="sub">Anyone can open anyone's task and finish it. The app records who actually did it, and the person it was assigned to gets an FYI email. "Transition lead" shows every task on the facilities they run, whoever it's assigned to.</p>${flt}<div class="list">${groupedTasks(ts, true, true, facOk) || '<div class="empty">No open tasks match.</div>'}</div>${doneTable()}`;
+  } else if (ui.view === 'analytics') { m.innerHTML = analyticsHtml(); analyticsAfter();
   } else if (ui.view === 'tracker') m.innerHTML = trackerHtml();
   else if (ui.view === 'groups') m.innerHTML = groupsHtml();
   else if (ui.view === 'inbox') m.innerHTML = inboxHtml();
@@ -160,10 +190,26 @@ function render() {
   else if (ui.view === 'new') { m.innerHTML = requestHtml(); corpInfo(); }
   renderLayer();
 }
+// filter dropdowns: facilities / corporates that have tasks in the list (plus any extra facilities passed in)
+function facSel(id, ts, v, extra) {
+  const ids = [...new Set([...ts.map(t => t.fac).filter(Boolean), ...(extra || []).map(f => f.id)])].map(facById).filter(Boolean).sort((a, b) => facName(a).localeCompare(facName(b)));
+  return `<select id="${id}" aria-label="Facility"><option value="">All facilities</option>${ids.map(f => `<option value="${f.id}" ${String(f.id) === String(v) ? 'selected' : ''}>${esc(facName(f))}</option>`).join('')}</select>`;
+}
+function corpSel(id, ts, v, extra) {
+  const ks = [...new Set([...ts.map(corpKey), ...(extra || []).map(f => lc(f.group || '__nocorp'))])].filter(Boolean);
+  const label = k => k === '__nocorp' ? 'No corporate yet' : (grp(k) ? grp(k).name : k);
+  return `<select id="${id}" aria-label="Corporate"><option value="">All corporates</option>${ks.sort((a, b) => label(a).localeCompare(label(b))).map(k => `<option value="${esc(k)}" ${k === v ? 'selected' : ''}>${esc(label(k))}</option>`).join('')}</select>`;
+}
+// sortable by task, assigned to, done by, date; newest first by default
+const DONE_COLS = [['task', 'Task', t => taskTitle(t)], ['fac', 'Facility', t => { const f = t.fac && facById(t.fac); return f ? facName(f) : ''; }], ['who', 'Assigned to', t => nameOf(t.assignee)], ['by', 'Done by', t => t.doneByName || nameOf(t.doneBy)], ['on', 'On', t => t.doneOn || '']];
 function doneTable() {
-  const ts = st.tasks.filter(t => t.status === 'Done' && !t.archived).sort((a, b) => (b.doneOn || '').localeCompare(a.doneOn || '')).slice(0, 15);
-  if (!ts.length) return '';
-  return `<h2>Recently done</h2><div class="tablewrap"><table><tr><th>Task</th><th>Assigned to</th><th>Done by</th><th>On</th></tr>${ts.map(t => `<tr class="click" data-task="${esc(t.key)}"><td>${esc(taskTitle(t))}</td><td>${esc(nameOf(t.assignee))}</td><td>${t.doneBy !== t.assignee ? '<b>' + esc(t.doneByName || nameOf(t.doneBy)) + '</b>' : esc(t.doneByName || nameOf(t.doneBy))}</td><td class="num">${fmtS(t.doneOn)}</td></tr>`).join('')}</table></div>`;
+  const all = st.tasks.filter(t => t.status === 'Done' && !t.archived);
+  if (!all.length) return '';
+  const S = ui.doneSort, col = DONE_COLS.find(c => c[0] === S.k) || DONE_COLS[4], idx = new Map(st.tasks.map((t, i) => [t, i]));
+  const ts = all.slice().sort((a, b) => { const x = col[2](a), y = col[2](b); return (x < y ? -1 : x > y ? 1 : 0) * S.dir || (b.doneOn || '').localeCompare(a.doneOn || '') || idx.get(b) - idx.get(a); });
+  const shown = ui.doneAll ? ts : ts.slice(0, 25);
+  const th = ([k, l]) => `<th aria-sort="${S.k === k ? (S.dir > 0 ? 'ascending' : 'descending') : 'none'}">${k === 'fac' ? l : `<button class="thsort" data-donesort="${k}">${l}${S.k === k ? (S.dir > 0 ? ' ▲' : ' ▼') : ''}</button>`}</th>`;
+  return `<h2>Recently done <span class="meta">${all.length}</span></h2><div class="tablewrap"><table><tr>${DONE_COLS.map(th).join('')}</tr>${shown.map(t => { const f = t.fac && facById(t.fac); return `<tr class="click" data-task="${esc(t.key)}"><td>${esc(taskTitle(t))}</td><td>${f ? facLink(f).replace('Facility page', esc(facName(f))) : '<span class="meta">' + esc(t.group === '__nocorp' ? '' : t.group) + '</span>'}</td><td>${esc(nameOf(t.assignee))}</td><td>${t.doneBy !== t.assignee ? '<b>' + esc(t.doneByName || nameOf(t.doneBy)) + '</b>' : esc(t.doneByName || nameOf(t.doneBy))}</td><td class="num">${fmtS(t.doneOn)}</td></tr>`; }).join('')}</table></div>${ts.length > 25 ? `<div style="margin-top:8px"><button class="btn sm" data-doneall>${ui.doneAll ? 'Show the latest 25' : 'Show all ' + ts.length}</button></div>` : ''}`;
 }
 function trackerHtml() {
   const q = lc(ui.q), F = ui.trackerFilter;
@@ -345,7 +391,7 @@ function taskDrawer(t) {
   const ppl = [...new Map([[t.assignee, nameOf(t.assignee)], ...people().filter(p => validEmail(p.email)).map(p => [lc(p.email), p.name])]).entries()];
   const req = f && f.req ? st.reqs.find(r => r.key === f.req) : null;
   const quick = ui.answer && def.quick && !isDone ? `<div class="card" style="padding:12px;border-color:var(--accent)"><b>Record "${esc(ui.answer)}" for this task?</b><div class="meta">You clicked "${esc(ui.answer)}" in the email.</div><div class="row" style="margin-top:8px"><button class="btn pri" data-quick="${esc(ui.answer)}">Yes, record "${esc(ui.answer)}"</button><button class="btn" data-noquick>No, let me fill the form</button></div></div>` : '';
-  return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="Task"><header><div style="min-width:0;flex:1"><div class="meta">${f ? `<span class="linkish" data-fac="${f.id}">${esc(facName(f))}</span> · CT-${pad(f.id)} · ${esc(f.group)}` : 'Corporate: ' + esc(t.group === '__nocorp' ? 'not known yet' : t.group)}</div><h1 style="font-size:17px">${esc(def.title(t))}</h1><div class="meta">Assigned to <b>${esc(nameOf(t.assignee))}</b> · due ${fmt(t.due)}${isWaiting(t) ? ' · starts ' + fmt(t.opensOn) : ''} · ${esc(t.status)}</div></div>${closeX}</header><div class="body">
+  return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="Task"><header><div style="min-width:0;flex:1"><div class="meta">${f ? `<span class="linkish" data-fac="${f.id}">${esc(facName(f))}</span> · CT-${pad(f.id)} · ${esc(f.group)} · ${facLink(f).replace('Facility page', 'Open facility page')}` : 'Corporate: ' + esc(t.group === '__nocorp' ? 'not known yet' : t.group)}</div><h1 style="font-size:17px">${esc(def.title(t))}</h1><div class="meta">Assigned to <b>${esc(nameOf(t.assignee))}</b> · due ${fmt(t.due)}${isWaiting(t) ? ' · starts ' + fmt(t.opensOn) : ''} · ${esc(t.status)}</div></div>${closeX}</header><div class="body">
   ${isDone ? `<div class="okmsg">${t.status === 'Not needed' ? 'Not needed anymore' : 'Done by <b>' + esc(t.doneByName || nameOf(t.doneBy)) + '</b>'} on ${fmt(t.doneOn)}${t.doneBy && t.doneBy !== t.assignee ? ' (assigned to ' + esc(nameOf(t.assignee)) + ')' : ''}.</div>` : `
   ${quick}
   ${me() !== t.assignee ? `<div class="instr">This is ${esc(nameOf(t.assignee))}'s task. You can finish it anyway. It'll say "Done by ${esc(meName())}" and ${esc(nameOf(t.assignee))} gets an FYI email.</div>` : ''}
@@ -413,6 +459,13 @@ document.addEventListener('click', async e => {
   const v = T.closest('[data-view]'); if (v) { ui.view = v.dataset.view; if (v.dataset.outfilter) ui.outFilter = v.dataset.outfilter; ui.openTask = ui.openFac = ui.openGroup = null; render(); return; }
   if (T.closest('[data-close]')) { ui.openTask = ui.openFac = ui.openGroup = null; ui.answer = null; renderLayer(); return; }
   const cb = T.closest('[data-selfac]'); if (cb) { const i = +cb.dataset.selfac; cb.checked ? ui.sel.add(i) : ui.sel.delete(i); e.stopPropagation(); render(); return; }
+  // "Facility page" link inside a task row: opens the facility, not the task (Ctrl/middle-click still opens a new tab)
+  const fp = T.closest('[data-facpage]'); if (fp) { if (e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); ui.openFac = +fp.dataset.facpage; ui.openTask = ui.openGroup = null; ui.answer = null; renderLayer(); return; }
+  const mb = T.closest('[data-mtby]'); if (mb) { ui.myF.by = mb.dataset.mtby; render(); return; }
+  const cf = T.closest('[data-clearf]'); if (cf) { if (cf.dataset.clearf === 'my') Object.assign(ui.myF, { fac: '', corp: '' }); else ui.allF = { lead: '', who: '', fac: '', corp: '' }; render(); return; }
+  const ds = T.closest('[data-donesort]'); if (ds) { const k = ds.dataset.donesort; ui.doneSort = ui.doneSort.k === k ? { k, dir: -ui.doneSort.dir } : { k, dir: k === 'on' ? -1 : 1 }; render(); return; }
+  if (T.closest('[data-doneall]')) { ui.doneAll = !ui.doneAll; render(); return; }
+  if (typeof analyticsClick === 'function' && analyticsClick(T)) return;
   const tk = T.closest('[data-task]'); if (tk) { ui.openTask = tk.dataset.task; ui.openFac = ui.openGroup = null; ui.answer = null; renderLayer(); return; }
   const fr = T.closest('[data-fac]'); if (fr && !T.closest('select')) { ui.openFac = +fr.dataset.fac; ui.openTask = ui.openGroup = null; renderLayer(); return; }
   const eg = T.closest('[data-editgrp]'); if (eg) { ui.openGroup = eg.dataset.editgrp; ui.openTask = ui.openFac = null; renderLayer(); return; }
@@ -546,7 +599,10 @@ document.addEventListener('change', async e => {
   if (e.target.classList.contains('ce-dept')) { const n = e.target.closest('.ce-row').querySelector('.ce-note'); n.hidden = e.target.value !== 'Other'; }
   if (id === 'g') { const b = $('#whbox'); if (b) b.hidden = e.target.value !== 'Yes'; }
   if (id === 'who') { const p = person(e.target.value); st.me = { email: lc(p.email), name: p.name }; ui.openTask = ui.openFac = ui.openGroup = null; render(); }
-  if (id === 'forwho') { ui.forWho = e.target.value === me() ? null : e.target.value; render(); }
+  if (id === 'forwho') { ui.forWho = e.target.value === me() ? null : e.target.value; Object.assign(ui.myF, { fac: '', corp: '' }); render(); }
+  if (id === 'mt_fac' || id === 'mt_corp') { ui.myF[id.slice(3)] = e.target.value; render(); }
+  if (['at_lead', 'at_who', 'at_fac', 'at_corp'].includes(id)) { ui.allF[id.slice(3)] = e.target.value; render(); }
+  if (typeof analyticsChange === 'function') analyticsChange(e.target);
   const li = e.target.closest && e.target.closest('[data-linkin]'); if (li && li.value) { const mid = li.dataset.linkin, fid = +li.value; await act(() => { const m = st.inbox.find(x => String(x._id) === String(mid)); if (m) { m.fac = fid; m.processed = true; } }, 'Linked'); }
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && (ui.openTask || ui.openFac || ui.openGroup)) { ui.openTask = ui.openFac = ui.openGroup = null; renderLayer(); } if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('task')) e.target.click(); });
