@@ -94,8 +94,12 @@ function person(x) { const s = lc(x); if (!s) return null; return people().find(
 function roleEmail(role) { const p = person(st.settings.roles[role]); return p && validEmail(p.email) ? lc(p.email) : ''; }
 function roleName(role) { const p = person(st.settings.roles[role]); return p ? p.name : '(not set)'; }
 function nameOf(email) { if (!email) return ''; const p = person(email); if (p) return p.name; return (st.names && st.names[lc(email)]) || email; }
-const amList = () => people().filter(p => p.am && validEmail(p.email));
-const repList = () => people().filter(p => p.rep && validEmail(p.email));
+const az = (a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' });
+// A to Z by name, for dropdowns. Never sorts the saved list itself.
+const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
+const sortedPeople = () => [...people()].sort(byName);
+const amList = () => people().filter(p => p.am && validEmail(p.email)).sort(byName);
+const repList = () => people().filter(p => p.rep && validEmail(p.email)).sort(byName);
 const isAm = e => !!(person(e) || {}).am;
 const isAdmin = e => !!(person(e) || {}).admin;
 const fallbackOwner = () => roleEmail('escalate') || (people().find(p => p.admin && validEmail(p.email)) || {}).email || '';
@@ -702,7 +706,9 @@ function run() {
       mail({ key: 'm:risk:' + f.id + ':' + f.dates.ord, code: 'E18', to: [am], fac: f.id, link: 'fac', day: day > st.today ? day : st.today, cond: { fac: f.id, untilEmail1: true, ord: f.dates.ord }, subject: 'At risk: ' + facName(f) + ' orders ' + fmt(f.dates.ord) + ' and Chicago hasn\'t been emailed', body: '<p>Finish the open tasks so the Chicago handoff email can go out.</p>' });
     }
     // complete
-    if (f.email2 && (done(fTask(f, 'GDD')) || preDone(f, 'gdd')) && (!f.email3 || f.e3Done)) {
+    // never complete while the FastCare task is still open (Oct 2026). Facilities already marked complete stay as they are.
+    const fcOpen = !!fTask(f, 'FASTCARE') && !done(fTask(f, 'FASTCARE'));
+    if (f.email2 && (done(fTask(f, 'GDD')) || preDone(f, 'gdd')) && (!f.email3 || f.e3Done) && !fcOpen) {
       f.complete = st.today;
       tasksOf(f).forEach(t => { if (!done(t) && ['CHICAGO_FOLLOW'].includes(t.type)) t.status = 'Not needed'; });
       mail({ key: 'm:E24:' + f.id, code: 'E24', to: [am, f.requester], fac: f.id, link: 'fac', subject: 'Transition complete: ' + facName(f), fyi: true, body: `<p><b>${esc(facName(f))}</b> is done.${f.dates ? ` First DOS ${fmt(f.dates.dos)}, ordering ${fmt(f.dates.ord)}, delivery ${fmt(f.dates.del)}.` : ''} Intake rep: ${esc(nameOf(f.rep)) || '-'}.</p>` });

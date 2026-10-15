@@ -243,3 +243,15 @@ h1 .tip{font-size:13px}
 @media (prefers-reduced-motion:reduce){.btn .spin{animation-duration:2s}}
 .task .m.pumprule{color:var(--accent);font-weight:500}
 .chk.isdone{opacity:.7}
+/* type-to-search dropdowns (js/combo.js): the real select stays, hidden, and holds the value */
+.combo{position:relative;display:inline-block;width:calc(var(--cw,16ch) + 40px);max-width:100%;vertical-align:middle}
+.field>.combo,.areas .combo,.ce-row .combo{display:block;width:100%}
+.combo .combo-in{width:100%;padding-right:28px !important;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%236B6F75' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;text-overflow:ellipsis}
+.combo-in::placeholder{color:var(--muted)}
+.combo-native{position:absolute !important;left:0;bottom:0;width:1px !important;height:1px !important;opacity:0;pointer-events:none;padding:0 !important;border:0 !important}
+.combo-list{position:fixed;z-index:80;max-height:280px;overflow:auto;background:var(--panel);border:1px solid var(--line2);border-radius:8px;box-shadow:0 8px 24px rgba(9,36,75,.18);padding:4px;max-width:min(420px,calc(100vw - 8px))}
+.combo-opt{padding:6px 10px;border-radius:6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.combo-opt.on{background:var(--accent-soft)}
+.combo-opt.picked{font-weight:600}
+.combo-opt.blank{color:var(--muted)}
+.combo-none{padding:6px 10px;color:var(--muted)}

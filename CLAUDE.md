@@ -61,6 +61,13 @@ Corporate is per line (no dropdown). "Already done" (`PRE_ITEMS` in engine.js, `
 ## Speed
 Saving no longer re-downloads everything: after a save, `SPStore.save` updates its own copy (ids, `base`, and the merged version of each row written in place into the screen's objects), and `settle()` only loads again when `r.reload` is set (a duplicate-key create, a failed write, an email the flow already changed, a row archived/unarchived). Quick loads after a click skip the big `GraphMessage` column; the first load and the 90-second refresh (`load({ full: true })`) include it, so old queued rows still get it filled in. Buttons that start a save show a spinner (`btnLoading`, `pressedBtn`).
 
+## Dropdowns
+- `js/combo.js` (loaded last) gives every `<select>` with 5+ non-blank options a type-to-search box. The real select stays in the page (hidden, `.combo-native`) and holds the value; picking sets it and fires `input` + `change`, so all reading/saving code is unchanged. Code that sets a select's value directly must fire `change` so the box shows it.
+- Dropdowns of people, facilities and corporates are A to Z (`byName`, `az`, `sortedPeople`, `peopleOpts`). The saved `settings.people` order is never changed.
+
+## Completion
+A facility is never marked complete while its FastCare task is open (since Oct 15 2026). Facilities already complete stay as they are.
+
 ## Cache
 `index.html` loads the css/js with `?v=N`. Bump N on every push that changes css or js, or people keep the old version for up to 10 minutes.
 

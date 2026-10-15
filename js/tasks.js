@@ -23,7 +23,7 @@ const tip = s => `<span class="infow"><button type="button" class="info" aria-la
 const fld = (label, inner, hint) => `<div class="field"><label>${label}</label>${inner}${hint ? `<div class="hint">${hint}</div>` : ''}</div>`;
 const chk = (id, label, v) => `<label class="chk"><input type="checkbox" id="${id}" ${v ? 'checked' : ''}><span>${label}</span></label>`;
 const V = id => { const e = document.getElementById(id); return e ? (e.type === 'checkbox' ? e.checked : e.value.trim()) : ''; };
-const peopleOpts = list => list.map(p => [lc(p.email), p.name]);
+const peopleOpts = list => list.map(p => [lc(p.email), p.name]).sort((a, b) => String(a[1]).localeCompare(String(b[1]), undefined, { sensitivity: 'base' }));
 // person picker: type a name, pick from the company address book
 const personPick = (id, val) => `<input type="text" id="${id}" class="pp" list="${id}_dl" autocomplete="off" placeholder="Start typing a name" value="${esc(val && val.name ? val.name + ' <' + val.email + '>' : '')}"><datalist id="${id}_dl"></datalist>`;
 function readPerson(id) { const v = V(id); const m = v.match(/^(.*?)\s*<([^>]+)>$/); if (m && validEmail(m[2])) return { name: m[1].trim(), email: lc(m[2]) }; return null; }
@@ -138,7 +138,7 @@ const TT = {
     title: t => 'FastCare: ' + facById(t.fac).name,
     form: t => {
       const f = facById(t.fac), n = t.need || {};
-      const corpOpts = [...Object.values(st.groups).filter(g => !g.standalone).map(g => g.name).sort(), 'New corporate…', 'No corporate (Independent HQ)'];
+      const corpOpts = [...Object.values(st.groups).filter(g => !g.standalone).map(g => g.name).sort(az), 'New corporate…', 'No corporate (Independent HQ)'];
       return `<div class="instr">fastcare.gentell.com → "Facility" → "Search:" (1 word if the full name doesn't come up).${n.corp ? ' Corporate = "Ownership-Headquarters" / "Purchasing Group-Chain". "Independent HQ" means no corporate.' : ''} "Actions" → "Edit Facility" for the wound rep + regional, "Actions" → "Contacts" for contacts.</div>
       ${n.corp ? `<div class="row">${fld('Corporate', sel('fc_grp', corpOpts, f.group && grp(f.group) && !grp(f.group).standalone ? grp(f.group).name : '', true))}<div class="field" id="fc_newbox" hidden><label>New corporate name</label>${txt('fc_new', '')}</div></div>` : ''}
       ${n.addr ? fld('Address', txt('fc_addr', f.address || '', '123 Main St, City, ST 12345'), 'State comes from the 2 letters before the zip.') : ''}
