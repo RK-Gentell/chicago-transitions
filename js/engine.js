@@ -61,8 +61,8 @@ function defaultSettings() {
     warehouses: ['GDD Boca Raton', 'GDD Bristol', 'GDD Chicago', 'GDD Chicopee', 'GDD Cleveland', 'GDD Dallas', 'GDD Evansville', 'GDD Minneapolis', 'GDD Ocala'],
     depts: 'Accounts Payable|F,Accounts Receivable|F,Administrator|F,Admissions|F,ADON|F,AP|C,Assistant Administrator|F,Business Office/Payers Contact|F,Census/Payers|C,Central Supply|F,Clinical Operations|F,Corporate Clinical|C,Corporate contact|C,Corporate Operations|C,Corporate Owner|C,Corporate Purchasing|C,Dietitian|F,Director of Purchasing|C,DON|F,EMR Access|C,Food Service|F,Medical Provider|F,Medical Records|F,Other|F,Other Nursing|F,Payers Contact|F,Regional|F,Regional Clinical|C,Regional Dietician|C,Rehab Director|F,Respiratory|F,Speech Therapist|F,Wound Care|F'
       .split(',').map(x => { const [n, t] = x.split('|'); return { name: n, type: t === 'F' ? 'Facility' : 'Corporate' }; }),
-    shipEnt: { 1: 'CT DE IL OH MA MD ME MI MO NH NJ NY PA RI VT AL FL GA NC SC TN VA TX', 2: 'AR CO IA ID IN KY LA MS ND NE NM OK SD UT WI CA NV OR WA', 3: 'WY' },
-    shipOst: { 1: 'CT DE MA MD ME NH NJ NY PA RI VT', 2: 'OH WV', 3: 'DC FL GA KY NC SC TN VA AL TX', 4: 'IL IN IA KS MI MN MO NE ND SD WI', 5: 'AR LA NM OK CO ID MT UT WY', 6: 'CA NV OR WA', 7: 'AK HI' }
+    shipEnt: { 1: 'CT DE IL OH MA MD ME MI MO NH NJ NY PA RI VT AL FL GA NC SC TN VA TX', 2: 'AR CO IA ID IN KY LA MS ND NE NM OK SD UT WI CA NV OR WA AZ DC KS MN MT WV', 3: 'WY HI' },
+    shipOst: { 1: 'CT DE MA MD ME NH NJ NY PA RI VT', 2: 'OH WV', 3: 'DC FL GA KY NC SC TN VA AL TX AZ', 4: 'IL IN IA KS MI MN MO NE ND SD WI MS', 5: 'AR LA NM OK CO ID MT UT WY', 6: 'CA NV OR WA', 7: 'AK HI' }
   };
 }
 
@@ -663,9 +663,25 @@ function importTeam20261015() {
   s.imported = [...(s.imported || []), 'team-2026-10-15'];
 }
 
+// One-time add (10/16/2026): ship points for states that were missing. Only adds a state that isn't anywhere in that table yet,
+// so a ship point someone already set in Settings is never changed. Runs once, then remembers it ran.
+const SHIP_2026_10_16 = { shipEnt: { 2: 'AZ DC KS MN MT WV', 3: 'HI' }, shipOst: { 3: 'AZ', 4: 'MS' } };
+function importShip20261016() {
+  const s = st.settings; if (!s || (s.imported || []).includes('ship-2026-10-16')) return;
+  for (const tbl in SHIP_2026_10_16) {
+    s[tbl] = Object.assign({}, s[tbl] || {});
+    for (const n in SHIP_2026_10_16[tbl]) SHIP_2026_10_16[tbl][n].split(' ').forEach(code => {
+      if (shipOf(s[tbl], code)) return;
+      s[tbl][n] = ((s[tbl][n] || '') + ' ' + code).trim();
+    });
+  }
+  s.imported = [...(s.imported || []), 'ship-2026-10-16'];
+}
+
 function run() {
   if (!st || !st.settings) return;
   importTeam20261015();
+  importShip20261016();
   processInbox();
   const groupsSeen = {};
   st.facs.forEach(f => {
