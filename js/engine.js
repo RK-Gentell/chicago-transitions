@@ -105,11 +105,34 @@ const isAdmin = e => !!(person(e) || {}).admin;
 const fallbackOwner = () => roleEmail('escalate') || (people().find(p => p.admin && validEmail(p.email)) || {}).email || '';
 function deptMap() { const m = {}; st.settings.depts.forEach(d => m[d.name] = d.type); return m; }
 // the state decides the ship point, and the ship point decides the delivery date. No known state = no dates.
-const stateFrom = addr => (String(addr || '').match(/,\s*([A-Z]{2})\s*\d{5}/) || [])[1] || '';
+// Addresses come in every shape (copied from the portal, FastCare, emails): "…, Benson, AZ 85602", "… Benson Arizona 85602",
+// "… benson az 85602-1234", "…, Benson, AZ 85602, USA". parseAddr reads the state (2 letters or the full name) and zip at the end.
+const US_STATES = { AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California', CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', DC: 'District of Columbia', FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa', KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland', MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri', MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey', NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont', VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming' };
+const STATE_NAMES = Object.entries(US_STATES).map(([c, n]) => [c, n]).concat([['DC', 'Washington DC'], ['DC', 'Washington D.C.']]).sort((a, b) => b[1].length - a[1].length);
+// → { street (everything before the state), state: 'AZ', zip: '85602' or '85602-1234', norm: '…, Benson, AZ 85602' } or null
+function parseAddr(addr) {
+  let s = String(addr || '').replace(/\s+/g, ' ').trim().replace(/[\s,.]*(u\.?s\.?a?\.?|united states( of america)?)$/i, '').trim();
+  const m = s.match(/^(.*?)[\s,]+(\d{5})(?:\s*-\s*(\d{4}))?\s*\.?$/); if (!m) return null;
+  const before = ' ' + m[1].replace(/[\s,.]+$/, ''), zip = m[2] + (m[3] ? '-' + m[3] : '');
+  let state = '', street = '';
+  const two = before.match(/^(.*)[\s,]([A-Za-z])\.?\s?([A-Za-z])\.?$/);
+  if (two && US_STATES[(two[2] + two[3]).toUpperCase()]) { state = (two[2] + two[3]).toUpperCase(); street = two[1]; }
+  else for (const [c, n] of STATE_NAMES) { const r = before.match(new RegExp('^(.*)[\\s,]' + n.replace(/\./g, '\\.?').replace(/ /g, '\\s+') + '$', 'i')); if (r) { state = c; street = r[1]; break; } }
+  street = street.replace(/[\s,]+$/, '').trim();
+  if (!state || !street) return null;
+  return { street, state, zip, norm: street + ', ' + state + ' ' + zip };
+}
+const stateFrom = addr => (parseAddr(addr) || {}).state || '';
+// saved addresses always end ", ST 12345" so they read the same everywhere; anything that can't be read is kept as typed
+const normAddr = addr => { const p = parseAddr(addr); return p ? p.norm : String(addr || '').trim(); };
 const stateOK = f => !!(f && f.state && shipOf(st.settings.shipEnt, f.state));
-// '' when the address is fine to schedule with, otherwise what's wrong (for forms)
+// '' when the address can be read (street, city, state, zip), otherwise what's wrong
+function addressFormatProblem(addr) {
+  return parseAddr(addr) ? '' : 'Type the full address with the city, state and zip at the end (…, Benson, AZ 85602). The state can be the 2 letters or the full name.';
+}
+// '' when the address is fine to schedule with (its state has a ship point), otherwise what's wrong
 function addressProblem(addr) {
-  if (!/,\s*[A-Z]{2}\s*\d{5}/.test(addr || '')) return 'Type the full address, ending with the state and zip (…, IN 46761).';
+  if (addressFormatProblem(addr)) return addressFormatProblem(addr);
   const s = stateFrom(addr); if (!shipOf(st.settings.shipEnt, s)) return 'There\'s no ship point for ' + s + ' in Settings ("Ship points"), so the delivery date can\'t be worked out. Ask Raizy to add it.';
   return '';
 }

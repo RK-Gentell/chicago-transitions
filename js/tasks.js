@@ -165,7 +165,7 @@ const TT = {
       const corpOpts = [...Object.values(st.groups).filter(g => !g.standalone).map(g => g.name).sort(az), 'New corporate…', 'No corporate (Independent HQ)'];
       return `<div class="instr">fastcare.gentell.com → "Facility" → "Search:" (1 word if the full name doesn't come up).${n.corp ? ' Corporate = "Ownership-Headquarters" / "Purchasing Group-Chain". "Independent HQ" means no corporate.' : ''} "Actions" → "Edit Facility" for the wound rep + regional, "Actions" → "Contacts" for contacts.</div>
       ${n.corp ? `<div class="row">${fld('Corporate', sel('fc_grp', corpOpts, f.group && grp(f.group) && !grp(f.group).standalone ? grp(f.group).name : '', true))}<div class="field" id="fc_newbox" hidden><label>New corporate name</label>${txt('fc_new', '')}</div></div>` : ''}
-      ${n.addr ? fld('Address', txt('fc_addr', f.address || '', '123 Main St, City, ST 12345'), 'State comes from the 2 letters before the zip.') : ''}
+      ${n.addr ? fld('Address', txt('fc_addr', f.address || '', '123 Main St, City, ST 12345'), 'Paste it as it is in the portal. The state can be the 2 letters or the full name.') : ''}
       <div class="row">${fld('Wound and Product Specialist', personPick('w', f.wound), 'Pick from the list; it fills their Gentell email.')}${fld('Regional Manager', personPick('r', f.regional))}</div>
       <div class="sect">Contacts${tip('Take a screenshot of the contacts in FastCare and paste it here: facility contacts, corporate contacts, or both. They go into the in-service & contacts request so the wound rep and regional can check them.')}</div>
       <div class="row"><div class="field"><label>Facility contacts</label>${shotZone('fc', 'fac', shotFor(t, 'fac'))}</div><div class="field"><label>Corporate contacts</label>${shotZone('fc', 'corp', shotFor(t, 'corp'))}</div></div>
@@ -178,7 +178,8 @@ const TT = {
       const n = t.need || {};
       if (n.corp && !V('fc_grp')) return 'Pick the corporate (or "No corporate").';
       if (n.corp && V('fc_grp') === 'New corporate…' && !V('fc_new')) return 'Type the new corporate name.';
-      if (n.addr && addressProblem(V('fc_addr'))) return addressProblem(V('fc_addr'));
+      // FastCare only needs an address it can read. A state with no ship point doesn't stop it: the transition lead gets an "Address" task that waits for one.
+      if (n.addr && addressFormatProblem(V('fc_addr'))) return addressFormatProblem(V('fc_addr'));
       if (!readPerson('w')) return 'Pick the wound rep from the list (start typing their name).';
       if (!readPerson('r')) return 'Pick the regional from the list (start typing their name).';
       const f = facById(t.fac);
@@ -187,7 +188,7 @@ const TT = {
     },
     done: t => {
       const f = facById(t.fac), n = t.need || {};
-      if (n.addr) { f.address = V('fc_addr'); f.state = stateFrom(f.address); }
+      if (n.addr) { f.address = normAddr(V('fc_addr')); f.state = stateFrom(f.address); }
       if (n.corp) {
         const v = V('fc_grp');
         if (v === 'No corporate (Independent HQ)') makeStandalone(f);
@@ -234,10 +235,10 @@ const TT = {
   },
   ADDRESS: {
     title: t => 'Address: ' + facName(facById(t.fac)),
-    form: t => { const f = facById(t.fac); return `<div class="instr">${f.address ? 'The address on file is <span class="q">' + esc(f.address) + '</span>, but ' + (stateFrom(f.address) ? 'there\'s no ship point for ' + esc(stateFrom(f.address)) + ' in Settings.' : 'it doesn\'t end with a state and zip.') : 'We don\'t have an address for this facility.'} The state decides the ship point, which decides the delivery date, so dates can\'t be worked out without it.</div>${fld('Full address', txt('ad_addr', f.address || '', '123 Main St, City, ST 12345'))}`; },
+    form: t => { const f = facById(t.fac); return `<div class="instr">${f.address ? 'The address on file is <span class="q">' + esc(f.address) + '</span>, but ' + (stateFrom(f.address) ? 'there\'s no ship point for ' + esc(stateFrom(f.address)) + ' in Settings ("Ship points"). Ask Raizy to add it; this task closes itself once she does.' : 'it doesn\'t end with a state and zip.') : 'We don\'t have an address for this facility.'} The state decides the ship point, which decides the delivery date, so dates can\'t be worked out without it.</div>${fld('Full address', txt('ad_addr', f.address || '', '123 Main St, City, ST 12345'))}`; },
     example: () => ({ ad_addr: '123 Demo St, LaGrange, IN 46761' }),
     validate: () => addressProblem(V('ad_addr')),
-    done: t => { const f = facById(t.fac); f.address = V('ad_addr'); f.state = stateFrom(f.address); }
+    done: t => { const f = facById(t.fac); f.address = normAddr(V('ad_addr')); f.state = stateFrom(f.address); }
   },
   E3_REPLY: {
     title: t => 'In-service & contacts reply: ' + facName(facById(t.fac)),

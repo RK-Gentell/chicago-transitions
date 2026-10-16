@@ -284,7 +284,7 @@ function outboxHtml() {
 function requestHtml() {
   const demo = STORE.mode === 'demo';
   return `<h1>New transition request</h1><p class="sub">${demo ? 'Filled with a demo request. Change anything. ' : ''}Everything else is automatic: each person gets an email for their part.</p><form id="rq" class="card rqform">
-    <section><h2 class="rqh">Facilities being transferred${tip('Address and corporate are optional. No corporate or "?" = don\'t know yet (it goes on the transition lead\'s FastCare task). "none" = no corporate. Spaces around the semicolons are ignored. The state comes from the 2 letters before the zip.')}</h2>
+    <section><h2 class="rqh">Facilities being transferred${tip('Address and corporate are optional. No corporate or "?" = don\'t know yet (it goes on the transition lead\'s FastCare task). "none" = no corporate. Spaces around the semicolons are ignored. The address has to end with the state (2 letters or the full name) and zip.')}</h2>
       <div class="rqi">One per line: <span class="q">Name; full address; corporate</span></div>
       <textarea id="rq_fac" aria-label="Facilities being transferred" style="min-height:90px">${demo ? 'Waters Of Lagrange; 123 Demo St, LaGrange, IN 46761; Infinity Healthcare Management\nWaters Of Princeton; 456 Demo Ave, Princeton, IN 47670; Infinity Healthcare Management' : ''}</textarea><div id="rq_corpinfo" class="note"></div></section>
     <section><h2 class="rqh">Reason for transition</h2><textarea id="rq_why" class="plain" aria-label="Reason for transition">${demo ? 'Infinity is moving its Indiana buildings to Lakewood. Chicago already knows (demo).' : ''}</textarea></section>
@@ -320,10 +320,11 @@ function parseRequest() {
     const group = none ? name : unknown ? '' : c3;
     if (V('rq_pre_fc') && unknown) return { err: '"' + name + '" has no corporate. Add it to the line, or untick "FastCare info gathered" (FastCare is where the transition lead would find it).' };
     if (V('rq_pre_fc') && !address && !V('rq_pre_added')) return { err: '"' + name + '" has no address, and Amy needs it to add it to Brightree. Add it to the line, or untick "FastCare info gathered".' };
-    if (address && addressProblem(address)) return { err: '"' + name + '": ' + addressProblem(address) + ' Or leave the address out.' };
+    // the address only has to be readable here; a state with no ship point gets an "Address" task later
+    if (address && addressFormatProblem(address)) return { err: '"' + name + '": ' + addressFormatProblem(address) + ' Or leave the address out.' };
     const dup = st.facs.find(f => !f.archived && !f.complete && lc(f.name) === lc(name));
     if (dup && !ui.confirmDup) { ui.confirmDup = true; return { err: '"' + name + '" is already in the tracker (CT-' + pad(dup.id) + '). Submit again if this really is a new request.' }; }
-    out.push({ name, address, group, none, state: stateFrom(address) });
+    out.push({ name, address: address ? normAddr(address) : '', group, none, state: stateFrom(address) });
   }
   return { lines: out };
 }
@@ -461,7 +462,7 @@ function facDrawer(f) {
   return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="Facility"><header><div style="flex:1;min-width:0"><div class="meta">CT-${pad(f.id)} · ${esc(f.group || 'corporate not known yet')}</div><h1 style="font-size:17px">${esc(facName(f))}</h1><span class="pill ${c}">${s}</span>${atRisk(f) ? ' <span class="pill p-risk">At risk</span>' : ''}</div>${closeX}</header><div class="body">
   <details class="card" style="padding:10px"><summary><b>Edit details</b> <span class="meta">(changes here don't touch the portal or Brightree; fix those yourself)</span></summary><form id="fdet" style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
     <div class="row">${fld('Facility name', txt('fd_name', f.name))}${fld('Portal name', txt('fd_pn', f.portalName))}</div>
-    <div class="row">${fld('Address', txt('fd_addr', f.address, '123 Main St, City, ST 12345'), 'The state (' + esc(f.state || 'none yet') + ') comes from the 2 letters before the zip. It decides the ship point and delivery date.')}</div>
+    <div class="row">${fld('Address', txt('fd_addr', f.address, '123 Main St, City, ST 12345'), 'The state (' + esc(f.state || 'none yet') + ') comes from the end of the address (2 letters or the full name, then the zip). It decides the ship point and delivery date.')}</div>
     <div class="row">${fld('Corporate', sel('fd_grp', Object.values(st.groups).filter(x => !x.standalone || lc(x.name) === lc(f.group)).map(x => x.name).sort(az), g.name, true))}</div>${chk('fd_none', 'No corporate (standalone)', g.standalone)}
     <div class="row">${fld('Intake rep', sel('fd_rep', R, f.rep, true))}${fld('Clinical rep', sel('fd_clin', R, f.clin, true))}${fld('Account manager', sel('fd_acct', R, acctOf(f), true))}${fld('Transition lead', sel('fd_am', A, f.am || amOf(f), true))}</div>
     <div><button class="btn sm pri" type="submit">Save details</button></div></form></details>
@@ -608,8 +609,8 @@ document.addEventListener('submit', async e => {
   }
   if (id === 'fdet') {
     const fid = ui.openFac, vals = { name: V('fd_name'), pn: V('fd_pn'), addr: V('fd_addr'), state: '', grp: V('fd_grp'), none: V('fd_none'), rep: V('fd_rep'), clin: V('fd_clin'), am: V('fd_am'), acct: V('fd_acct') };
-    if (vals.addr && addressProblem(vals.addr)) { toast(addressProblem(vals.addr)); return; }
-    if (vals.addr) vals.state = stateFrom(vals.addr);
+    if (vals.addr && addressFormatProblem(vals.addr)) { toast(addressFormatProblem(vals.addr)); return; }
+    if (vals.addr) { vals.addr = normAddr(vals.addr); vals.state = stateFrom(vals.addr); }
     if (vals.state && !/^[A-Z]{2}$/.test(vals.state)) { toast('State is 2 letters.'); return; }
     await act(() => { const f = facById(fid), oldState = f.state;
       if (f.email1 && vals.state && vals.state !== oldState) mail({ key: 'm:E13:state:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Address changed after the Chicago handoff email: ' + facName(f), body: '<p>' + esc(meName()) + ' changed the state from ' + esc(oldState || '(none)') + ' to ' + esc(vals.state) + '. The dates didn\'t change. Check the ship point and delivery date, and send Chicago a correction if they\'re wrong.</p>' }); f.name = vals.name || f.name; f.portalName = vals.pn; f.address = vals.addr; f.state = vals.addr ? vals.state : ''; f.rep = vals.rep || f.rep; f.clin = vals.clin || f.clin; f.am = vals.am || f.am; f.acct = vals.acct; if (vals.none) { if (!G(f).standalone) makeStandalone(f); } else if (vals.grp && lc(vals.grp) !== lc(f.group)) f.group = grp(vals.grp).name; }, 'Saved');
