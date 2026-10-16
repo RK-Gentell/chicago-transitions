@@ -18,7 +18,7 @@ const MS = [
   { k: 'ps', l: 'Portal setup', done: f => done(fTask(f, 'PORTAL_SETUP')) || preDone(f, 'ps') || !!f.email1, on: f => (fTask(f, 'PORTAL_SETUP') || {}).doneOn },
   { k: 'e1', l: 'Chicago handoff email', done: f => !!f.email1, on: f => f.email1 },
   { k: 'e2', l: 'Transfer notice', done: f => !!f.email2, on: f => f.email2 },
-  { k: 'e3', l: 'In-service & contacts', done: f => !!f.e3Done || (!!f.complete && !f.email3), on: f => f.e3Done },
+  { k: 'e3', l: 'Contacts from wound rep / regional', done: f => !!f.e3Done || (!!f.complete && !f.email3), on: f => f.e3Done },
   { k: 'gdd', l: 'GDD answer', done: f => done(fTask(f, 'GDD')) || preDone(f, 'gdd') || !!f.gdd, on: f => (fTask(f, 'GDD') || {}).doneOn }
 ];
 // status bucket: Not started (nothing done yet), In progress, On hold, Complete
@@ -32,7 +32,7 @@ function bucketOf(f) {
 const STAGES = ['Not started', 'In setup', 'Ready to schedule', 'Emailed Chicago to send', 'Sent by Chicago', 'Complete', 'On hold'];
 const stageColor = s => s === 'Complete' ? 'var(--ok)' : s === 'On hold' ? 'var(--warn)' : s === 'Not started' ? 'var(--an-ns)' : 'var(--accent)';
 function stage2(f) { const s = stageOf(f)[0]; return s === 'In setup' && bucketOf(f) === 'Not started' ? 'Not started' : s; }
-const TYPE_LABEL = { FASTCARE: 'FastCare', BRIGHTREE: 'Brightree report', GDD: 'GDD answer', GDD_PORTAL: 'GDD warehouse in portal', AREAS: 'Areas of care', PRICE: 'Price table', RULE: 'Pick the reps', EMR: 'EMR access', EMR_ADD: 'EMR login: corporate adds facility', EMR_PORTAL: 'EMR info in portal', PORTAL_ADD: 'Add to Brightree', PUMPS: 'Pumps', PORTAL_SETUP: 'Portal setup', CONTACTS_PORTAL: 'Contacts into portal', SCHEDULE: 'Schedule + Chicago handoff email', ADDRESS: 'Address', E3_REPLY: 'In-service & contacts reply', EMAIL3_FOLLOW: 'In-service & contacts follow-up', CHICAGO_FOLLOW: 'Chicago follow-up' };
+const TYPE_LABEL = { FASTCARE: 'FastCare', BRIGHTREE: 'Brightree report', GDD: 'GDD answer', GDD_PORTAL: 'GDD warehouse in portal', AREAS: 'Areas of care', PRICE: 'Price table', RULE: 'Pick the reps', EMR: 'EMR access', EMR_ADD: 'EMR login: corporate adds facility', EMR_PORTAL: 'EMR info in portal', PORTAL_ADD: 'Add to Brightree', PUMPS: 'Pumps', PORTAL_SETUP: 'Portal setup', CONTACTS_PORTAL: 'Contacts into portal', SCHEDULE: 'Schedule + Chicago handoff email', ADDRESS: 'Address', E3_REPLY: 'Contacts reply', EMAIL3_FOLLOW: 'Contacts follow-up', CHICAGO_FOLLOW: 'Chicago follow-up' };
 const typeLabel = t => TYPE_LABEL[t.type] || t.type;
 // when a task could first be worked on
 const taskStart = t => (t.opensOn && t.opensOn > (t.created || '') ? t.opensOn : t.created) || '';
@@ -58,7 +58,7 @@ function waits(d) {
   });
   d.facs.filter(f => !f.hold && !f.complete && !f.archived).forEach(f => {
     if (f.email1 && !f.email2) out.push({ who: 'chicago', whoName: 'GNS Chicago', kind: 'out', what: 'Transfer notice to the facility', f, corp: f.group, lead: amOf(f), since: f.email1, days: bizDays(f.email1, st.today) });
-    if (f.email3 && !f.e3Done && !f.e3Reply) out.push({ who: 'woundreg', whoName: 'Wound rep / regional', kind: 'out', what: 'Reply to the in-service & contacts request', f, corp: f.group, lead: amOf(f), since: f.email3, days: bizDays(f.email3, st.today) });
+    if (f.email3 && !f.e3Done && !f.e3Reply) out.push({ who: 'woundreg', whoName: 'Wound rep / regional', kind: 'out', what: 'Reply to the contacts request', f, corp: f.group, lead: amOf(f), since: f.email3, days: bizDays(f.email3, st.today) });
   });
   out.forEach(w => { if (w.late === undefined) w.late = w.days >= 5; });
   return out;

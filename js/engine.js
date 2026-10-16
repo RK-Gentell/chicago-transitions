@@ -249,7 +249,7 @@ const PRE_ITEMS = [
   ['added', 'Facility added to Brightree', 'Skips Amy\'s "Add … to Brightree" task. Type each facility\'s name above exactly as Brightree shows it.'],
   ['pumps', 'Pumps checked and added to "Pump Tracking"', ''],
   ['gdd', 'GDD question answered', ''],
-  ['fc', 'FastCare info gathered, and the in-service & contacts request sent to the wound rep and regional', 'Skips the FastCare task, the in-service & contacts request and its follow-ups.'],
+  ['fc', 'FastCare info gathered, and the contacts request sent to the wound rep and regional', 'Skips the FastCare task, the contacts request and its follow-ups.'],
   ['ct', 'The contacts on this request are already in the portal', ''],
   ['emr', 'EMR info for the facility is in the portal', ''],
   ['ps', 'Portal setup done', ''],
@@ -446,7 +446,7 @@ function email1Body(f) {
 <p>We will be transitioning <b>${esc(facName(f))}</b> from the <b>${esc(f.group)}</b> group over to Lakewood for <b>${areas}</b>. Please send the below to the facility contacts (admin, DON, central supply, etc.) to inform them of this transition. Please include <b>${esc(r.name)}</b> and myself on the email to the facility, and CC <b>${esc(CFG.mailbox)}</b> so our system knows it went out.</p>
 <p>Please don't send any additional <b>${orders}</b> orders, as Lakewood is now taking responsibility for the orders for this facility. Any order requests that come in for this facility should be forwarded to <b>${esc(r.name)}</b>.</p>
 <p>The subject of the email to the facility should be: <b>${esc(facName(f))} - Transfer from GNS Chicago to Lakewood</b>.</p>
-<p>Thank you!<br>${esc(nameOf(amOf(f)))}</p>
+${inserviceAsk(f)}<p>Thank you!<br>${esc(nameOf(amOf(f)))}</p>
 <hr>
 <p>Hello,</p>
 <p>I hope you're doing well!</p>
@@ -459,20 +459,31 @@ function email1Body(f) {
 <p>We're looking forward to continuing our relationship and making your process as smooth as possible! Going forward, please feel free to direct any requests or questions to your new representative.</p>
 <p>Thank you, and we appreciate your partnership.</p>`;
 }
+// the wound rep + regional are on the Chicago handoff email (in To), with a line asking them to get the facility to book an in-service
+const woundRegEmails = f => [f.wound && f.wound.email, f.regional && f.regional.email].filter(Boolean);
+function inserviceAsk(f) {
+  if (!woundRegEmails(f).length) return '';
+  const d = f.dates;
+  return `<p><b>${esc(e3Names(f).join(' and '))}:</b> please speak to the facility and get them to sign up for an in-service${d ? ' before their first Lakewood order on <b>' + fmtS(d.dos) + '</b>' : ''}, so they know the updated ordering process and how to get supplies in between monthly orders. We typically want the admin, DON and central supply on the call; anyone else involved in ordering is welcome too. The booking link is in the facility email below.</p>`;
+}
 function sendEmail1(f, correction) {
   const am = amOf(f), s = st.settings, subj = facName(f) + '- Transfer from GNS Chicago to Lakewood';
-  mail({ key: 'm:' + (correction ? 'E22' : 'E14') + ':' + f.id + (correction ? ':' + uid() : ''), code: correction ? 'E22' : 'E14', to: [...s.e1To, f.rep], cc: [...s.e1Cc, am, acctOf(f)], fac: f.id, noTag: true, link: 'none', subject: (correction ? 'CORRECTION: ' : '') + subj, body: (correction ? '<p><b>Corrected dates below.</b></p>' : '') + email1Body(f) });
+  mail({ key: 'm:' + (correction ? 'E22' : 'E14') + ':' + f.id + (correction ? ':' + uid() : ''), code: correction ? 'E22' : 'E14', to: [...s.e1To, f.rep, ...woundRegEmails(f)], cc: [...s.e1Cc, am, acctOf(f)], fac: f.id, noTag: true, link: 'none', subject: (correction ? 'CORRECTION: ' : '') + subj, body: (correction ? '<p><b>Corrected dates below.</b></p>' : '') + email1Body(f) });
   if (correction) return;
   f.email1 = st.today;
   mail({ key: 'm:E15:' + f.id, code: 'E15', to: s.e1To, cc: [am], fac: f.id, noTag: true, link: 'none', day: addBiz(st.today, 3), cond: { fac: f.id, untilEmail2: true }, subject: 'RE: ' + subj, body: `<p>Hi ${esc(s.chicagoGreeting)},</p><p>Checking in, has the facility email for <b>${esc(facName(f))}</b> gone out? Please CC ${esc(CFG.mailbox)} on it.</p><p>Thank you!<br>${esc(nameOf(am))}</p>` });
   newTask('CHICAGO_FOLLOW', { fac: f.id, assignee: am, amTask: true, opensOn: addBiz(st.today, 5) });
 }
-// Email 3 goes to the wound rep and regional. When anyone replies (to the mailbox), the follow-ups stop and the AM
-// gets an "Email 3 reply" task to put in what they sent. No reply: follow-ups at +3 and +6 business days, then the AM is told.
-const E3_SUBJECT = f => facName(f) + '- Transfer from GNS Chicago to Lakewood';
+// Email 3 = the contacts request to the wound rep and regional, sent as soon as the FastCare task is done. When anyone replies
+// (to the mailbox), the follow-ups stop and the transition lead gets a "Contacts reply" task to put in what they sent.
+// No reply: follow-ups at +3 and +6 business days, then the transition lead is told.
+// Since Oct 16 2026 it only asks for contacts (f.e3v2); the in-service ask moved to the Chicago handoff email. Facilities that got
+// the older combined email (in-service + contacts) keep its wording and subject on their follow-ups.
+// The "Contacts needed" subject keeps replies to the Chicago handoff email (same "Transfer from GNS Chicago" subject) from counting as contacts replies.
+const E3_SUBJECT = f => facName(f) + (f.e3v2 ? '- Contacts needed: Transfer from GNS Chicago to Lakewood' : '- Transfer from GNS Chicago to Lakewood');
 const e3Names = f => [...new Set([f.wound && f.wound.name, f.regional && f.regional.name].filter(Boolean).map(n => String(n).split(' ')[0]))];
 const e3Hi = f => '<p>Hi ' + esc(e3Names(f).join(' and ')) + ',</p>';
-// contacts part of the in-service & contacts request: the screenshot from the FastCare task and/or the contacts typed into the app
+// contacts part of the contacts request: the screenshot from the FastCare task and/or the contacts typed into the app
 // (request, facility page, corporate). Nothing at all → ask for them instead of asking them to review.
 const e3List = f => { const seen = new Set(); return [...(f.contacts || []), ...((f.group && G(f).contacts) || [])].filter(c => { const k = lc(c.email || (c.first + ' ' + c.last)); if (!k.trim() || seen.has(k)) return false; seen.add(k); return true; }); };
 // up to 2 screenshots from the FastCare task: facility contacts and corporate contacts
@@ -489,6 +500,17 @@ function e3Contacts(f) {
 }
 const e3Attach = f => { const [a, b] = e3Shots(f).map(x => x[1]); return Object.assign({}, a ? { attachPath: a.path, attachName: a.name } : {}, b ? { attachPath2: b.path, attachName2: b.name } : {}); };
 function email3Body(f) {
+  if (!f.e3v2) return email3BodyOld(f);
+  const g = FG(f), am = amOf(f), areas = covKnown(g) ? areasPhrase(g)[0] : '';
+  return `${e3Hi(f)}
+<p>I hope all is well!</p>
+<p>I would like to update you that we are working on transitioning <b>${esc(facName(f))}</b>${f.group ? ' from the <b>' + esc(f.group) + '</b> group' : ''} to the Lakewood branch${areas ? ' for <b>' + areas + '</b>' : ''}. Can you assist us with obtaining the following contact information?</p>
+<ul><li>Name and email of a medical provider that can sign forms via our e-sign platform, PandaDoc, so we can bill patients supplies to insurance (this can be a medical director, NP or PA).</li><li>Name and email of the speech therapist or director of rehab</li><li>Name and email of the dietician</li></ul>
+${e3Contacts(f)}
+<p>Thank you for your help!<br>${esc(nameOf(am))}</p>`;
+}
+// the combined in-service + contacts email, as sent before Oct 16 2026 (only for follow-ups on facilities that got it)
+function email3BodyOld(f) {
   const g = FG(f), d = f.dates, am = amOf(f), areas = covKnown(g) ? areasPhrase(g)[0] : '';
   return `${e3Hi(f)}
 <p>I hope all is well!</p>
@@ -499,7 +521,7 @@ ${e3Contacts(f)}
 <p>Thank you for your help!<br>${esc(nameOf(am))}</p>`;
 }
 function sendEmail3(f) {
-  f.email3 = st.today;
+  f.email3 = st.today; f.e3v2 = true;
   mail({ key: 'm:E16:' + f.id, code: 'E16', to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [f.rep, acctOf(f), roleEmail('rules'), amOf(f)], fac: f.id, noTag: true, link: 'none', subject: E3_SUBJECT(f), body: email3Body(f), ...e3Attach(f) });
 }
 // One step at a time: only the next follow-up is ever queued, and it's cancelled the moment "Done" comes in.
@@ -514,9 +536,9 @@ function chaseEmail3(f) {
   const last = used.map(m => m.day).sort().pop() || (round ? f.e3RoundFrom : f.email3);
   const day = addBiz(last, 3), key = pre + step + ':' + mine.length, am = amOf(f), cond = { fac: f.id, e3Round: round };
   if (step < 3) mail({ key, code: 'E16F', day, cond, ...e3Attach(f), to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [am], fac: f.id, noTag: true, link: 'none', subject: 'RE: ' + E3_SUBJECT(f),
-      body: `${e3Hi(f)}<p>${step === 1 ? 'Just following up on my email below' : 'Following up again on my email below'} about <b>${esc(facName(f))}</b>. Can you please get the in-service booked and send over the contact info?</p><p>Thank you!<br>${esc(nameOf(am))}</p><hr>${email3Body(f)}` });
-  else mail({ key, code: 'E16A', day, cond, to: [am], fac: f.id, link: 'fac', subject: 'No reply to the in-service & contacts request: ' + facName(f),
-      body: `<p>${esc(e3Names(f).join(' and ') || 'The wound rep and regional')} didn't reply to the in-service & contacts request for <b>${esc(facName(f))}</b>, even after 2 follow-ups. Please reach out to them.</p>` + note('When it\'s taken care of, click "In-service & contacts: taken care of" on the facility page. The facility can\'t be marked complete until then.') });
+      body: `${e3Hi(f)}<p>${step === 1 ? 'Just following up on my email below' : 'Following up again on my email below'} about <b>${esc(facName(f))}</b>. Can you please ${f.e3v2 ? '' : 'get the in-service booked and '}send over the contact info?</p><p>Thank you!<br>${esc(nameOf(am))}</p><hr>${email3Body(f)}` });
+  else mail({ key, code: 'E16A', day, cond, to: [am], fac: f.id, link: 'fac', subject: 'No reply to the contacts request: ' + facName(f),
+      body: `<p>${esc(e3Names(f).join(' and ') || 'The wound rep and regional')} didn't reply to the contacts request for <b>${esc(facName(f))}</b>, even after 2 follow-ups. Please reach out to them.</p>` + note('When it\'s taken care of, click "Contacts: taken care of" on the facility page. The facility can\'t be marked complete until then.') });
 }
 // request said some steps are already done: set what those steps would have set, so their tasks never get made
 function applyPre(f, pre, l) {
@@ -536,7 +558,7 @@ const e3Who = (f, from) => { const x = [f.wound, f.regional].find(p => p && lc(p
 function gotE3Reply(f, m) {
   f.e3Reply = { from: m.from, at: (m.received || '').slice(0, 10) || st.today, inbox: m._id || '' };
   const t = newTask('E3_REPLY', { fac: f.id, assignee: amOf(f), amTask: true, reply: f.e3Reply });
-  todo(t, 'reply to the in-service & contacts request for ' + facName(f), esc(e3Who(f, m.from)) + ' replied to the in-service & contacts request for <b>' + esc(facName(f)) + '</b>. Put in the info they sent.');
+  todo(t, 'reply to the contacts request for ' + facName(f), esc(e3Who(f, m.from)) + ' replied to the contacts request for <b>' + esc(facName(f)) + '</b>. Put in the info they sent.');
 }
 function addAmy(f) {
   const g = G(f), t = newTask('PORTAL_ADD', { fac: f.id, assignee: roleEmail('portal') });
@@ -615,7 +637,7 @@ function processInbox() {
     const chicago = [...(st.settings.e1To || []), ...(st.settings.e1Cc || [])].map(lc);
     if (from !== mb && inTo && !chicago.includes(from) && ls.includes('transfer from gns chicago')) {
       const team = (st.settings.people || []).map(p => lc(p.email)), them = x => [x.wound && x.wound.email, x.regional && x.regional.email].map(lc);
-      const f = live.find(x => x.email3 && !x.e3Done && !x.e3Reply && match(x) && (m.received || '').slice(0, 10) >= x.email3 && (them(x).includes(from) || !team.includes(from)));
+      const f = live.find(x => x.email3 && !x.e3Done && !x.e3Reply && match(x) && (!x.e3v2 || ls.includes('contacts needed')) && (m.received || '').slice(0, 10) >= x.email3 && (them(x).includes(from) || !team.includes(from)));
       if (f) { gotE3Reply(f, m); m.fac = f.id; m.isE3Reply = true; return; }
     }
     if (from !== mb && inCc && !inTo && ls.includes('transfer from gns chicago')) {
