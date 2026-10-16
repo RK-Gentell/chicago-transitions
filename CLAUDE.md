@@ -10,7 +10,7 @@ A task app that runs the Chicago → Lakewood facility transition process from t
 - `js/engine.js`: the rules. `run()` creates every task and email that's due. Dates, email wording (Chicago handoff email / in-service & contacts request templates), reminders, inbox matching.
 - `js/tasks.js`: the task types (`TT`): title, form, validate, done, opens (waiting tasks), quick (email-button answers).
 - `js/store.js`: loading and saving. `SPStore` (Microsoft Graph) and `DemoStore` (in memory).
-- `js/analytics.js`: the Analytics screen (stages, transition leads, who things wait on, turnaround, schedule, per-corporate progress). Read-only: never changes or saves data. Loaded before ui.js.
+- `js/analytics.js`: the Analytics screen, laid out like the "Transition Lead Analytics" preview Raizy approved: takeaway line, 7 tiles, tabs Overview / Bottlenecks / Schedule / Corporates / Facilities. The 8 steps are `MS` (FastCare → GDD answer). Read-only: never changes or saves data. Loaded before ui.js.
 - `js/ui.js`: screens and clicks. Every change goes through `act()`: reload → change → `run()` → save → reload.
 - `index.html`, `style.css`, `vendor/msal-browser.min.js` (MSAL 4.30.0, UMD).
 
