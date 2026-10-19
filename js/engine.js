@@ -257,23 +257,58 @@ function atRisk(f) { const d = f.dates; return !!(d && !f.email1 && !f.hold && !
 
 // a corporate we already work with in the portal (price table, EMR access) that's new to this app
 const hasPrice = g => !!(g && (g.price || g.existing));
-const preDone = (f, k) => !!(f.pre && f.pre[k]);
+// "already done" flags. Since Oct 19 2026 (f.pre.v2) FastCare and the contacts request are 2 steps (wr, e3), and so are
+// scheduling and the Chicago handoff email (sched, e1). Older flags: fc = wr + e3, e1 = sched + e1.
+const preDone = (f, k) => { const p = f && f.pre; if (!p) return false; if (p[k]) return true; if (p.v2) return false; return (k === 'wr' || k === 'e3') ? !!p.fc : k === 'sched' ? !!p.e1 : false; };
+// older flags spelled out in the new keys, so adding to them never changes what they meant
+function normPre(p) { const o = Object.assign({}, p || {}); if (!o.v2) { if (o.fc) { o.wr = true; o.e3 = true; } if (o.e1) o.sched = true; o.v2 = true; } return o; }
+// the handoff email was marked sent, but it wasn't scheduled yet: the Brightree report + schedule still happen (without sending the email again)
+const handoffOnly = f => !!(f.email1 && f.pre && f.pre.v2 && f.pre.e1 && !f.pre.sched && !f.schedDone);
+// dates still move (recalculate, can be changed) until the handoff email, or until the schedule is done after a handoff marked sent
+const datesOpen = f => !f.email1 || handoffOnly(f);
+// dates typed in because it was already scheduled (no Brightree report)
+function manualDatesObj(f) {
+  const m = f.manualDates; if (!m) return null;
+  return { ord: m.ord, dos: m.dos, del: m.del, os: diff(m.ord, m.del), day: WD[dow(m.del)], manual: true, why: ['Already scheduled: dates entered by ' + (m.by || 'someone') + (m.on ? ' on ' + fmtS(m.on) : '')] };
+}
+const CAD_V = { Monthly: '4', Biweekly: '2', Weekly: '1' }, CAD_L = { 4: 'Monthly', 2: 'Biweekly', 1: 'Weekly' };
+// FastCare done, or its info filled in when marked already done (new flag only, so older facilities get no new contacts task)
+const fcDoneNew = f => done(fTask(f, 'FASTCARE')) || !!(f.pre && f.pre.v2 && f.pre.wr && !f.pre.fc);
+// what an "already done" step needs typed in (per facility). info: { pn, gdd, gddWh, wound, regional, ord, dos, del, cad }. Returns '' or what's wrong.
+function preInfoProblem(keys, i, label) {
+  const L = label ? label + ': ' : '';
+  if (keys.includes('added') && !i.pn) return L + '"Facility added to Brightree": type the name as Brightree shows it.';
+  if (keys.includes('gdd') && !['Yes', 'No'].includes(i.gdd)) return L + '"GDD question answered": pick Yes or No.';
+  if (keys.includes('gdd') && i.gdd === 'Yes' && !i.gddWh) return L + '"GDD question answered": which warehouse?';
+  if (keys.includes('wr') && (!i.wound || !i.regional)) return L + '"FastCare info gathered": pick the wound rep and the regional from the list (start typing their name).';
+  if (keys.includes('sched')) {
+    if (!i.ord || !i.dos || !i.del) return L + '"Scheduled": enter the ordering date, date of service and delivery date.';
+    if (!(i.ord < i.dos && i.dos <= i.del)) return L + '"Scheduled": the ordering date has to be before the date of service, and the delivery date on or after it.';
+    if (!i.cad) return L + '"Scheduled": pick how often enteral ships.';
+  }
+  return '';
+}
 // what can be ticked as "already done" on the request. Order = the order of the flow.
 const PRE_ITEMS = [
   ['corp', 'Corporate is already set up in the portal (we have the price table, EMR access and so on)', 'Skips the price table and EMR access requests. It still gets added here like any corporate.'],
-  ['added', 'Facility added to Brightree', 'Skips Amy\'s "Add … to Brightree" task. Type each facility\'s name above exactly as Brightree shows it.'],
+  ['added', 'Facility added to Brightree', 'Skips Amy\'s "Add … to Brightree" task. Type the name exactly as Brightree shows it.'],
   ['pumps', 'Pumps checked and added to "Pump Tracking"', ''],
-  ['gdd', 'GDD question answered', ''],
-  ['fc', 'FastCare info gathered, and the contacts request sent to the wound rep and regional', 'Skips the FastCare task, the contacts request and its follow-ups.'],
+  ['gdd', 'GDD question answered', 'Skips the GDD question. Pick the answer, and the warehouse if Yes.'],
+  ['wr', 'FastCare info gathered (we have the wound rep and regional)', 'Skips the FastCare task. Pick the wound rep and regional. The contacts request still goes to them, unless "No contacts request needed" is ticked too.'],
+  ['e3', 'No contacts request needed', 'We already have the contacts and they\'re accurate (or the request already went out). Skips the contacts request and its follow-ups.'],
   ['ct', 'The contacts on this request are already in the portal', ''],
   ['emr', 'EMR info for the facility is in the portal', ''],
   ['ps', 'Portal setup done', ''],
-  ['e1', 'Scheduled, and the Chicago handoff email sent', 'Skips the Brightree report and scheduling. Dates stay blank.'],
+  ['sched', 'Scheduled', 'Skips the Brightree report and scheduling. Enter the dates from the Ordering Calendar. The Chicago handoff email goes out with them automatically, unless "Chicago handoff email sent" is ticked too.'],
+  ['e1', 'Chicago handoff email sent', 'Skips sending it. If "Scheduled" isn\'t ticked, the Brightree report and schedule tasks still come, without sending the email again.'],
   ['e2', 'GNS Chicago sent the transfer notice to the facility', '']
 ];
+// ticking a step ticks the ones it includes
+const PRE_IMPLY = { e2: ['e1'], sched: ['ps'] };
+const PRE_INFO = ['added', 'gdd', 'wr', 'sched'];
 // the AM's first tasks on new facilities, as links (skips ones ticked "already done")
-const amFirstTasks = list => { const ts = list.flatMap(f => [preDone(f, 'fc') ? null : [esc(facName(f)) + ': FastCare', 't:FASTCARE:f' + f.id], preDone(f, 'e1') ? null : [esc(facName(f)) + ': Brightree report', 't:BRIGHTREE:f' + f.id]].filter(Boolean)); return ts.length ? '<p>Your tasks:</p>' + taskList(ts) : '<p>Nothing for you to do yet. You\'ll get an email when there is.</p>'; };
-const preList = f => PRE_ITEMS.filter(([k]) => (f.pre || {})[k]).map(x => x[1].split(' (')[0].split(',')[0]);
+const amFirstTasks = list => { const ts = list.flatMap(f => [preDone(f, 'wr') ? null : [esc(facName(f)) + ': FastCare', 't:FASTCARE:f' + f.id], preDone(f, 'sched') ? null : [esc(facName(f)) + ': Brightree report', 't:BRIGHTREE:f' + f.id]].filter(Boolean)); return ts.length ? '<p>Your tasks:</p>' + taskList(ts) : '<p>Nothing for you to do yet. You\'ll get an email when there is.</p>'; };
+const preList = f => PRE_ITEMS.filter(([k]) => preDone(f, k)).map(x => x[1].split(' (')[0].split(',')[0]);
 
 // ---------- email ----------
 const btnStyle = 'display:inline-block;background:#003171;color:#ffffff;padding:8px 16px;border-radius:4px;text-decoration:none;font-weight:bold;margin:0 8px 8px 0';
@@ -458,7 +493,7 @@ const whenET = ms => new Date(ms).toLocaleString('en-US', { timeZone: 'America/N
 // ---------- email templates ----------
 function repLine(f) { const r = person(f.rep) || {}; return { name: r.name || nameOf(f.rep), email: r.email || f.rep, ext: r.ext || '' }; }
 function email1Body(f) {
-  const g = FG(f), [areas, orders] = areasPhrase(g), r = repLine(f), d = f.dates, cad = f.bt.cadence, s = st.settings;
+  const g = FG(f), [areas, orders] = areasPhrase(g), r = repLine(f), d = f.dates, cad = String((f.bt || f.manualDates || {}).cadence || '4'), s = st.settings;
   const cadLine = cad === '4' ? 'Orders will continue every 4 weeks thereafter, on the same day of the week, for consistency and ease of planning.' : `Enteral orders will continue ${cad === '1' ? 'every week' : 'every other week'} thereafter, on the same day of the week. Ostomy, tracheostomy and urological orders will continue every 4 weeks.`;
   return `<p>Hi ${esc(chiGreet(f))},</p>
 <p>We will be transitioning <b>${esc(facName(f))}</b> from the <b>${esc(f.group)}</b> group over to Lakewood for <b>${areas}</b>. Please send the below to the facility contacts (admin, DON, central supply, etc.) to inform them of this transition. Please include <b>${esc(r.name)}</b> and myself on the email to the facility, and CC <b>${esc(CFG.mailbox)}</b> so our system knows it went out.</p>
@@ -568,16 +603,23 @@ function chaseEmail3(f) {
       body: `<p>${esc(e3Names(f).join(' and ') || 'The wound rep and regional')} didn't reply to the contacts request for <b>${esc(facName(f))}</b>, even after 2 follow-ups. Please reach out to them.</p>` + note('When it\'s taken care of, click "Contacts: taken care of" on the facility page. The facility can\'t be marked complete until then.') });
 }
 // request said some steps are already done: set what those steps would have set, so their tasks never get made
-function applyPre(f, pre, l) {
+function applyPre(f, pre, l, info) {
   if (!Object.keys(pre).length) return;
-  const p = Object.assign({}, pre); if (p.e2) p.e1 = true; if (p.e1) p.ps = true;
+  const p = Object.assign({}, pre), i = info || {}; Object.keys(PRE_IMPLY).forEach(k => { if (p[k]) PRE_IMPLY[k].forEach(x => p[x] = true); }); p.v2 = true;
   f.pre = p;
-  if (p.added) { f.inPortal = true; f.portalName = l.name; f.addedBefore = true; }
+  const by = 'Done before the request';
+  if (p.added) { f.inPortal = true; f.portalName = i.pn || l.name; f.addedBefore = true; }
   if (p.pumps) f.pumps = 'already done';
-  if (p.gdd) f.gdd = 'Already done';
-  if (p.fc) { f.email3 = st.today; markE3Done(f, 'Done before the request'); }
-  if (p.e1) { f.email1 = st.today; f.email1By = 'Done before the request'; }
-  if (p.e2) { f.email2 = st.today; f.email2By = 'Done before the request'; }
+  if (p.gdd) { f.gdd = i.gdd || 'Already done'; f.gddWh = i.gdd === 'Yes' ? i.gddWh || '' : ''; } // a "Yes" emails the GDD contact once the request is saved (run)
+  if (p.wr) { f.wound = i.wound; f.regional = i.regional; }
+  if (p.e3) { f.noE3 = true; markE3Done(f, by); }
+  if (p.sched) setManualDates(f, i, by);
+  if (p.e1) { f.email1 = st.today; f.email1By = by; }
+  if (p.e2) { f.email2 = st.today; f.email2By = by; }
+}
+function setManualDates(f, i, byName) {
+  f.manualDates = { ord: i.ord, dos: i.dos, del: i.del, cadence: CAD_V[i.cad] || i.cad || '4', by: byName, on: st.today };
+  f.dates = manualDatesObj(f); f.rec = null;
 }
 function markE3Done(f, by, day) { if (f.e3Done) return; f.e3Done = day || st.today; f.e3DoneBy = by; }
 // someone replied to Email 3: stop the follow-ups, AM puts in what they sent
@@ -723,12 +765,13 @@ function run() {
     if (!f.asked) {
       f.asked = true;
       const need = { corp: !f.group, addr: !f.address };
-      if (!preDone(f, 'fc')) { const tf = newTask('FASTCARE', { fac: f.id, assignee: am, amTask: true, need }); todo(tf, 'FastCare for ' + facName(f), 'Look up <b>' + esc(f.name) + '</b> in FastCare.'); }
+      if (!preDone(f, 'wr')) { const tf = newTask('FASTCARE', { fac: f.id, assignee: am, amTask: true, need }); todo(tf, 'FastCare for ' + facName(f), 'Look up <b>' + esc(f.name) + '</b> in FastCare.'); }
       if (!preDone(f, 'gdd')) { const tg = newTask('GDD', { fac: f.id, assignee: roleEmail('gdd') });
       queue('E10', tg.assignee, f, tg, (fs, ts) => fs.length === 1
         ? { code: 'E10', to: [ts[0].assignee], fac: fs[0].id, task: ts[0].key, buttons: ['No'], cond: { task: ts[0].key }, subject: 'GDD orders for ' + facName(fs[0]) + '?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did <b>${esc(facName(fs[0]))}</b>${chiName(fs[0]) ? ' (Chicago name: ' + esc(fs[0].name) + ')' : ''} (${esc(fs[0].group || 'corporate not known yet')}) get orders from GDD? If yes, open the task and pick the warehouse.</p>` }
         : { code: 'E10', to: [ts[0].assignee], link: 'none', subject: 'GDD orders for ' + fs.length + ' facilities?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did any of these get orders from GDD? Click "No" or open the task to pick the warehouse.</p>${taskList(fs.map((x, i) => ['<b>' + esc(facName(x)) + '</b>', ts[i].key]), ['No'])}` }); }
-      if (!preDone(f, 'e1')) { const tb = newTask('BRIGHTREE', { fac: f.id, assignee: am, amTask: true }); todo(tb, 'Brightree report for ' + facName(f), 'Run the Brightree report for <b>' + esc(facName(f)) + '</b>' + (chiName(f) ? ' (Chicago name: ' + esc(f.name) + ')' : '') + '.'); }
+      if (preDone(f, 'gdd') && f.gdd === 'Yes' && f.gddWh) gddAnswer(f, 'Yes', f.gddWh); // marked answered on the request: same FYI as Chris answering
+      if (!preDone(f, 'sched')) { const tb = newTask('BRIGHTREE', { fac: f.id, assignee: am, amTask: true }); todo(tb, 'Brightree report for ' + facName(f), 'Run the Brightree report for <b>' + esc(facName(f)) + '</b>' + (chiName(f) ? ' (Chicago name: ' + esc(f.name) + ')' : '') + '.'); }
     }
 
     // corporate not known yet: Malka picks reps per facility; corporate asks wait for the FastCare task
@@ -772,10 +815,12 @@ function run() {
     }
     // dates (frozen once Email 1 went out)
     // no usable state (address missing or no ship point for it): no dates, so nothing can be scheduled with a wrong delivery date
-    { const d = calcDates(f); if (!f.email1) { f.rec = d || null; f.dates = !d ? null : f.dosChosen ? Object.assign(derive(f, f.dosChosen), { why: [...d.why, 'Changed by ' + (f.dosBy || 'someone') + ' from the recommended ' + fmtS(d.dos)], changed: true }) : d; } }
+    // already scheduled (dates typed in): those dates, nothing recalculates
+    if (f.manualDates) { if (!f.email1) { f.dates = manualDatesObj(f); f.rec = null; } }
+    else { const d = calcDates(f); if (datesOpen(f)) { f.rec = d || null; f.dates = !d ? null : f.dosChosen ? Object.assign(derive(f, f.dosChosen), { why: [...d.why, 'Changed by ' + (f.dosBy || 'someone') + ' from the recommended ' + fmtS(d.dos)], changed: true }) : d; } }
     if (stateOK(f)) tasksOf(f, 'ADDRESS').forEach(t => { if (!done(t)) { t.status = 'Not needed'; t.doneOn = st.today; } });
     // address still missing (or its state has no ship point) once FastCare is done: the transition lead gets a task for it
-    if (!f.email1 && !stateOK(f) && (done(fTask(f, 'FASTCARE')) || preDone(f, 'fc')) && !tasksOf(f, 'ADDRESS').some(t => !done(t))) {
+    if (datesOpen(f) && !f.manualDates && !stateOK(f) && (done(fTask(f, 'FASTCARE')) || preDone(f, 'wr')) && !tasksOf(f, 'ADDRESS').some(t => !done(t))) {
       const t = newTask('ADDRESS', { fac: f.id, assignee: am, amTask: true });
       todo(t, 'address for ' + facName(f), 'We need the full address for <b>' + esc(facName(f)) + '</b> before it can be scheduled.');
     }
@@ -804,18 +849,21 @@ function run() {
     }
     {
       const fc = fTask(f, 'FASTCARE'), openCP = tasksOf(f, 'CONTACTS_PORTAL').some(t => !done(t));
-      if (!openCP && f.inPortal && done(fc) && f.contacts.some(c => !c.inPortal)) {
+      if (!openCP && f.inPortal && fcDoneNew(f) && f.contacts.some(c => !c.inPortal)) {
         const t = newTask('CONTACTS_PORTAL', { fac: f.id, assignee: am, amTask: true });
         todo(t, 'add contacts for ' + facName(f), 'Add the contacts for <b>' + esc(facName(f)) + '</b> to the portal.');
       }
     }
-    if (!fTask(f, 'SCHEDULE') && !f.email1 && f.dates && (done(fTask(f, 'PORTAL_SETUP')) || preDone(f, 'ps'))) {
+    if (!fTask(f, 'SCHEDULE') && datesOpen(f) && !preDone(f, 'sched') && f.dates && (done(fTask(f, 'PORTAL_SETUP')) || preDone(f, 'ps'))) {
       const t = newTask('SCHEDULE', { fac: f.id, assignee: am, amTask: true });
       todo(t, 'schedule ' + facName(f), 'Schedule <b>' + esc(facName(f)) + '</b>. The Brightree report is done, so schedule it as soon as you can: the longer it waits, the more likely the last delivery dates change.', 'High');
     }
-    // Email 3 to the wound rep + regional: as soon as the FastCare task is done
-    if (!f.email3 && done(fTask(f, 'FASTCARE')) && f.wound && f.regional) sendEmail3(f);
-    if (f.email1 && f.e1NoWound && !f.inserviceMail && done(fTask(f, 'FASTCARE')) && woundRegEmails(f).length) sendInservice(f);
+    // already scheduled, handoff email not sent: it goes out by itself once it has what it needs
+    if (!f.email1 && f.manualDates && preDone(f, 'sched') && f.dates && f.rep && covKnown(FG(f)) && !settingsProblems().length) { sendEmail1(f); f.email1By = 'Sent automatically (already scheduled)'; }
+    // Email 3 to the wound rep + regional: as soon as the FastCare task is done (or its info was filled in), unless no contacts request is needed
+    const fcIn = done(fTask(f, 'FASTCARE')) || preDone(f, 'wr');
+    if (!f.email3 && !f.noE3 && !preDone(f, 'e3') && fcIn && f.wound && f.regional) sendEmail3(f);
+    if (f.email1 && f.e1NoWound && !f.inserviceMail && fcIn && woundRegEmails(f).length) sendInservice(f);
     // portal setup done while EMR access wasn't ready: check it as soon as it is
     if (f.emrCheckDue && !f.emrChecked && emrReady(f) && !fTask(f, 'EMR_CHECK')) { const t = newTask('EMR_CHECK', { fac: f.id, assignee: am, amTask: true }); todo(t, 'check EMR access for ' + facName(f), 'EMR access for <b>' + esc(facName(f)) + '</b> is set up now. Log in and check it works.'); }
     // older facilities had an "Email 3 follow-up" task: carry over its answer, close it if still open
@@ -904,11 +952,13 @@ function stepTasks(f, k) {
     case 'added': return open(['PORTAL_ADD']);
     case 'pumps': return open(['PUMPS']);
     case 'gdd': return open(['GDD']);
-    case 'fc': return open(['FASTCARE', 'E3_REPLY', 'EMAIL3_FOLLOW']);
+    case 'wr': return open(['FASTCARE']);
+    case 'e3': return open(['E3_REPLY', 'EMAIL3_FOLLOW']);
     case 'ct': return open(['CONTACTS_PORTAL']);
     case 'emr': return open(['EMR_ADD', 'EMR_PORTAL']);
     case 'ps': return open(['PORTAL_SETUP']);
-    case 'e1': return open(['BRIGHTREE', 'SCHEDULE', 'ADDRESS']);
+    case 'sched': return open(['BRIGHTREE', 'SCHEDULE', 'ADDRESS']);
+    case 'e1': return [];
     case 'e2': return open(['CHICAGO_FOLLOW']);
   }
   return [];
@@ -923,10 +973,12 @@ function stepIsDone(f, k) {
     case 'added': return !!f.inPortal;
     case 'pumps': return !!f.pumps;
     case 'gdd': return !!f.gdd;
-    case 'fc': return !!f.e3Done;
-    case 'ct': return (f.contacts || []).every(c => c.inPortal) && !stepTasks(f, 'ct').length && done(fTask(f, 'FASTCARE'));
+    case 'wr': return !!done(fTask(f, 'FASTCARE'));
+    case 'e3': return !!(f.e3Done || f.noE3);
+    case 'ct': return (f.contacts || []).every(c => c.inPortal) && !stepTasks(f, 'ct').length && fcDoneNew(f);
     case 'emr': return !!done(fTask(f, 'EMR_PORTAL')) || (!!g.emrNew && !!g.emr);
     case 'ps': return !!done(fTask(f, 'PORTAL_SETUP'));
+    case 'sched': return !!(f.manualDates || f.schedDone || done(fTask(f, 'SCHEDULE')) || (f.email1 && !handoffOnly(f)));
     case 'e1': return !!f.email1;
     case 'e2': return !!f.email2;
   }
@@ -935,36 +987,47 @@ function stepIsDone(f, k) {
 // EMR access for this facility is in the portal (new login entered by the EMR person, or the existing login + EMR info task)
 const emrReady = f => { const g = G(f); return preDone(f, 'emr') || done(fTask(f, 'EMR_PORTAL')) || (!!g.emrNew && !!g.emr && !!f.inPortal && done(gTask(g.name, 'EMR'))); };
 // later steps include the earlier ones (same as the request form)
-const stepChain = keys => { const p = new Set(keys); if (p.has('e2')) p.add('e1'); if (p.has('e1')) p.add('ps'); return [...p]; };
+const stepChain = keys => { const p = new Set(keys); Object.keys(PRE_IMPLY).forEach(k => { if (p.has(k)) PRE_IMPLY[k].forEach(x => p.add(x)); }); return [...p]; };
 function stepProblem(f, keys) {
   if (!keys.length) return 'Tick at least 1 step.';
   if (keys.includes('corp') && !f.group) return 'This facility has no corporate yet. Pick it under "Edit details" first.';
-  if (keys.includes('fc') && !f.group) return '"FastCare info gathered" needs the corporate. Pick it under "Edit details" first.';
+  if (keys.includes('wr') && !f.group) return '"FastCare info gathered" needs the corporate. Pick it under "Edit details" first.';
   return '';
 }
 // sets what the skipped steps would have set, closes their open tasks, and tells the people those tasks were sent to
-function markStepsDone(f, picked, by, byName) {
-  const keys = stepChain(picked).filter(k => !stepIsDone(f, k)), g = f.group ? G(f) : null;
-  const err = stepProblem(f, keys); if (err) return { err };
+function markStepsDone(f, picked, by, byName, info) {
+  const keys = stepChain(picked).filter(k => !stepIsDone(f, k)), g = f.group ? G(f) : null, i = info || {};
+  const err = stepProblem(f, keys) || preInfoProblem(keys, i); if (err) return { err };
   const closed = [];
   keys.forEach(k => stepTasks(f, k).forEach(t => { if (!closed.includes(t)) closed.push(t); }));
-  f.pre = Object.assign({}, f.pre || {}); keys.forEach(k => f.pre[k] = true);
+  f.pre = normPre(f.pre); keys.forEach(k => f.pre[k] = true);
   f.stepsDone = [...(f.stepsDone || []), { keys, by, byName, on: st.today }];
   if (keys.includes('corp') && g && !g.price) g.existing = true;
-  if (keys.includes('added')) { f.inPortal = true; f.portalName = f.portalName || f.name; f.addedBefore = true; }
+  if (keys.includes('added')) { f.inPortal = true; f.portalName = i.pn || f.portalName || f.name; f.addedBefore = true; }
   if (keys.includes('pumps') && !f.pumps) f.pumps = 'already done';
-  if (keys.includes('gdd') && !f.gdd) f.gdd = 'Already done';
-  if (keys.includes('fc')) { f.email3 = f.email3 || st.today; markE3Done(f, byName); }
+  if (keys.includes('gdd')) gddAnswer(f, i.gdd, i.gddWh);
+  if (keys.includes('wr')) { f.wound = i.wound; f.regional = i.regional; }
+  if (keys.includes('e3')) { f.noE3 = true; markE3Done(f, byName); }
+  if (keys.includes('sched')) { if (f.email1) f.schedDone = st.today; else setManualDates(f, i, byName); }
   if (keys.includes('ct')) (f.contacts || []).forEach(c => c.inPortal = true);
   if (keys.includes('e1') && !f.email1) { f.email1 = st.today; f.email1By = byName + ' (marked on the facility page)'; }
   if (keys.includes('e2') && !f.email2) { f.email2 = st.today; f.email2By = byName + ' (marked on the facility page)'; }
   closed.forEach(t => { t.status = 'Done'; t.doneBy = by; t.doneByName = byName; t.doneOn = st.today; t.closedOnFac = true; });
-  // 1 email per person whose task was removed
+  notifyClosed(f, closed, by, byName, ts => 'marked ' + (ts.length === 1 ? 'this' : 'these') + ' as already done');
+  return { keys, closed };
+}
+// 1 email per person whose task was removed (not the person who did it)
+function notifyClosed(f, closed, by, byName, what) {
   const byWho = {}; closed.forEach(t => { if (t.assignee && t.assignee !== by) (byWho[t.assignee] = byWho[t.assignee] || []).push(t); });
   Object.entries(byWho).forEach(([who, ts]) => mail({ key: 'm:E25:' + hash(ts.map(t => t.key).sort().join(',')) + ':' + uid(), code: 'E25', to: [who], fac: f.id, link: 'none',
     subject: (ts.length === 1 ? 'Not needed anymore: ' + taskTitle(ts[0]) : 'Not needed anymore: ' + ts.length + ' tasks for ' + facName(f)),
-    body: `<p>Hi ${esc(first(nameOf(who)))},</p><p>${esc(byName)} marked ${ts.length === 1 ? 'this' : 'these'} as already done for <b>${esc(facName(f))}</b>, so it's been removed from your tasks. You don't need to do ${ts.length === 1 ? 'it' : 'them'}.</p><ul>${ts.map(t => '<li>' + esc(taskTitle(t)) + '</li>').join('')}</ul>` }));
-  return { keys, closed };
+    body: `<p>Hi ${esc(first(nameOf(who)))},</p><p>${esc(byName)} ${what(ts)} for <b>${esc(facName(f))}</b>, so ${ts.length === 1 ? 'it\'s' : 'they\'ve'} been removed from your tasks. You don't need to do ${ts.length === 1 ? 'it' : 'them'}.</p><ul>${ts.map(t => '<li>' + esc(taskTitle(t)) + '</li>').join('')}</ul>` }));
+}
+// closes a facility's open tasks of these types as Done (what they ask for was filled in on the facility page)
+function closeFilled(f, types, by, byName) {
+  const ts = tasksOf(f).filter(t => types.includes(t.type) && !done(t) && !t.archived);
+  ts.forEach(t => { t.status = 'Done'; t.doneBy = by; t.doneByName = byName; t.doneOn = st.today; t.doneAt = nowIso(); t.closedOnFac = true; });
+  return ts;
 }
 
 // ---------- Brightree report → portal setup → schedule, done together when possible ----------
@@ -999,7 +1062,7 @@ function psWaiting(f) {
 }
 // after a task is done: the task it's recommended to do right away. { to: 'PORTAL_SETUP'|'SCHEDULE', task, waiting: [...] } or null
 function nextStep(f, from) {
-  if (!f || f.email1 || f.hold || f.complete || f.deleted) return null;
+  if (!f || !datesOpen(f) || f.hold || f.complete || f.deleted) return null;
   const ps = fTask(f, 'PORTAL_SETUP'), psDone = done(ps) || preDone(f, 'ps');
   if (from === 'BRIGHTREE' && !psDone) return { to: 'PORTAL_SETUP', task: ps && !done(ps) ? ps : null, waiting: ps ? [] : psWaiting(f) };
   if (from === 'BRIGHTREE' || from === 'PORTAL_SETUP') {
@@ -1019,7 +1082,7 @@ function btProblem(f, v) {
   if (!v.cad) return 'Pick how often enteral ships.';
   return '';
 }
-const updateBtCheck = (f, v) => f.email1 ? 'The Chicago handoff email already went out with these dates, so the report dates can\'t change. Use "Dates changed: send correction" on the facility page.' : btProblem(f, v);
+const updateBtCheck = (f, v) => !datesOpen(f) ? 'The Chicago handoff email already went out with these dates, so the report dates can\'t change. Use "Dates changed: send correction" on the facility page.' : btProblem(f, v);
 function updateBt(f, v, by, byName) {
   const err = updateBtCheck(f, v); if (err) return { err };
   const cad = ({ Monthly: '4', Biweekly: '2', Weekly: '1' })[v.cad] || v.cad || '4';
@@ -1035,7 +1098,9 @@ function updateBt(f, v, by, byName) {
 // ---------- editing a facility's details (facility page "Edit details") ----------
 // Anything that was entered can be changed, but not cleared: a task that was done stays done. Wrong from the start? Put the task back in the queue.
 // v holds only the fields the form showed. Returns '' or what's wrong (then nothing is changed).
-const btChanged = (f, v) => { const b = f.bt || {}, cad = ({ 4: 'Monthly', 2: 'Biweekly', 1: 'Weekly' })[b.cadence] || 'Monthly'; return v.le !== undefined && !!f.bt && !f.email1 && ((b.lastEnt || '') !== v.le || (b.lastOuts || '') !== v.lo || cad !== v.cad); };
+// Brightree report dates typed in on the facility page before the report task was done (only while dates can still move)
+const btNew = (f, v) => v.le !== undefined && !f.bt && datesOpen(f) && !f.manualDates && !!(v.le || v.lo);
+const btChanged = (f, v) => { const b = f.bt || {}, cad = ({ 4: 'Monthly', 2: 'Biweekly', 1: 'Weekly' })[b.cadence] || 'Monthly'; return v.le !== undefined && !!f.bt && datesOpen(f) && ((b.lastEnt || '') !== v.le || (b.lastOuts || '') !== v.lo || cad !== v.cad); };
 function editFacilityCheck(f, v) {
   if (!f) return 'That facility isn\'t there anymore.';
   const blank = (had, now, label) => had && !now ? label + ' can\'t be left blank. It was entered before; if it was wrong, change it, or put the task that entered it back in the queue.' : '';
@@ -1051,7 +1116,7 @@ function editFacilityCheck(f, v) {
   }
   if (v.gdd !== undefined) { if (['Yes', 'No'].includes(f.gdd) && !v.gdd) errs.push('The GDD answer can\'t be left blank.'); if (v.gdd === 'Yes' && !v.gddWh) errs.push('Which GDD warehouse?'); }
   if (v.addr && addressFormatProblem(v.addr)) errs.push(addressFormatProblem(v.addr));
-  if (btChanged(f, v)) errs.push(btProblem(f, v));
+  if (btChanged(f, v) || btNew(f, v)) errs.push(btProblem(f, v));
   return errs.find(Boolean) || '';
 }
 function editFacility(f, v, by, byName) {
@@ -1062,25 +1127,36 @@ function editFacility(f, v, by, byName) {
   const state = v.addr ? stateFrom(v.addr) : f.state, oldState = f.state;
   if (f.email1 && v.addr && state !== oldState) mail({ key: 'm:E13:state:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Address changed after the Chicago handoff email: ' + facName(f), body: '<p>' + esc(byName) + ' changed the state from ' + esc(oldState || '(none)') + ' to ' + esc(state) + '. The dates didn\'t change. Check the ship point and delivery date, and send Chicago a correction if they\'re wrong.</p>' });
   if (f.email1 && v.rep && v.rep !== f.rep) mail({ key: 'm:E13:rep:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Intake rep changed after the Chicago handoff email: ' + facName(f), body: '<p>' + esc(byName) + ' changed the intake rep from ' + esc(nameOf(f.rep)) + ' to ' + esc(nameOf(v.rep)) + '. The Chicago handoff email (and the transfer notice to the facility) named ' + esc(nameOf(f.rep)) + '. Click "Dates changed: send correction" on the facility page to send Chicago the corrected email with the new rep, or let the facility know yourself.</p>' });
-  const oldAm = amOf(f);
+  const oldAm = amOf(f), closed = [], wrWas = JSON.stringify([f.wound || null, f.regional || null]);
+  // a portal name typed in for the first time means it's in Brightree: Amy's "Add to Brightree" task isn't needed
+  if (v.pn && !f.inPortal && v.pn !== (f.portalName || '')) { f.inPortal = true; f.addedOnFac = byName; closed.push(...closeFilled(f, ['PORTAL_ADD'], by, byName)); }
   f.name = v.name || f.name; if (v.pn) f.portalName = v.pn;
   if (v.addr) { f.address = v.addr; f.state = state; }
   if (v.rep) f.rep = v.rep; if (v.clin) f.clin = v.clin; if (v.acct) f.acct = v.acct; if (v.am) f.am = v.am;
   if (v.none) { if (!G(f).standalone) makeStandalone(f); } else if (v.grp && lc(v.grp) !== lc(f.group) && grp(v.grp)) f.group = grp(v.grp).name;
   if (v.wound) f.wound = v.wound; if (v.regional) f.regional = v.regional;
   if (v.why) f.why = v.why;
-  if (v.gdd && (v.gdd !== f.gdd || (v.gdd === 'Yes' && v.gddWh !== f.gddWh))) {
+  // first GDD answer here: same as Chris answering (FYI to the GDD contact if Yes), and his task closes
+  if (['Yes', 'No'].includes(v.gdd) && !['Yes', 'No'].includes(f.gdd)) { gddAnswer(f, v.gdd, v.gddWh); closed.push(...closeFilled(f, ['GDD'], by, byName)); }
+  else if (v.gdd && (v.gdd !== f.gdd || (v.gdd === 'Yes' && v.gddWh !== f.gddWh))) {
     const was = f.gdd === 'Yes' ? f.gddWh : '';
     f.gdd = v.gdd; f.gddWh = v.gdd === 'Yes' ? v.gddWh : '';
     if (was || f.gddWh) mail({ key: 'm:E11:' + f.id + ':' + hash(was + '>' + f.gddWh), code: 'E11', to: [roleEmail('gddInfo')], cc: [amOf(f)], fac: f.id, link: 'none', subject: 'GDD changed: ' + facName(f), body: `<p>Hi ${esc(first(roleName('gddInfo')))},</p><p>FYI, ${esc(byName)} changed the GDD answer for <b>${esc(facName(f))}</b>: ${f.gddWh ? 'it\'s serviced through <b>' + esc(f.gddWh) + '</b>' : 'it\'s <b>not</b> serviced through GDD'}${was ? ' (it was ' + esc(was) + ')' : ''}.</p>` });
     if (!f.gddWh) tasksOf(f, 'GDD_PORTAL').forEach(t => { if (!done(t)) { t.status = 'Not needed'; t.doneOn = st.today; } });
   }
   let btRes = null; if (btv) btRes = updateBt(f, btv, by, byName);
+  // report dates typed in here before the report task: it closes
+  if (btNew(f, v)) { f.bt = { lastEnt: v.le || '', lastOuts: v.lo || '', cadence: CAD_V[v.cad] || '4' }; f.btAt = nowIso(); f.btBy = byName; closed.push(...closeFilled(f, ['BRIGHTREE'], by, byName)); }
+  // wound rep + regional both in: the FastCare task isn't needed (it also needs the corporate; a missing address gets its own task)
+  let fcLeft = '';
+  const wrNew = JSON.stringify([f.wound || null, f.regional || null]) !== wrWas; // only when they were filled in or changed just now
+  if (wrNew && f.wound && f.regional && fTask(f, 'FASTCARE') && !done(fTask(f, 'FASTCARE'))) { if (f.group) closed.push(...closeFilled(f, ['FASTCARE'], by, byName)); else fcLeft = 'The FastCare task stays open: it still needs the corporate.'; }
+  if (closed.length) notifyClosed(f, closed, by, byName, ts => 'filled in what ' + (ts.length === 1 ? 'this task asks' : 'these tasks ask') + ' for on the facility page');
   if (amOf(f) !== oldAm) {
     const open = tasksOf(f).filter(t => !done(t) && !t.archived && t.amTask);
     mail({ key: 'm:E20:lead:' + f.id + ':' + uid(), code: 'E20', to: [amOf(f)], cc: [oldAm], fac: f.id, link: 'fac', subject: 'You\'re now the transition lead: ' + facName(f), body: `<p>${esc(byName)} made you the transition lead for <b>${esc(facName(f))}</b> (it was ${esc(nameOf(oldAm))}).</p>${open.length ? '<p>Its open tasks moved to you:</p>' + taskList(open.map(t => [esc(taskTitle(t)), t.key])) : '<p>No open tasks right now.</p>'}` });
   }
-  return { ok: true, bt: btRes };
+  return { ok: true, bt: btRes, closed, fcLeft };
 }
 // contacts edited on the facility page. A contact that's new or changed goes on the next "Contacts into portal" task.
 function saveContacts(f, list, byName) {

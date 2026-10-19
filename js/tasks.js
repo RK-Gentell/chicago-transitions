@@ -175,6 +175,7 @@ const TT = {
       <div class="row"><div class="field"><label>Facility contacts</label>${shotZone('fc', 'fac', shotFor(t, 'fac'))}</div><div class="field"><label>Corporate contacts</label>${shotZone('fc', 'corp', shotFor(t, 'corp'))}</div></div>
       ${f.contactsShot || f.corpShot ? `<div class="note">Already saved: the ${[f.contactsShot && 'facility', f.corpShot && 'corporate'].filter(Boolean).join(' and ')} contacts screenshot. Paste a new one only to replace it.</div>` : ''}
       ${chk('fc_nocts', 'No FastCare contacts available')}
+      ${chk('fc_norev', 'We don\'t need the contacts reviewed' + tip('We already have the contacts and we\'re sure they\'re accurate. No contacts request goes to the wound rep and regional. They still get the in-service ask on the Chicago handoff email.'), !!f.noE3)}
       ${e3List(f).length ? `<div class="note">These also go in the email (added on the request, facility page or corporate): ${e3List(f).map(c => esc((c.first + ' ' + c.last).trim() || c.email)).join(', ')}</div>` : ''}`;
     },
     example: t => { const n = fcNeed(t); const o = { w: 'Peter West <peter.west@demo.gentell.com>', r: 'Brian McCauley <brian.mccauley@demo.gentell.com>' }; if (n.corp) { o.fc_grp = 'New corporate…'; o.fc_new = 'Infinity Healthcare Management'; } if (n.addr) o.fc_addr = '123 Demo St, LaGrange, IN 46761'; o.fc_nocts = true; return o; },
@@ -187,10 +188,10 @@ const TT = {
       if (!readPerson('w')) return 'Pick the wound rep from the list (start typing their name).';
       if (!readPerson('r')) return 'Pick the regional from the list (start typing their name).';
       const f = facById(t.fac);
-      if (!shotFor(t, 'fac') && !shotFor(t, 'corp') && !V('fc_nocts') && !f.contactsShot && !f.corpShot) return 'Paste a screenshot of the facility or corporate contacts (or both), or tick "No FastCare contacts available".';
+      if (!shotFor(t, 'fac') && !shotFor(t, 'corp') && !V('fc_nocts') && !V('fc_norev') && !f.contactsShot && !f.corpShot) return 'Paste a screenshot of the facility or corporate contacts (or both), or tick "No FastCare contacts available" or "We don\'t need the contacts reviewed".';
       return '';
     },
-    done: t => {
+    done: (t, ctx) => {
       const f = facById(t.fac), n = fcNeed(t);
       if (n.addr) { f.address = normAddr(V('fc_addr')); f.state = stateFrom(f.address); }
       if (n.corp) {
@@ -203,6 +204,9 @@ const TT = {
       const keep = !V('fc_nocts');
       f.contactsShot = sv.fac || (keep && f.contactsShot) || null; f.corpShot = sv.corp || (keep && f.corpShot) || null; f.noFcContacts = !f.contactsShot && !f.corpShot && !!V('fc_nocts');
       f.wound = readPerson('w'); f.regional = readPerson('r');
+      // contacts don't need reviewing: no contacts request. Unticked when redoing the task: the request goes out after all.
+      if (V('fc_norev')) { if (!f.email3 && !f.e3Done) { f.noE3 = true; f.e3NoReview = true; markE3Done(f, (ctx ? ctx.byName : '') + ' (contacts didn\'t need reviewing)'); } }
+      else if (f.e3NoReview && !f.email3) { delete f.noE3; delete f.e3NoReview; delete f.e3Done; delete f.e3DoneBy; }
     }
   },
   BRIGHTREE: {
@@ -240,8 +244,9 @@ const TT = {
   SCHEDULE: {
     title: t => 'Schedule: ' + facName(facById(t.fac)),
     form: t => { const f = facById(t.fac); return f.dates ? scheduleForm(f) : '<div class="err">No dates yet: the facility needs a full address with a state that has a ship point. Fix it on the facility page.</div>'; }, example: () => ({}),
-    validate: t => { const f = facById(t.fac); if (!f.dates || !stateOK(f)) return 'No dates yet: fix the address on the facility page first.'; const s = settingsProblems(); if (s.length) return 'The Chicago handoff email can\'t go out until Settings are finished: ' + s.join(' '); if (!f.rep) return 'The facility has no intake rep.'; if (f.dates.ord < st.today) return 'The ordering date has passed. Change the dates above and click "Save dates" first.'; return ''; },
-    done: t => sendEmail1(facById(t.fac))
+    validate: t => { const f = facById(t.fac); if (!f.dates || !stateOK(f)) return 'No dates yet: fix the address on the facility page first.'; if (f.email1) return ''; const s = settingsProblems(); if (s.length) return 'The Chicago handoff email can\'t go out until Settings are finished: ' + s.join(' '); if (!f.rep) return 'The facility has no intake rep.'; if (f.dates.ord < st.today) return 'The ordering date has passed. Change the dates above and click "Save dates" first.'; return ''; },
+    // the handoff email was already marked sent: done only records the schedule
+    done: t => { const f = facById(t.fac); if (f.email1) f.schedDone = st.today; else sendEmail1(f); }
   },
   ADDRESS: {
     title: t => 'Address: ' + facName(facById(t.fac)),
@@ -296,6 +301,7 @@ function portalForm(f) {
   return `<div class="instr">portal.isgmed.com → "Facilities" → "Facilities" → search 1 word → check "Corporate" → edit pencil. Leave every other field as it is. Have the Brightree report open for the pump, spike set and supplements lines.</div><div class="note">Nothing here gets typed back into this app.</div><div class="tablewrap"><table class="vals">${rows.map(r => `<tr><td>${esc(r[0])}</td><td><b>${esc(r[1])}</b></td></tr>`).join('')}</table></div><div class="note">Contacts are a separate task, so this doesn't wait on them.</div>${chk('ok', 'Saved ("Facility successfully updated.")')}${emrBox}`;
 }
 function dateEditor(f) {
+  if (f.manualDates) { const m = f.dates || manualDatesObj(f); return `<div class="card" style="padding:10px"><b>Dates (already scheduled)</b><div class="meta" style="margin-top:4px">Ordering ${fmt(m.ord)} · date of service ${fmt(m.dos)} · delivery ${fmt(m.del)} · enteral ships ${esc(CAD_L[f.manualDates.cadence] || 'Monthly')}</div><div class="meta">${esc(m.why[0])}.${f.email1 ? '' : ' The Chicago handoff email goes out with these dates as soon as the facility has an intake rep and its areas of care.'}</div></div>`; }
   const d = f.dates, r = f.rec, w = dateWarn(f, d.dos);
   return `<div class="card" style="padding:10px" id="dedit"><b>${d.changed ? 'Dates (changed)' : 'Recommended dates'}</b>${tip('Change any 1 date and the other 2 move with it.')}
   <div class="row">${fld('Ordering date', dt('de_ord', d.ord))}${fld('Date of service', dt('de_dos', d.dos))}${fld('Delivery date', dt('de_del', d.del))}</div>
@@ -316,5 +322,5 @@ function btRecheck(f) {
 function scheduleForm(f) {
   const d = f.dates, b = f.bt;
   return `${btRecheck(f)}${dateEditor(f)}<div class="instr"><ol><li>"Facilities" → schedule icon under "Actions" → "Facility Schedule".</li><li>"Start Date" <span class="q">${fmtS(d.del)}</span>, "Day of the Week" <span class="q">${d.day}</span>, "Weeks" <span class="q">4</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>${b.cadence !== '4' ? `<li>"Select Area of Care" → "Enteral" → "Add Schedule": same Start Date and day, "Weeks" <span class="q">${b.cadence}</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>` : ''}<li>"Generate Dates" → check "Override Manually" → "Save".</li><li>"Schedules" → Ordering Calendar → open the entry on ${fmt(d.ord)} and check the 3 dates match the ones above. Wrong? Recheck Start Date, Day of the Week and OS Days and generate again. Missing? The ordering date probably landed on a weekend.</li><li>In the calendar pop-up for the ordering date, add the notes: <span class="q">Chicago transition</span> + <span class="q">Email Shani the list of eligible pump fed and trach pts so she can review Chicago's billing</span> + anything useful from the report.</li></ol></div>
-  <div class="note">"Mark done" sends the Chicago handoff email with these dates. Changed a date above? Click "Save dates" first.</div>`;
+  ${f.email1 ? '<div class="note">The Chicago handoff email was already marked sent, so "Mark done" only records the schedule. No email goes out. Changed a date above? Click "Save dates" first.</div>' : '<div class="note">"Mark done" sends the Chicago handoff email with these dates. Changed a date above? Click "Save dates" first.</div>'}`;
 }

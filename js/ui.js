@@ -291,6 +291,34 @@ function outboxHtml() {
   return `<h1>Outbox</h1><p class="sub">Every email the app sent or will send (last ${OUTBOX_DAYS} days). The "CT - Send emails" flow sends them from ${esc(CFG.mailbox)} within about 5 minutes; scheduled ones go out early that morning (7 or 8 am Eastern). Scheduled ones that aren't needed anymore (the task got done first) are dropped automatically.</p>${mailSections(st.mails, isAdmin(me()), 'h2')}`;
 }
 
+// ---------- info for "already done" steps (request form and facility page) ----------
+// keys = the ticked steps (with what they include); facs = [{ name, f }] (f = the facility, to prefill). Ids: <prefix><field>_<i>
+function preInfoHtml(prefix, keys, facs) {
+  const need = PRE_INFO.filter(k => keys.includes(k)); if (!need.length || !facs.length) return '';
+  const cads = ['Monthly', 'Weekly', 'Biweekly'];
+  const one = (x, i) => { const f = x.f || {}, d = f.dates || {}, id = n => prefix + n + '_' + i;
+    return `<div class="card" style="padding:8px 10px;display:flex;flex-direction:column;gap:6px">${facs.length > 1 ? '<b>' + esc(x.name) + '</b>' : ''}
+      ${need.includes('added') ? `<div class="row">${fld('Facility name as Brightree shows it (our portal name)', txt(id('pn'), f.portalName || '', String(x.name || '').replace(/\s*\([A-Z]{2}\)\s*$/, '') + '- 123456'))}</div>` : ''}
+      ${need.includes('gdd') ? `<div class="row">${fld('Did it get orders from GDD?', sel(id('gdd'), ['Yes', 'No'], ['Yes', 'No'].includes(f.gdd) ? f.gdd : ''))}<div id="${id('whb')}" ${f.gdd === 'Yes' ? '' : 'hidden'}>${fld('Which warehouse?', sel(id('wh'), st.settings.warehouses, f.gddWh || '', true))}</div></div>` : ''}
+      ${need.includes('wr') ? `<div class="row">${fld('Wound and Product Specialist', personPick(id('w'), f.wound))}${fld('Regional Manager', personPick(id('r'), f.regional))}</div>` : ''}
+      ${need.includes('sched') ? `<div class="row">${fld('Ordering date', dt(id('ord'), d.ord))}${fld('Date of service', dt(id('dos'), d.dos))}${fld('Delivery date', dt(id('del'), d.del))}${fld('Enteral ships', sel(id('cad'), cads, CAD_L[(f.bt || {}).cadence] || 'Monthly', true))}</div>` : ''}</div>`; };
+  return `<div class="sect" style="margin-top:8px">Details for what's already done${tip('The app needs these to carry on without the skipped tasks.')}</div><div style="display:flex;flex-direction:column;gap:8px">${facs.map(one).join('')}</div>`;
+}
+function readPreInfo(prefix, i) { const id = n => prefix + n + '_' + i; return { pn: V(id('pn')), gdd: V(id('gdd')), gddWh: V(id('wh')), wound: readPerson(id('w')), regional: readPerson(id('r')), ord: V(id('ord')), dos: V(id('dos')), del: V(id('del')), cad: V(id('cad')) }; }
+// already scheduled but the handoff email isn't sent yet: it goes out with these dates, so the ordering date can't have passed
+const schedPast = (keys, i, label) => keys.includes('sched') && !keys.includes('e1') && i.ord && i.ord < st.today ? (label ? label + ': ' : '') + '"Scheduled": the ordering date has passed, and the Chicago handoff email would go out with it. Tick "Chicago handoff email sent" too if it already went out, or fix the dates.' : '';
+// redraws the details box, keeping what was typed
+function redrawPreInfo(boxId, prefix, keys, facs) {
+  const box = document.getElementById(boxId); if (!box) return;
+  const keep = {}; box.querySelectorAll('input,select').forEach(e => { if (e.id) keep[e.id] = e.value; });
+  box.innerHTML = preInfoHtml(prefix, keys, facs);
+  box.querySelectorAll('input,select').forEach(e => { if (e.id in keep && keep[e.id] !== '') { e.value = keep[e.id]; if (e.type === 'hidden') segSync(e.id); if (e.tagName === 'SELECT') e.dispatchEvent(new Event('change', { bubbles: true })); } });
+  box.querySelectorAll('[id*="_gdd_"]').forEach(e => { const b = document.getElementById(e.id.replace('_gdd_', '_whb_')); if (b) b.hidden = e.value !== 'Yes'; });
+}
+const rqKeys = () => stepChain(PRE_ITEMS.map(x => x[0]).filter(k => V('rq_pre_' + k)));
+const rqFacs = () => V('rq_fac').split('\n').map(l => l.split(';')[0].trim()).filter(Boolean).map(name => ({ name }));
+const fsKeys = f => stepChain([...document.querySelectorAll('[data-step]:checked:not(:disabled)')].map(x => x.dataset.step)).filter(k => !stepIsDone(f, k));
+
 // ---------- new request ----------
 function requestHtml() {
   const demo = STORE.mode === 'demo';
@@ -307,7 +335,7 @@ function requestHtml() {
       <div class="field" id="rq_corpbox" hidden><label>Corporate contacts</label>${contactEditor('rq_corp', 'Corporate', false)}<div class="hint">Put first the person we ask for things, like adding a facility to their EMR login. Not needed if the corporate already has contacts in the app.</div></div>
       <div class="field" id="rq_fctsbox" hidden><label>Facility contacts</label>${contactEditor('rq_fcts', '', true)}<div class="hint">Several facilities? Type the facility name in the first box. Leave it blank for all of them.</div></div></section>
     <section><details class="rqd" id="rq_pre"><summary><h2 class="rqh">Already done${tip('Tick anything that\'s already taken care of, for every facility on this request. The app skips those tasks. Info that usually comes from a skipped task (like an EMR username or dates) stays blank.')}<span class="meta" id="rq_precount"></span></h2></summary>
-      <div class="predone">${PRE_ITEMS.map(([k, l, h]) => chk('rq_pre_' + k, esc(l) + (h ? tip(esc(h)) : ''))).join('')}</div></details></section>
+      <div class="predone">${PRE_ITEMS.map(([k, l, h]) => chk('rq_pre_' + k, esc(l) + (h ? tip(esc(h)) : ''))).join('')}</div><div id="rq_preinfo"></div></details></section>
     <section><h2 class="rqh">Attachments${tip('PDFs, docs, or emails you saved from Outlook first. Saved in SharePoint, in a folder for this request. Linked on every task.')}</h2>
       <div class="drop" id="rq_drop" tabindex="0"><b>Drag files here</b> or <label class="linkish" for="rq_files">browse</label><input type="file" id="rq_files" multiple hidden></div><div class="rqi" style="margin-top:6px">Emails: forward them to <span class="q">${esc(CFG.mailbox)}</span> with the facility name in the subject. They show up on the facility page under "Mailbox".</div><div id="rq_list" class="meta">${ui.dropped.map(f => esc(f.name)).join(', ')}</div></section>
     <div id="rq_err"></div><div><button class="btn pri" type="submit">Submit request</button></div></form>`;
@@ -329,13 +357,20 @@ function parseRequest() {
     const none = /^(none|no corporate|standalone)$/i.test(c3);
     const unknown = !c3 || c3 === '?';
     const group = none ? name : unknown ? '' : c3;
-    if (V('rq_pre_fc') && unknown) return { err: '"' + name + '" has no corporate. Add it to the line, or untick "FastCare info gathered" (FastCare is where the transition lead would find it).' };
-    if (V('rq_pre_fc') && !address && !V('rq_pre_added')) return { err: '"' + name + '" has no address, and Amy needs it to add it to Brightree. Add it to the line, or untick "FastCare info gathered".' };
+    if (V('rq_pre_wr') && unknown) return { err: '"' + name + '" has no corporate. Add it to the line, or untick "FastCare info gathered" (FastCare is where the transition lead would find it).' };
+    if (V('rq_pre_wr') && !address && !V('rq_pre_added')) return { err: '"' + name + '" has no address, and Amy needs it to add it to Brightree. Add it to the line, or untick "FastCare info gathered".' };
     // the address only has to be readable here; a state with no ship point gets an "Address" task later
     if (address && addressFormatProblem(address)) return { err: '"' + name + '": ' + addressFormatProblem(address) + ' Or leave the address out.' };
     const dup = st.facs.find(f => !f.archived && !f.complete && lc(f.name) === lc(name));
     if (dup && !ui.confirmDup) { ui.confirmDup = true; return { err: '"' + name + '" is already in the tracker (CT-' + pad(dup.id) + '). Submit again if this really is a new request.' }; }
     out.push({ name, address: address ? normAddr(address) : '', group, none, state: stateFrom(address) });
+  }
+  // info the ticked "already done" steps need, per facility
+  const keys = stepChain(PRE_ITEMS.map(x => x[0]).filter(k => V('rq_pre_' + k)));
+  for (let i = 0; i < out.length; i++) {
+    const info = readPreInfo('rq_pi_', i), e = preInfoProblem(keys, info, out.length > 1 ? out[i].name : '') || schedPast(keys, info, out.length > 1 ? out[i].name : '');
+    if (e) return { err: e + ' (under "Already done")' };
+    out[i].info = info;
   }
   return { lines: out };
 }
@@ -356,7 +391,7 @@ async function submitRequest() {
     const created = p.lines.map((l, i) => {
       if (l.group) { const g = ensureGroup(l.group, l.none); if (pre.corp && !g.price) g.existing = true; g.cov = Object.assign({}, covIn, g.cov || {}); if (corp.length && !(g.contacts || []).length) g.contacts = corp.map(c => ({ first: c.first, last: c.last, dept: c.dept, note: c.note, email: c.email })); }
       const f = { id: ids[i], req: req.key, name: l.name, address: l.address, state: l.state, group: l.group ? grp(l.group).name : '', pendingCov: Object.assign({}, covIn), rep, clin: rep, am, acct, contacts: [], requested: st.today, requester: me(), why, files: saved };
-      applyPre(f, pre, l);
+      applyPre(f, pre, l, l.info);
       fcts.forEach(c => { if (c.fac && !lc(l.name).startsWith(lc(c.fac))) return; addContacts(f, [c], 'requester'); });
       if (pre.ct) f.contacts.forEach(c => c.inPortal = true);
       st.facs.push(f); return f;
@@ -465,7 +500,7 @@ function reopenCard(t, ppl) {
 function stepsCard(f) {
   if (f.complete || f.deleted) return '';
   const items = PRE_ITEMS.map(([k, l, h]) => { const d = stepIsDone(f, k), n = d ? 0 : stepTasks(f, k).length; return `<label class="chk ${d ? 'isdone' : ''}"><input type="checkbox" id="fs_pre_${k}" data-step="${k}" ${d ? 'checked disabled' : ''}><span>${esc(l)}${d ? ' <span class="tag">done</span>' : n ? ' <span class="meta">(closes ' + n + ' open task' + (n > 1 ? 's' : '') + ')</span>' : ''}${h ? tip(esc(h)) : ''}</span></label>`; }).join('');
-  return `<details class="card" style="padding:10px" id="fsteps"><summary><b>Mark steps done</b> <span class="meta">(already taken care of outside the app)</span></summary><div class="meta" style="margin:6px 0">Tick what's already done. Their open tasks close, and anyone those tasks were sent to gets an email that they don't need to do them.</div><div class="predone">${items}</div><div id="fs_err"></div><div style="margin-top:8px"><button class="btn sm pri" id="fs_go">Mark ticked steps done</button></div></details>`;
+  return `<details class="card" style="padding:10px" id="fsteps"><summary><b>Mark steps done</b> <span class="meta">(already taken care of outside the app)</span></summary><div class="meta" style="margin:6px 0">Tick what's already done. Their open tasks close, and anyone those tasks were sent to gets an email that they don't need to do them.</div><div class="predone">${items}</div><div id="fs_preinfo"></div><div id="fs_err"></div><div style="margin-top:8px"><button class="btn sm pri" id="fs_go">Mark ticked steps done</button></div></details>`;
 }
 // the clinical box on the corporate's rule: "same as intake" when the rule says so (older rules: when clinical = intake)
 const ruleClinVal = g => g.clinSame || (!partialRule(g) && g.rep && (!g.clin || g.clin === g.rep)) ? '__same' : (g.clin || '');
@@ -504,15 +539,19 @@ const withCur = (opts, v) => !v || opts.some(o => o[0] === v) ? opts : [...opts,
 // every detail entered for the facility; nothing that was filled in can be cleared (a done task stays done)
 function editDetails(f, R, A) {
   const g = G(f), b = f.bt || {}, cadV = ({ 4: 'Monthly', 2: 'Biweekly', 1: 'Weekly' })[b.cadence] || 'Monthly';
-  const bt = !f.bt ? '' : f.email1 ? `<div class="meta">Brightree report: last enteral ${b.lastEnt ? fmtS(b.lastEnt) : '-'}, last uro / ostomy / trach ${b.lastOuts ? fmtS(b.lastOuts) : '-'}. The Chicago handoff email went out, so these can't change here.</div>`
+  // a task still open for something this form can fill in: say that filling it in closes the task
+  const closes = (type, what) => { const t = fTask(f, type); return t && !done(t) && !t.archived ? '<div class="meta">' + what + ' closes the "' + esc(taskTitle(t)) + '" task' + (t.assignee && t.assignee !== me() ? ' (' + esc(nameOf(t.assignee)) + ' gets an email that it\'s not needed)' : '') + '.</div>' : ''; };
+  const btFirst = !f.bt && datesOpen(f) && !f.manualDates;
+  const bt = btFirst ? `<div class="sect">Brightree report${tip('Last delivery dates from the GNS Lakewood Report in Chicago\'s Brightree (Delivery Actual date). The dates calculate from them.')}</div><div class="row">${fld('Last enteral (Delivery Actual date)', dt('fd_le', ''))}${fld('Last uro / ostomy / trach', dt('fd_lo', ''))}${fld('Enteral ships', sel('fd_cad', ['Monthly', 'Weekly', 'Biweekly'], 'Monthly'))}</div>${closes('BRIGHTREE', 'Entering them')}`
+    : !f.bt ? '' : !datesOpen(f) ? `<div class="meta">Brightree report: last enteral ${b.lastEnt ? fmtS(b.lastEnt) : '-'}, last uro / ostomy / trach ${b.lastOuts ? fmtS(b.lastOuts) : '-'}. The Chicago handoff email went out, so these can't change here.</div>`
     : `<div class="sect">Brightree report${tip('Changing a date recalculates the recommended dates. A date of service picked by hand goes back to the new recommended one.')}</div><div class="row">${fld('Last enteral (Delivery Actual date)', dt('fd_le', b.lastEnt))}${fld('Last uro / ostomy / trach', dt('fd_lo', b.lastOuts))}${fld('Enteral ships', sel('fd_cad', ['Monthly', 'Weekly', 'Biweekly'], cadV))}</div>`;
-  const gdd = f.gdd ? `<div class="row">${fld('GDD orders?', sel('fd_gdd', ['Yes', 'No'], ['Yes', 'No'].includes(f.gdd) ? f.gdd : '', true), f.gdd === 'Already done' ? 'Marked "already done" on the request. Pick Yes or No only if you know.' : '')}<div class="field" id="fd_whbox" ${f.gdd === 'Yes' ? '' : 'hidden'}><label>GDD warehouse</label>${sel('fd_wh', st.settings.warehouses, f.gddWh || '', true)}</div></div>` : '';
+  const gdd = `<div class="row">${fld('GDD orders?', sel('fd_gdd', ['Yes', 'No'], ['Yes', 'No'].includes(f.gdd) ? f.gdd : '', true), f.gdd === 'Already done' ? 'Marked "already done" on the request. Pick Yes or No only if you know.' : '')}<div class="field" id="fd_whbox" ${f.gdd === 'Yes' ? '' : 'hidden'}><label>GDD warehouse</label>${sel('fd_wh', st.settings.warehouses, f.gddWh || '', true)}</div></div>${closes('GDD', 'Answering it')}`;
   return `<details class="card" style="padding:10px" id="fdetbox" ${ui.editOpen === f.id ? 'open' : ''}><summary><b>Edit details</b> <span class="meta">(changes here don't touch the portal or Brightree. Changed after the portal setup? You get an "Update the portal" task)</span></summary><form id="fdet" style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
-    <div class="row">${fld('Chicago name', txt('fd_name', f.name), 'The name GNS Chicago / Gentell uses (from the request). Used to search Chicago\'s Brightree and FastCare.')}${fld('Portal name', txt('fd_pn', f.portalName), 'Our name in Brightree and the portal. Once it\'s in, it\'s the name everywhere in the app and in every email.')}</div>
+    <div class="row">${fld('Chicago name', txt('fd_name', f.name), 'The name GNS Chicago / Gentell uses (from the request). Used to search Chicago\'s Brightree and FastCare.')}${fld('Portal name', txt('fd_pn', f.portalName), 'Our name in Brightree and the portal, exactly as Brightree shows it. Once it\'s in, it\'s the name everywhere in the app and in every email.' + (f.inPortal ? '' : ' Typing it in means the facility is in Brightree.'))}</div>${f.inPortal ? '' : closes('PORTAL_ADD', 'Typing in the portal name')}
     <div class="row">${fld('Address', txt('fd_addr', f.address, '123 Main St, City, ST 12345'), 'The state (' + esc(f.state || 'none yet') + ') comes from the end of the address (2 letters or the full name, then the zip). It decides the ship point and delivery date.')}</div>
     <div class="row">${fld('Corporate', sel('fd_grp', Object.values(st.groups).filter(x => !x.standalone || lc(x.name) === lc(f.group)).map(x => x.name).sort(az), g.name, true))}</div>${chk('fd_none', 'No corporate (standalone)', g.standalone)}
     <div class="row">${fld('Intake rep', sel('fd_rep', withCur(R, f.rep), f.rep, true))}${fld('Clinical rep', sel('fd_clin', withCur(R, f.clin), f.clin, true))}${fld('Account manager', sel('fd_acct', withCur(R, acctOf(f)), acctOf(f), true))}${fld('Transition lead', sel('fd_am', withCur(A, f.am || amOf(f)), f.am || amOf(f), true))}</div>
-    ${f.wound || f.regional || done(fTask(f, 'FASTCARE')) ? `<div class="row">${fld('Wound and Product Specialist', personPick('fd_w', f.wound))}${fld('Regional Manager', personPick('fd_r', f.regional))}</div>${f.email3 && !f.e3Done ? '<div class="meta">The contacts request already went out. A change here only affects its follow-ups.</div>' : ''}` : ''}
+    <div class="row">${fld('Wound and Product Specialist', personPick('fd_w', f.wound))}${fld('Regional Manager', personPick('fd_r', f.regional))}</div>${f.email3 && !f.e3Done ? '<div class="meta">The contacts request already went out. A change here only affects its follow-ups.</div>' : ''}${f.group ? closes('FASTCARE', 'Picking both') : ''}${f.group && fTask(f, 'FASTCARE') && !done(fTask(f, 'FASTCARE')) && !f.noE3 ? '<div class="meta">Then the contacts request goes to them, without a FastCare contacts screenshot.</div>' : ''}
     ${gdd}${bt}
     <div class="row">${fld('Reason for transition', txt('fd_why', f.why))}</div>
     <div id="fd_err"></div><div><button class="btn sm pri" type="submit">Save details</button></div></form></details>`;
@@ -587,12 +626,12 @@ document.addEventListener('click', async e => {
     if (ok) { const t = taskByKey(key); if (t && done(t)) toast('Put back, but it closed itself again: what it asks for is already filled in. Change it on the ' + (t.fac ? 'facility' : 'corporate') + ' page instead.'); else if (!ui.errors.length) toast('Back in the queue for ' + nameOf(t.assignee) + '.'); }
     return; }
   if (T.id === 'fs_go') { const id = ui.openFac, f0 = facById(id), keys = [...document.querySelectorAll('[data-step]:checked:not(:disabled)')].map(x => x.dataset.step);
-    const all = stepChain(keys).filter(k => !stepIsDone(f0, k)), err = stepProblem(f0, all);
+    const all = stepChain(keys).filter(k => !stepIsDone(f0, k)), info = readPreInfo('fs_pi_', 0), err = stepProblem(f0, all) || preInfoProblem(all, info) || schedPast(all.concat(f0.email1 ? ['e1'] : []), info);
     if (err) { $('#fs_err').innerHTML = '<div class="err">' + esc(err) + '</div>'; return; }
     const ts = [...new Set(all.flatMap(k => stepTasks(f0, k)))], others = [...new Set(ts.map(t => t.assignee).filter(a => a && a !== me()))];
     if (!confirm('Mark ' + all.length + ' step' + (all.length > 1 ? 's' : '') + ' done for ' + facName(f0) + '?' + (ts.length ? '\n\nCloses: ' + ts.map(taskTitle).join('; ') + '.' : '\n\nNo open tasks to close.') + (others.length ? '\n\nEmails ' + others.map(nameOf).join(', ') + ' that ' + (ts.length > 1 ? 'they\'re' : 'it\'s') + ' not needed anymore.' : '') + (all.includes('corp') ? '\n\n"Corporate is already set up" applies to every facility in ' + f0.group + '.' : ''))) return;
     let res = null;
-    await act(() => { res = markStepsDone(facById(id), keys, me(), meName()); if (res.err) return false; }, 'Marked done');
+    await act(() => { res = markStepsDone(facById(id), keys, me(), meName(), info); if (res.err) return false; }, 'Marked done');
     if (res && res.err) toast(res.err);
     return; }
   if (T.id === 're_go') { const key = ui.openTask, to = $('#re').value; await act(() => { const t = taskByKey(key); if (!t || to === t.assignee) return false; reassign(t, to, meName()); }, 'Reassigned to ' + nameOf(to)); return; }
@@ -676,6 +715,8 @@ document.addEventListener('submit', async e => {
     await act(() => { res = editFacility(facById(fid), Object.assign({}, vals), me(), meName()); if (typeof res === 'string') return false; }, 'Saved');
     if (typeof res === 'string') { toast(res); return; }
     if (res && res.bt && res.bt.changed && !ui.errors.length) toast('Saved. Dates recalculated' + (res.bt.dropped ? ': the date picked by hand was replaced by the new recommended one.' : '.'));
+    else if (res && res.closed && res.closed.length && !ui.errors.length) toast('Saved. Closed: ' + res.closed.map(taskTitle).join('; ') + '.' + (res.fcLeft ? ' ' + res.fcLeft : ''));
+    else if (res && res.fcLeft && !ui.errors.length) toast('Saved. ' + res.fcLeft);
     return;
   }
   if (id === 'fcov') { const fid = ui.openFac, vals = {}; AREAS.forEach(a => vals[a] = V('fc_' + a)); await act(() => { const f = facById(fid), g = G(f); f.cov = {}; AREAS.forEach(a => { if (vals[a] && vals[a] !== (g.cov || {})[a]) f.cov[a] = vals[a]; }); }, 'Areas of care saved'); return; }
@@ -712,16 +753,21 @@ document.addEventListener('input', e => {
   }
   if (e.target.id === 'rq_fac') ui.confirmDup = false;
 });
-document.addEventListener('input', e => { if (e.target.id === 'rq_fac') corpInfo(); });
+document.addEventListener('input', e => { if (e.target.id === 'rq_fac') { corpInfo(); if (PRE_INFO.some(k => V('rq_pre_' + k))) redrawPreInfo('rq_preinfo', 'rq_pi_', rqKeys(), rqFacs()); } });
 document.addEventListener('change', async e => {
   const id = e.target.id;
   if (id === 'rq_files') addFiles(e.target.files);
   if (id.startsWith('rq_pre_')) setTimeout(() => { const n = document.querySelectorAll('.predone input:checked').length, c = $('#rq_precount'); if (c) c.textContent = n ? n + ' ticked' : ''; });
   // "Already done": later steps imply the earlier ones
   for (const pre of ['rq_pre_', 'fs_pre_']) {
-    const chain = ['ps', 'e1', 'e2'].map(k => pre + k), ci = chain.indexOf(id);
-    if (ci >= 0) chain.forEach((c, j) => { const el = document.getElementById(c); if (el && !el.disabled && (e.target.checked ? j < ci : j > ci)) el.checked = e.target.checked; });
+    if (!id.startsWith(pre)) continue;
+    const k = id.slice(pre.length), set = (x, v) => { const el = document.getElementById(pre + x); if (el && !el.disabled) el.checked = v; };
+    if (e.target.checked) (PRE_IMPLY[k] || []).forEach(x => set(x, true));
+    else Object.keys(PRE_IMPLY).forEach(x => { if (PRE_IMPLY[x].includes(k)) set(x, false); });
+    if (pre === 'rq_pre_') redrawPreInfo('rq_preinfo', 'rq_pi_', rqKeys(), rqFacs());
+    else { const f = facById(ui.openFac); if (f) redrawPreInfo('fs_preinfo', 'fs_pi_', fsKeys(f), [{ name: facName(f), f }]); }
   }
+  const pg = id.match(/^(rq_pi_|fs_pi_)gdd_(\d+)$/); if (pg) { const b = document.getElementById(pg[1] + 'whb_' + pg[2]); if (b) b.hidden = e.target.value !== 'Yes'; }
   if (id === 'fc_grp') { const b = $('#fc_newbox'); if (b) b.hidden = e.target.value !== 'New corporate…'; }
   if (['de_ord', 'de_dos', 'de_del'].includes(id)) deLive(id);
   if (e.target.type === 'hidden') segSync(id);

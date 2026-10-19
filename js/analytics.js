@@ -16,10 +16,10 @@ const latest = xs => xs.filter(Boolean).sort().pop() || '';
 const tk = (f, type) => fTask(f, type);
 const tTook = t => t && t.status === 'Done' && t.doneOn ? bizDays(taskStart(t), t.doneOn) : null;
 const MS = [
-  { l: 'FastCare', s: 'FastCare', done: f => done(tk(f, 'FASTCARE')) || preDone(f, 'fc'), on: f => (tk(f, 'FASTCARE') || {}).doneOn, task: 'FASTCARE' },
-  { l: 'Brightree report', s: 'Brightree report', done: f => !!f.bt || done(tk(f, 'BRIGHTREE')) || preDone(f, 'e1'), on: f => (tk(f, 'BRIGHTREE') || {}).doneOn, task: 'BRIGHTREE' },
+  { l: 'FastCare', s: 'FastCare', done: f => done(tk(f, 'FASTCARE')) || preDone(f, 'wr'), on: f => (tk(f, 'FASTCARE') || {}).doneOn, task: 'FASTCARE' },
+  { l: 'Brightree report', s: 'Brightree report', done: f => !!f.bt || done(tk(f, 'BRIGHTREE')) || preDone(f, 'sched'), on: f => (tk(f, 'BRIGHTREE') || {}).doneOn, task: 'BRIGHTREE' },
   { l: 'Added to Brightree', s: 'In Brightree', done: f => !!f.inPortal, on: f => (tk(f, 'PORTAL_ADD') || {}).doneOn, task: 'PORTAL_ADD' },
-  { l: 'Portal setup', s: 'Portal setup', done: f => done(tk(f, 'PORTAL_SETUP')) || preDone(f, 'ps') || !!f.email1, on: f => (tk(f, 'PORTAL_SETUP') || {}).doneOn, task: 'PORTAL_SETUP' },
+  { l: 'Portal setup', s: 'Portal setup', done: f => done(tk(f, 'PORTAL_SETUP')) || preDone(f, 'ps') || (!!f.email1 && !handoffOnly(f)), on: f => (tk(f, 'PORTAL_SETUP') || {}).doneOn, task: 'PORTAL_SETUP' },
   { l: 'Schedule + Chicago handoff email', s: 'Handoff email', done: f => !!f.email1, on: f => f.email1, task: 'SCHEDULE' },
   { l: 'Transfer notice from Chicago', s: 'Transfer notice', done: f => !!f.email2, on: f => f.email2, start: f => f.email1, took: f => f.email1 && f.email2 ? bizDays(f.email1, f.email2) : null },
   { l: 'Contacts from wound rep / regional', s: 'Contacts', done: f => !!f.e3Done || (!!f.complete && !f.email3), on: f => f.e3Done, start: f => f.email3, took: f => f.email3 && f.e3Done ? bizDays(f.email3, f.e3Done) : null },

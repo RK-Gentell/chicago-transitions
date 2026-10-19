@@ -94,6 +94,15 @@ A facility is never marked complete while its FastCare task is open (since Oct 1
 - `calcDates`: the ordering date is at least 7 calendar days from today (first orders start processing a week before). `rec.weekPush` / `rec.pushedWeek`; the date editor shows "Pushed out a week" with a box; unticking sets `f.noPush` (rush) and the dates go back to the original calculation. Recalculates daily like the rest until the handoff email.
 - Portal setup has an EMR access check (`emrReady`): required when access is ready (`f.emrChecked`); not ready → `f.emrCheckDue`, and an `EMR_CHECK` task for the lead once it is. The Shani note moved from portal notes to the schedule task's calendar pop-up note (with "Chicago transition").
 
+## "Already done" split + details, Edit details closes tasks (Oct 19 2026, evening)
+- `PRE_ITEMS` keys now: corp, added, pumps, gdd, wr (FastCare info: wound rep + regional), e3 (no contacts request needed), ct, emr, ps, sched (scheduled), e1 (handoff sent), e2. `PRE_IMPLY`: e2 → e1, sched → ps (e1 no longer implies ps).
+- Older flags (no `f.pre.v2`): fc = wr + e3, e1 = sched + e1. `preDone` reads them that way; `normPre` spells them out before adding new keys. `fcDoneNew` ignores the old fc, so older facilities never get a new "Contacts into portal" task.
+- Ticking added / gdd / wr / sched asks for info (`PRE_INFO`, `preInfoHtml` / `readPreInfo` / `preInfoProblem`): Brightree name; GDD Yes/No + warehouse (Yes sends the usual E11 FYI); wound rep + regional; ordering / DOS / delivery + enteral cadence. Request form: per facility line (`rq_pi_<field>_<i>`); facility page "Mark steps done": `fs_pi_`.
+- sched: `f.manualDates` (`setManualDates`, `manualDatesObj`) are the dates; nothing recalculates; no Brightree report / schedule task; date editor shows them read-only. Not handoff sent: `run()` sends the handoff email by itself once rep + areas + Settings are in (`email1By` "Sent automatically (already scheduled)"). The ordering date can't be past when entered (`schedPast`) unless handoff is also ticked.
+- e1 without sched (`handoffOnly`): Brightree report → portal setup → schedule still happen; `datesOpen(f)` keeps the dates moving; SCHEDULE "Mark done" sets `f.schedDone` and sends nothing.
+- e3 / FastCare "We don't need the contacts reviewed" (`fc_norev`): `f.noE3` + `e3Done`, no contacts request. Wound rep + regional still required. Redoing FastCare without the tick (`f.e3NoReview`) undoes it and the request goes out.
+- Edit details always shows wound rep / regional, GDD, portal name, and Brightree dates (before the report). Filling them in closes FASTCARE (both picked, corporate known), GDD (first Yes/No, via `gddAnswer`), PORTAL_ADD (portal name typed while not in Brightree → `inPortal`), BRIGHTREE (`btNew`). Only for values changed in that save. `closeFilled` + `notifyClosed` (E25 to the other assignees; also used by `markStepsDone`).
+
 ## Cache
 `index.html` loads the css/js with `?v=N`. Bump N on every push that changes css or js, or people keep the old version for up to 10 minutes.
 
