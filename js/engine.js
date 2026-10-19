@@ -50,7 +50,7 @@ function defaultSettings() {
       { name: 'Linda Anwaya', email: 'linda.anwaya@gentell.com', rep: true, ext: '' }
     ],
     roles: { rules: 'Malka Heiman', price: 'Yehuda Jacobs', portal: 'Amy Crawford', emr: 'Priscilla Cordero', pumps: 'Eduardo Cruz', gdd: 'Chris Anest', gddInfo: 'Apol Escopin', escalate: 'Raizy Kreiser' },
-    chicagoGreeting: 'Christian',
+    chicagoGreeting: 'Christian', chicagoGreetingNoEnt: 'Brittany',
     // from the Email 1s sent on 10/7/2026
     e1To: ['darlene.kusek@gentell.com', 'christian.brandt@gentell.com', 'danielle.butler@gentell.com', 'bbarrows@gentell.com'],
     e1Cc: ['kyle.king@gentell.com', 'dproulx@gentell.com', 'bschorn@gentell.com', 'jvidal@gentell.com', 'linda.anwaya@gentell.com', 'aliyah.price@gentell.com'],
@@ -162,6 +162,13 @@ function ensureGroup(name, standalone) {
   return st.groups[k];
 }
 const facName = f => f.portalName || f.name;
+// the name GNS Chicago / Gentell uses (typed on the request). Shown small next to the portal name once that's different.
+const facNames = f => [...new Set([facName(f), f.name, String(f.name || '').replace(/\s*\([^)]*\)\s*$/, '')].map(lc).filter(n => n.length >= 4))];
+const chiName = f => f && f.portalName && lc(f.portalName) !== lc(f.name) ? f.name : '';
+// "Portal name / Chicago name" (the Chicago handoff email subject), or just the one name
+const bothNames = f => chiName(f) ? facName(f) + ' / ' + f.name : facName(f);
+// Chicago handoff email greeting: Brittany when we don't take enteral, otherwise Christian (both in Settings)
+const chiGreet = f => (FG(f).cov || {}).Enteral === "Don't Supply" ? (st.settings.chicagoGreetingNoEnt || 'Brittany') : st.settings.chicagoGreeting;
 const facById = i => st.facs.find(f => f.id === i);
 const taskByKey = k => st.tasks.find(t => t.key === k);
 const tasksOf = (f, type) => st.tasks.filter(t => t.fac === f.id && (!type || t.type === type));
@@ -199,10 +206,17 @@ function calcDates(f) {
   const pb = partB(g), back = pb ? 2 : 1, earliest = addBiz(st.today, 1); let pushed = false;
   while (addBiz(dos, -back) < earliest) { dos = addBiz(dos, 1); pushed = true; }
   if (pushed) why.push('Ordering date would be in the past → DOS pushed to ' + fmtS(dos));
+  // first orders start processing a week before the ordering date: the ordering date is at least a week from today,
+  // unless someone unticked "Push out a week" for a rush (f.noPush)
+  const plain = dos, weekOut = add(st.today, 7); let wk = dos;
+  while (addBiz(wk, -back) < weekOut) wk = addBiz(wk, 1);
+  const weekPush = wk !== plain ? { from: plain, fromOrd: addBiz(plain, -back) } : null;
+  if (weekPush && !f.noPush) { dos = wk; why.push('Ordering date ' + fmtS(weekPush.fromOrd) + ' is within a week of today → pushed so ordering is ' + fmtS(addBiz(dos, -back)) + ', a week out (time to process the first order). DOS ' + fmtS(dos)); }
+  else if (weekPush) why.push('Ordering date is within a week of today, but "Push out a week" is unticked (rush), so it stays');
   const sp = shipOf(st.settings.shipEnt, f.state) || 1;
   why.push((pb ? 'Part B only → ordering 2 business days' : 'Not Part B only → ordering 1 business day') + ' before DOS');
   why.push('Ship Point ' + f.state + ' = ' + sp + ' → delivery DOS + ' + sp + ' business day' + (sp > 1 ? 's' : ''));
-  return Object.assign(derive(f, dos), { why });
+  return Object.assign(derive(f, dos), { why, weekPush, pushedWeek: !!weekPush && !f.noPush });
 }
 function derive(f, dos) {
   const g = FG(f), pb = partB(g), back = pb ? 2 : 1, sp = shipOf(st.settings.shipEnt, f.state) || 1;
@@ -221,6 +235,7 @@ function dateWarn(f, dos) {
   if (dos < r.dos) { const n = diff(dos, r.dos); w.push('This DOS is ' + n + ' day' + (n > 1 ? 's' : '') + ' earlier than the recommended ' + fmt(r.dos) + ', which is ' + basisText(f) + '. Chicago\'s last delivery may not be used up yet, so this order could overlap their billing.'); }
   if (isWE(dos)) w.push('This DOS is on a ' + WD[dow(dos)] + '.');
   const d = derive(f, dos); if (d.ord < addBiz(st.today, 1)) w.push('The ordering date (' + fmt(d.ord) + ') has already passed or is today.');
+  else if (d.ord < add(st.today, 7) && !f.noPush) w.push('The ordering date (' + fmt(d.ord) + ') is less than a week from today. First orders usually start processing a week before the ordering date.');
   return w;
 }
 function saveDates(f, dos, by) {
@@ -257,7 +272,7 @@ const PRE_ITEMS = [
   ['e2', 'GNS Chicago sent the transfer notice to the facility', '']
 ];
 // the AM's first tasks on new facilities, as links (skips ones ticked "already done")
-const amFirstTasks = list => { const ts = list.flatMap(f => [preDone(f, 'fc') ? null : [esc(f.name) + ': FastCare', 't:FASTCARE:f' + f.id], preDone(f, 'e1') ? null : [esc(f.name) + ': Brightree report', 't:BRIGHTREE:f' + f.id]].filter(Boolean)); return ts.length ? '<p>Your tasks:</p>' + taskList(ts) : '<p>Nothing for you to do yet. You\'ll get an email when there is.</p>'; };
+const amFirstTasks = list => { const ts = list.flatMap(f => [preDone(f, 'fc') ? null : [esc(facName(f)) + ': FastCare', 't:FASTCARE:f' + f.id], preDone(f, 'e1') ? null : [esc(facName(f)) + ': Brightree report', 't:BRIGHTREE:f' + f.id]].filter(Boolean)); return ts.length ? '<p>Your tasks:</p>' + taskList(ts) : '<p>Nothing for you to do yet. You\'ll get an email when there is.</p>'; };
 const preList = f => PRE_ITEMS.filter(([k]) => (f.pre || {})[k]).map(x => x[1].split(' (')[0].split(',')[0]);
 
 // ---------- email ----------
@@ -279,6 +294,8 @@ function emailHtml(body, m) {
   else if (m.task && m.link !== 'none') links = `<p><a href="${esc(appLink('task=' + encodeURIComponent(m.task)))}" style="${btnStyle}">Open the task</a></p>`;
   else if (m.link === 'mytasks') links = `<p><a href="${esc(appLink('view=mytasks'))}" style="${btnStyle}">Open my tasks</a></p>`;
   else if (m.link === 'fac' && m.fac) links = `<p><a href="${esc(appLink('fac=' + m.fac))}" style="${btnStyle}">Open the facility</a></p>`;
+  const cf = m.fac && !m.noTag && facById(m.fac), cn = cf ? chiName(cf) : '';
+  if (cn) body += '<p style="color:#6B6F75;font-size:9pt;margin-top:10px">Chicago name: ' + esc(cn) + '</p>';
   const fyi = (m.fyi || FYI_CODES.has(m.code)) ? '<p style="color:#6B6F75;font-size:9.5pt;border-top:1px solid #E5E9ED;padding-top:6px;margin-top:12px">This email is for your information only. No action is needed on your part.</p>' : '';
   return `<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt">${body}${links}${fyi}</div>`;
 }
@@ -443,7 +460,7 @@ function repLine(f) { const r = person(f.rep) || {}; return { name: r.name || na
 function email1Body(f) {
   const g = FG(f), [areas, orders] = areasPhrase(g), r = repLine(f), d = f.dates, cad = f.bt.cadence, s = st.settings;
   const cadLine = cad === '4' ? 'Orders will continue every 4 weeks thereafter, on the same day of the week, for consistency and ease of planning.' : `Enteral orders will continue ${cad === '1' ? 'every week' : 'every other week'} thereafter, on the same day of the week. Ostomy, tracheostomy and urological orders will continue every 4 weeks.`;
-  return `<p>Hi ${esc(s.chicagoGreeting)},</p>
+  return `<p>Hi ${esc(chiGreet(f))},</p>
 <p>We will be transitioning <b>${esc(facName(f))}</b> from the <b>${esc(f.group)}</b> group over to Lakewood for <b>${areas}</b>. Please send the below to the facility contacts (admin, DON, central supply, etc.) to inform them of this transition. Please include <b>${esc(r.name)}</b> and myself on the email to the facility, and CC <b>${esc(CFG.mailbox)}</b> so our system knows it went out.</p>
 <p>Please don't send any additional <b>${orders}</b> orders, as Lakewood is now taking responsibility for the orders for this facility. Any order requests that come in for this facility should be forwarded to <b>${esc(r.name)}</b>.</p>
 <p>The subject of the email to the facility should be: <b>${esc(facName(f))} - Transfer from GNS Chicago to Lakewood</b>.</p>
@@ -467,12 +484,21 @@ function inserviceAsk(f) {
   const d = f.dates;
   return `<p><b>${esc(e3Names(f).join(' and '))}:</b> please speak to the facility and get them to sign up for an in-service${d ? ' before their first Lakewood order on <b>' + fmtS(d.dos) + '</b>' : ''}, so they know the updated ordering process and how to get supplies in between monthly orders. We typically want the admin, DON and central supply on the call; anyone else involved in ordering is welcome too. The booking link is in the facility email below.</p>`;
 }
+// the in-service ask on its own, for facilities whose Chicago handoff email went out before the FastCare task (no wound rep / regional then)
+function sendInservice(f) {
+  f.inserviceMail = st.today;
+  const d = f.dates, am = amOf(f);
+  mail({ key: 'm:E27:' + f.id, code: 'E27', to: woundRegEmails(f), cc: [f.rep, acctOf(f), am], fac: f.id, noTag: true, link: 'none', subject: facName(f) + '- In-service needed: Transfer from GNS Chicago to Lakewood',
+    body: `${e3Hi(f)}<p>I hope all is well!</p><p><b>${esc(facName(f))}</b>${f.group ? ' from the <b>' + esc(f.group) + '</b> group' : ''} is transitioning from GNS Chicago to Lakewood${d ? ', and their first Lakewood order is scheduled for <b>' + fmtS(d.dos) + '</b> for <b>' + fmtS(d.del) + '</b> delivery' : ''}.</p><p>Can you please speak to the facility and get them to sign up for an in-service${d ? ' before then' : ''}, so they know the updated ordering process and how to get supplies in between monthly orders? We typically want the admin, DON and central supply on the call; anyone else involved in ordering is welcome too.${st.settings.inserviceUrl ? ' Here is the link for them to book it: <a href="' + esc(st.settings.inserviceUrl) + '">Schedule an In-Service Call with GNS Lakewood</a>.' : ''}</p><p>Thank you!<br>${esc(nameOf(am))}</p>` });
+}
 function sendEmail1(f, correction) {
-  const am = amOf(f), s = st.settings, subj = facName(f) + '- Transfer from GNS Chicago to Lakewood';
+  const am = amOf(f), s = st.settings, subj = bothNames(f) + '- Transfer from GNS Chicago to Lakewood';
   mail({ key: 'm:' + (correction ? 'E22' : 'E14') + ':' + f.id + (correction ? ':' + uid() : ''), code: correction ? 'E22' : 'E14', to: [...s.e1To, f.rep, ...woundRegEmails(f)], cc: [...s.e1Cc, am, acctOf(f)], fac: f.id, noTag: true, link: 'none', subject: (correction ? 'CORRECTION: ' : '') + subj, body: (correction ? '<p><b>Corrected dates below.</b></p>' : '') + email1Body(f) });
   if (correction) return;
   f.email1 = st.today;
-  mail({ key: 'm:E15:' + f.id, code: 'E15', to: s.e1To, cc: [am], fac: f.id, noTag: true, link: 'none', day: addBiz(st.today, 3), cond: { fac: f.id, untilEmail2: true }, subject: 'RE: ' + subj, body: `<p>Hi ${esc(s.chicagoGreeting)},</p><p>Checking in, has the facility email for <b>${esc(facName(f))}</b> gone out? Please CC ${esc(CFG.mailbox)} on it.</p><p>Thank you!<br>${esc(nameOf(am))}</p>` });
+  // FastCare not done yet: no wound rep / regional on it. They get their own in-service email once FastCare is done (sendInservice).
+  if (!woundRegEmails(f).length) f.e1NoWound = true;
+  mail({ key: 'm:E15:' + f.id, code: 'E15', to: s.e1To, cc: [am], fac: f.id, noTag: true, link: 'none', day: addBiz(st.today, 3), cond: { fac: f.id, untilEmail2: true }, subject: 'RE: ' + subj, body: `<p>Hi ${esc(chiGreet(f))},</p><p>Checking in, has the facility email for <b>${esc(facName(f))}</b> gone out? Please CC ${esc(CFG.mailbox)} on it.</p><p>Thank you!<br>${esc(nameOf(am))}</p>` });
   newTask('CHICAGO_FOLLOW', { fac: f.id, assignee: am, amTask: true, opensOn: addBiz(st.today, 5) });
 }
 // Email 3 = the contacts request to the wound rep and regional, sent as soon as the FastCare task is done. When anyone replies
@@ -634,7 +660,8 @@ function processInbox() {
     if (ct && facById(+ct[1])) { m.fac = +ct[1]; return; }
     const mb = lc(CFG.mailbox), inTo = (m.to || []).map(lc).includes(mb), inCc = (m.cc || []).map(lc).includes(mb);
     const live = st.facs.filter(f => !f.archived);
-    const match = f => ls.includes(lc(facName(f))) || ls.includes(lc(f.name));
+    // either name counts: the portal name or the Chicago name (also without the "(IN)"-style state in parentheses)
+    const match = f => facNames(f).some(n => ls.includes(n));
     // a reply to Email 3 (or a follow-up): sent to the mailbox, after Email 3, not from us or GNS Chicago
     const chicago = [...(st.settings.e1To || []), ...(st.settings.e1Cc || [])].map(lc);
     if (from !== mb && inTo && !chicago.includes(from) && ls.includes('transfer from gns chicago')) {
@@ -696,19 +723,19 @@ function run() {
     if (!f.asked) {
       f.asked = true;
       const need = { corp: !f.group, addr: !f.address };
-      if (!preDone(f, 'fc')) { const tf = newTask('FASTCARE', { fac: f.id, assignee: am, amTask: true, need }); todo(tf, 'FastCare for ' + f.name, 'Look up <b>' + esc(f.name) + '</b> in FastCare.'); }
+      if (!preDone(f, 'fc')) { const tf = newTask('FASTCARE', { fac: f.id, assignee: am, amTask: true, need }); todo(tf, 'FastCare for ' + facName(f), 'Look up <b>' + esc(f.name) + '</b> in FastCare.'); }
       if (!preDone(f, 'gdd')) { const tg = newTask('GDD', { fac: f.id, assignee: roleEmail('gdd') });
       queue('E10', tg.assignee, f, tg, (fs, ts) => fs.length === 1
-        ? { code: 'E10', to: [ts[0].assignee], fac: fs[0].id, task: ts[0].key, buttons: ['No'], cond: { task: ts[0].key }, subject: 'GDD orders for ' + fs[0].name + '?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did <b>${esc(fs[0].name)}</b> (${esc(fs[0].group || 'corporate not known yet')}) get orders from GDD? If yes, open the task and pick the warehouse.</p>` }
-        : { code: 'E10', to: [ts[0].assignee], link: 'none', subject: 'GDD orders for ' + fs.length + ' facilities?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did any of these get orders from GDD? Click "No" or open the task to pick the warehouse.</p>${taskList(fs.map((x, i) => ['<b>' + esc(x.name) + '</b>', ts[i].key]), ['No'])}` }); }
-      if (!preDone(f, 'e1')) { const tb = newTask('BRIGHTREE', { fac: f.id, assignee: am, amTask: true }); todo(tb, 'Brightree report for ' + f.name, 'Run the Brightree report for <b>' + esc(f.name) + '</b>.'); }
+        ? { code: 'E10', to: [ts[0].assignee], fac: fs[0].id, task: ts[0].key, buttons: ['No'], cond: { task: ts[0].key }, subject: 'GDD orders for ' + facName(fs[0]) + '?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did <b>${esc(facName(fs[0]))}</b>${chiName(fs[0]) ? ' (Chicago name: ' + esc(fs[0].name) + ')' : ''} (${esc(fs[0].group || 'corporate not known yet')}) get orders from GDD? If yes, open the task and pick the warehouse.</p>` }
+        : { code: 'E10', to: [ts[0].assignee], link: 'none', subject: 'GDD orders for ' + fs.length + ' facilities?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did any of these get orders from GDD? Click "No" or open the task to pick the warehouse.</p>${taskList(fs.map((x, i) => ['<b>' + esc(facName(x)) + '</b>', ts[i].key]), ['No'])}` }); }
+      if (!preDone(f, 'e1')) { const tb = newTask('BRIGHTREE', { fac: f.id, assignee: am, amTask: true }); todo(tb, 'Brightree report for ' + facName(f), 'Run the Brightree report for <b>' + esc(facName(f)) + '</b>' + (chiName(f) ? ' (Chicago name: ' + esc(f.name) + ')' : '') + '.'); }
     }
 
     // corporate not known yet: Malka picks reps per facility; corporate asks wait for the FastCare task
     if (!f.group) {
       if (!f.rep && !st.tasks.some(t => t.group === '__nocorp' && t.type === 'RULE' && !done(t))) {
         const t = newTask('RULE', { group: '__nocorp', assignee: roleEmail('rules') });
-        mail({ key: 'm:E3:' + t.key, code: 'E3', to: [t.assignee], task: t.key, cond: { task: t.key }, subject: 'Pick a rep: corporate not known yet', body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>These facilities don't have a corporate yet, so there's no corporate rule to use. Pick the reps per facility.</p><ul>${ruleFacs(t).map(x => '<li>' + esc(x.name) + '</li>').join('')}</ul>` });
+        mail({ key: 'm:E3:' + t.key, code: 'E3', to: [t.assignee], task: t.key, cond: { task: t.key }, subject: 'Pick a rep: corporate not known yet', body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>These facilities don't have a corporate yet, so there's no corporate rule to use. Pick the reps per facility.</p><ul>${ruleFacs(t).map(x => '<li>' + esc(facName(x)) + '</li>').join('')}</ul>` });
       }
       return;
     }
@@ -717,7 +744,7 @@ function run() {
     applyRule(f, g);
     if (ruleNeeds(f).length && !st.tasks.some(t => lc(t.group) === lc(g.name) && t.type === 'RULE' && !done(t))) {
       const t = newTask('RULE', { group: g.name, assignee: roleEmail('rules') });
-      queue('E3', t.assignee, f, t, (fs, ts) => ({ code: 'E3', to: [ts[0].assignee], task: ts[0].key, cond: { task: ts[0].key }, subject: 'Pick a rep: ' + g.name, body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p>${partialRule(g) && (g.rep || g.clin || g.clinSame || g.acct || g.am) ? `<p>These facilities from <b>${esc(g.name)}</b> need reps the corporate rule leaves to each facility:</p><ul>${facsOfGroup(g.name).filter(x => ruleNeeds(x).length).map(x => '<li>' + esc(x.name) + ': ' + ruleNeeds(x).map(posName).join(', ') + '</li>').join('')}</ul><p>Pick them in the task. The rule fills the rest.</p>` : `<p>These facilities from <b>${esc(g.name)}</b> have no rep and the corporate has no rep rule:</p><ul>${facsOfGroup(g.name).filter(x => ruleNeeds(x).length).map(x => '<li>' + esc(x.name) + '</li>').join('')}</ul><p>Pick the intake rep, clinical rep, account manager and transition lead. Tick "Save as the corporate rule" so future facilities under this corporate get them automatically. Leave a position blank in the top row to keep picking it per facility.</p>`}` }));
+      queue('E3', t.assignee, f, t, (fs, ts) => ({ code: 'E3', to: [ts[0].assignee], task: ts[0].key, cond: { task: ts[0].key }, subject: 'Pick a rep: ' + g.name, body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p>${partialRule(g) && (g.rep || g.clin || g.clinSame || g.acct || g.am) ? `<p>These facilities from <b>${esc(g.name)}</b> need reps the corporate rule leaves to each facility:</p><ul>${facsOfGroup(g.name).filter(x => ruleNeeds(x).length).map(x => '<li>' + esc(facName(x)) + ': ' + ruleNeeds(x).map(posName).join(', ') + '</li>').join('')}</ul><p>Pick them in the task. The rule fills the rest.</p>` : `<p>These facilities from <b>${esc(g.name)}</b> have no rep and the corporate has no rep rule:</p><ul>${facsOfGroup(g.name).filter(x => ruleNeeds(x).length).map(x => '<li>' + esc(facName(x)) + '</li>').join('')}</ul><p>Pick the intake rep, clinical rep, account manager and transition lead. Tick "Save as the corporate rule" so future facilities under this corporate get them automatically. Leave a position blank in the top row to keep picking it per facility.</p>`}` }));
     }
     // corporate asks, once per corporate
     if (!groupsSeen[lc(g.name)]) {
@@ -734,7 +761,7 @@ function run() {
         if (open && g.price) { open.status = 'Not needed'; open.doneOn = st.today; }
         if (!g.price && !open) {
           const t = newTask('PRICE', { group: g.name, assignee: roleEmail('price') });
-          mail({ key: 'm:E5:' + t.key, code: 'E5', to: [t.assignee], task: t.key, cond: { task: t.key }, subject: 'Price table for ' + g.name, body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>Which price table does <b>${esc(g.name)}</b> go on?</p>${areasTableHtml(g)}<p>Facilities: ${facsOfGroup(g.name).map(x => esc(x.name)).join(', ')}.</p>` });
+          mail({ key: 'm:E5:' + t.key, code: 'E5', to: [t.assignee], task: t.key, cond: { task: t.key }, subject: 'Price table for ' + g.name, body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>Which price table does <b>${esc(g.name)}</b> go on?</p>${areasTableHtml(g)}<p>Facilities: ${facsOfGroup(g.name).map(x => esc(facName(x))).join(', ')}.</p>` });
         }
       }
       const gf = facsOfGroup(g.name).filter(x => !x.hold);
@@ -758,7 +785,7 @@ function run() {
     const main = mainCorp(g);
     if ((g.emr || g.existing) && !g.emrNew && !fTask(f, 'EMR_ADD') && !preDone(f, 'emr')) {
       const t = newTask('EMR_ADD', { fac: f.id, assignee: am, amTask: true });
-      if (main) mail({ key: 'm:E7b:' + t.key, code: 'E7b', to: [main.email], cc: [am], fac: f.id, link: 'none', subject: 'Add ' + f.name + ' to your EMR login', body: `<p>Hi ${esc(main.first)},</p><p>Can you add <b>${esc(f.name)}</b> to the existing EMR login${g.emr ? ' <b>' + esc(g.emr) + '</b>' : ''}? Thank you!<br>${esc(nameOf(am))}</p>` });
+      if (main) mail({ key: 'm:E7b:' + t.key, code: 'E7b', to: [main.email], cc: [am], fac: f.id, link: 'none', subject: 'Add ' + facName(f) + ' to your EMR login', body: `<p>Hi ${esc(main.first)},</p><p>Can you add <b>${esc(facName(f))}</b> to the existing EMR login${g.emr ? ' <b>' + esc(g.emr) + '</b>' : ''}? Thank you!<br>${esc(nameOf(am))}</p>` });
     }
     if (f.inPortal && !fTask(f, 'PUMPS') && !f.pumps) {
       const tp = newTask('PUMPS', { fac: f.id, assignee: roleEmail('pumps') });
@@ -788,6 +815,9 @@ function run() {
     }
     // Email 3 to the wound rep + regional: as soon as the FastCare task is done
     if (!f.email3 && done(fTask(f, 'FASTCARE')) && f.wound && f.regional) sendEmail3(f);
+    if (f.email1 && f.e1NoWound && !f.inserviceMail && done(fTask(f, 'FASTCARE')) && woundRegEmails(f).length) sendInservice(f);
+    // portal setup done while EMR access wasn't ready: check it as soon as it is
+    if (f.emrCheckDue && !f.emrChecked && emrReady(f) && !fTask(f, 'EMR_CHECK')) { const t = newTask('EMR_CHECK', { fac: f.id, assignee: am, amTask: true }); todo(t, 'check EMR access for ' + facName(f), 'EMR access for <b>' + esc(facName(f)) + '</b> is set up now. Log in and check it works.'); }
     // older facilities had an "Email 3 follow-up" task: carry over its answer, close it if still open
     const e3t = fTask(f, 'EMAIL3_FOLLOW');
     if (e3t && e3t.status === 'Done') markE3Done(f, e3t.doneBy, e3t.doneOn);
@@ -902,6 +932,8 @@ function stepIsDone(f, k) {
   }
   return false;
 }
+// EMR access for this facility is in the portal (new login entered by the EMR person, or the existing login + EMR info task)
+const emrReady = f => { const g = G(f); return preDone(f, 'emr') || done(fTask(f, 'EMR_PORTAL')) || (!!g.emrNew && !!g.emr && !!f.inPortal && done(gTask(g.name, 'EMR'))); };
 // later steps include the earlier ones (same as the request form)
 const stepChain = keys => { const p = new Set(keys); if (p.has('e2')) p.add('e1'); if (p.has('e1')) p.add('ps'); return [...p]; };
 function stepProblem(f, keys) {
