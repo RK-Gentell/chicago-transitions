@@ -279,3 +279,15 @@ h1 .tip{font-size:13px}
 .combo-opt.blank{color:var(--muted)}
 .combo-none{padding:6px 10px;color:var(--muted)}
 .ruletbl td.need .combo-in,.ruletbl td.need select{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+/* high importance (schedule task once the Brightree report is done): orange, not the red "At risk" */
+.p-high{background:var(--warn);color:var(--panel)}
+.task .r .p-high{margin-bottom:2px}
+.warnbox{padding:10px;border-color:var(--warn);background:var(--warn-soft)}
+.warnbox > b{color:var(--warn)}
+/* transition lead notes on the tracker: always editable */
+.notecell{min-width:220px}
+textarea.leadnote{min-height:34px;height:34px;width:100%;font-size:12px;padding:4px 6px;resize:vertical;cursor:text}
+textarea.leadnote:focus{height:72px}
+.notemeta{margin-top:4px}
+.sm-link{background:none;border:0;padding:0;font-size:12px;margin-top:2px}
+.notecell{min-width:180px}

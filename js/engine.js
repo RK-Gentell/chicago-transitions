@@ -287,8 +287,8 @@ function emailHtml(body, m) {
    day  YYYY-MM-DD to send later (8 am Eastern). Leave out to send now.
    cond when to cancel a later email (see mailStillValid). */
 // "to do" email for a task with steps: just what to do; the details are in the task
-function todo(t, subject, line) {
-  return mail({ key: 'm:E13:' + t.key, code: 'E13', to: [t.assignee], fac: t.fac, task: t.key, cond: { task: t.key }, subject: 'To do: ' + subject, body: '<p>' + line + '</p>' });
+function todo(t, subject, line, importance) {
+  return mail({ key: 'm:E13:' + t.key, code: 'E13', to: [t.assignee], fac: t.fac, task: t.key, cond: { task: t.key }, subject: 'To do: ' + subject, body: '<p>' + line + '</p>', importance });
 }
 // follow-ups go out as high importance; everything else normal (the "CT - Send emails" flow reads the Importance column)
 const HIGH_CODES = new Set(['E15', 'E16F', 'E16A', 'E17']);
@@ -344,7 +344,7 @@ function mailStillValid(m) {
 }
 
 // ---------- tasks ----------
-const REPEATABLE = new Set(['PRICE', 'RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS']);
+const REPEATABLE = new Set(['PRICE', 'RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS', 'PORTAL_UPDATE']);
 function newTask(type, o) {
   const base = 't:' + type + ':' + (o.fac ? 'f' + o.fac : 'g' + lc(o.group));
   let key = base;
@@ -357,7 +357,7 @@ function newTask(type, o) {
 }
 function taskTitle(t) { return (TT[t.type] && TT[t.type].title(t)) || t.type; }
 function finishTask(t, by, byName) {
-  t.status = 'Done'; t.doneBy = by; t.doneByName = byName; t.doneOn = st.today;
+  t.status = 'Done'; t.doneBy = by; t.doneByName = byName; t.doneOn = st.today; t.doneAt = nowIso();
   if (by !== t.assignee && t.assignee) mail({ key: 'm:E19:' + t.key, code: 'E19', to: [t.assignee], fac: t.fac, subject: 'Done by ' + byName + ': ' + taskTitle(t), body: `<p>${esc(byName)} finished this.</p>`, link: 'none' });
 }
 function reassign(t, to, byName) {
@@ -402,6 +402,7 @@ const REM_GAP = 24 * 3600 * 1000;
 const etDay = iso => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
 // demo mode runs on a pretend date: 9 am Eastern on st.today
 const nowMs = () => st && st.demo ? Date.parse(st.today + 'T13:00:00Z') : Date.now();
+const nowIso = () => new Date(nowMs()).toISOString();
 const isReminder = m => m.code === 'E17' && !!m.task && m.status !== 'Cancelled' && m.status !== 'Failed';
 const isManualRem = m => /:manual:/.test(m.key);
 // when a reminder goes (or went) out: its send time, or 8 am Eastern on its day for ones queued "now" on another day (demo)
@@ -578,6 +579,7 @@ function gddAnswer(f, a, wh) {
   if (a !== 'Yes') return;
   mail({ key: 'm:E11:' + f.id, code: 'E11', to: [roleEmail('gddInfo')], cc: [amOf(f)], fac: f.id, link: 'none', subject: 'New facility on GDD: ' + facName(f), body: `<p>Hi ${esc(first(roleName('gddInfo')))},</p><p>FYI, <b>${esc(facName(f))}</b> (${esc(f.group || 'corporate not known yet')}) is a new facility and it's going to be serviced through <b>${esc(f.gddWh)}</b>.</p><p>Thank you!</p>` });
   if (done(fTask(f, 'PORTAL_SETUP')) && !fTask(f, 'GDD_PORTAL')) {
+    if (f.portalSnap) f.portalSnap.vendor = f.gddWh || ''; // the GDD warehouse task covers "Main Vendor", so no "Update the portal" task for it
     const n = newTask('GDD_PORTAL', { fac: f.id, assignee: amOf(f), amTask: true });
     mail({ key: 'm:E13:' + n.key, code: 'E13', to: [n.assignee], fac: f.id, task: n.key, cond: { task: n.key }, subject: 'To do: GDD warehouse for ' + facName(f), body: `<p>Chris says it's serviced through ${esc(f.gddWh)}. Set "Main Vendor" in the portal.</p>` });
   }
@@ -782,7 +784,7 @@ function run() {
     }
     if (!fTask(f, 'SCHEDULE') && !f.email1 && f.dates && (done(fTask(f, 'PORTAL_SETUP')) || preDone(f, 'ps'))) {
       const t = newTask('SCHEDULE', { fac: f.id, assignee: am, amTask: true });
-      todo(t, 'schedule ' + facName(f), 'Schedule <b>' + esc(facName(f)) + '</b>.');
+      todo(t, 'schedule ' + facName(f), 'Schedule <b>' + esc(facName(f)) + '</b>. The Brightree report is done, so schedule it as soon as you can: the longer it waits, the more likely the last delivery dates change.', 'High');
     }
     // Email 3 to the wound rep + regional: as soon as the FastCare task is done
     if (!f.email3 && done(fTask(f, 'FASTCARE')) && f.wound && f.regional) sendEmail3(f);
@@ -813,6 +815,8 @@ function run() {
   // completed facilities are never archived (Oct 2026). Ones archived before that come back, with their done tasks.
   // Their open tasks stay put away, so nobody gets reminders on old work. (Deleted facilities stay archived.)
   st.facs.forEach(f => { if (f.archived && f.complete && !f.deleted) { f.archived = false; tasksOf(f).forEach(t => { if (t.archived && done(t)) t.archived = false; }); } });
+  // details changed after the portal setup (on the facility page, the corporate, the tracker): the transition lead updates the portal
+  st.facs.forEach(trackPortal);
   flush();
   ensureTaskMails();
   st.tasks.forEach(t => { if (!done(t) && !t.archived) spaceReminders(t); });
@@ -853,6 +857,8 @@ function reopenTask(t, to, by, byName) {
   t.due = addBiz(st.today, isAm(t.assignee) ? st.settings.amDays : st.settings.helperDays);
   // the pumps answer is what the task recorded; undo it so the portal setup shows "not checked yet" again
   if (t.type === 'PUMPS') { const f = facById(t.fac); if (f && f.pumps === 'checked') f.pumps = ''; }
+  // portal setup done again covers every field, so any open "Update the portal" task isn't needed; the snapshot is retaken when it's done
+  if (t.type === 'PORTAL_SETUP') { const f = facById(t.fac); if (f) { delete f.portalSnap; tasksOf(f, 'PORTAL_UPDATE').forEach(x => { if (!done(x)) { x.status = 'Not needed'; x.doneOn = st.today; } }); } }
   mail({ key: 'm:E26:' + t.key + ':' + uid(), code: 'E26', to: [t.assignee], fac: t.fac, task: t.key, cond: { task: t.key },
     subject: 'Back in your queue: ' + taskTitle(t), body: `<p>${esc(byName)} put this task back in the queue. It still needs to be done. Due ${fmt(t.due)}.</p>` });
   return '';
@@ -927,4 +933,159 @@ function markStepsDone(f, picked, by, byName) {
     subject: (ts.length === 1 ? 'Not needed anymore: ' + taskTitle(ts[0]) : 'Not needed anymore: ' + ts.length + ' tasks for ' + facName(f)),
     body: `<p>Hi ${esc(first(nameOf(who)))},</p><p>${esc(byName)} marked ${ts.length === 1 ? 'this' : 'these'} as already done for <b>${esc(facName(f))}</b>, so it's been removed from your tasks. You don't need to do ${ts.length === 1 ? 'it' : 'them'}.</p><ul>${ts.map(t => '<li>' + esc(taskTitle(t)) + '</li>').join('')}</ul>` }));
   return { keys, closed };
+}
+
+// ---------- Brightree report → portal setup → schedule, done together when possible ----------
+// The schedule is based on the last delivery dates on the Brightree report. If scheduling waits, Chicago may ship again,
+// the dates change and billing overlaps. So once the report is done, the schedule task is high importance, and finishing
+// the report or the portal setup points straight to the next one.
+const isHighTask = t => !!t && t.type === 'SCHEDULE' && !done(t) && !!(facById(t.fac) || {}).bt;
+const BT_STALE_MS = 8 * 3600 * 1000;
+// when the Brightree report dates were last entered or rechecked: { ms, day, exact } (exact = we know the time, not just the day)
+function btWhen(f) {
+  if (!f || !f.bt) return null;
+  if (f.btAt) return { ms: Date.parse(f.btAt), day: etDay(f.btAt), exact: true };
+  const t = fTask(f, 'BRIGHTREE');
+  if (t && t.doneAt) return { ms: Date.parse(t.doneAt), day: etDay(t.doneAt), exact: true };
+  if (t && t.doneOn) return { ms: Date.parse(t.doneOn + 'T12:00:00Z'), day: t.doneOn, exact: false };
+  return null;
+}
+// more than 8 hours since the report (only the day known: any earlier day counts)
+function btStale(f) { const w = btWhen(f); if (!w) return false; return w.exact ? nowMs() - w.ms > BT_STALE_MS : w.day < st.today; }
+const btWhenText = w => w.exact ? whenET(w.ms) : fmt(w.day);
+// what portal setup still waits on (it's made once all of these are in)
+function psWaiting(f) {
+  const g = f.group ? G(f) : null, w = [];
+  if (!f.group) w.push('The corporate (FastCare task)');
+  if (!f.rep) w.push('The intake rep (' + roleName('rules') + ', "Pick the reps")');
+  if (g && !covKnown(FG(f))) w.push('The areas of care');
+  if (g && !hasPrice(g)) w.push('The price table (' + roleName('price') + ')');
+  if (!f.inPortal) w.push('Adding it to Brightree (' + roleName('portal') + ')');
+  if (!f.bt) w.push('The Brightree report');
+  if (!f.dates && f.bt) w.push('The dates (a full address with a state that has a ship point)');
+  return w;
+}
+// after a task is done: the task it's recommended to do right away. { to: 'PORTAL_SETUP'|'SCHEDULE', task, waiting: [...] } or null
+function nextStep(f, from) {
+  if (!f || f.email1 || f.hold || f.complete || f.deleted) return null;
+  const ps = fTask(f, 'PORTAL_SETUP'), psDone = done(ps) || preDone(f, 'ps');
+  if (from === 'BRIGHTREE' && !psDone) return { to: 'PORTAL_SETUP', task: ps && !done(ps) ? ps : null, waiting: ps ? [] : psWaiting(f) };
+  if (from === 'BRIGHTREE' || from === 'PORTAL_SETUP') {
+    const sc = fTask(f, 'SCHEDULE');
+    return { to: 'SCHEDULE', task: sc && !done(sc) ? sc : null, waiting: sc ? [] : !f.dates ? ['The dates (a full address with a state that has a ship point)'] : [] };
+  }
+  return null;
+}
+// new Brightree report dates (rechecked on the schedule task or changed on the facility page). Only before the Chicago handoff email.
+// The dates recalculate. A DOS someone picked by hand was based on the old report, so it goes back to the new recommended one.
+// Returns '' or what's wrong.
+function btProblem(f, v) {
+  const b = f.bt || {};
+  if (!v.le && !v.lo) return 'Enter at least 1 last delivery date.';
+  if ((v.le && v.le > st.today) || (v.lo && v.lo > st.today)) return 'A last delivery date can\'t be in the future.';
+  if ((b.lastEnt && !v.le) || (b.lastOuts && !v.lo)) return 'A last delivery date that was entered can\'t be cleared here. If it was entered by mistake, put the Brightree report task back in the queue and do it again.';
+  if (!v.cad) return 'Pick how often enteral ships.';
+  return '';
+}
+const updateBtCheck = (f, v) => f.email1 ? 'The Chicago handoff email already went out with these dates, so the report dates can\'t change. Use "Dates changed: send correction" on the facility page.' : btProblem(f, v);
+function updateBt(f, v, by, byName) {
+  const err = updateBtCheck(f, v); if (err) return { err };
+  const cad = ({ Monthly: '4', Biweekly: '2', Weekly: '1' })[v.cad] || v.cad || '4';
+  const old = Object.assign({}, f.bt || {}), nb = { lastEnt: v.le || '', lastOuts: v.lo || '', cadence: cad };
+  const changed = (old.lastEnt || '') !== nb.lastEnt || (old.lastOuts || '') !== nb.lastOuts;
+  const dropped = changed && !!f.dosChosen, oldDos = f.dates ? f.dates.dos : '';
+  (f.btHistory = f.btHistory || []).push({ bt: old, at: f.btAt || '', by: f.btBy || '' });
+  f.bt = nb; f.btAt = nowIso(); f.btBy = byName;
+  if (dropped) { f.dosChosen = ''; f.dosBy = ''; }
+  return { changed, dropped, oldDos, cadChanged: (old.cadence || '4') !== cad };
+}
+
+// ---------- editing a facility's details (facility page "Edit details") ----------
+// Anything that was entered can be changed, but not cleared: a task that was done stays done. Wrong from the start? Put the task back in the queue.
+// v holds only the fields the form showed. Returns '' or what's wrong (then nothing is changed).
+const btChanged = (f, v) => { const b = f.bt || {}, cad = ({ 4: 'Monthly', 2: 'Biweekly', 1: 'Weekly' })[b.cadence] || 'Monthly'; return v.le !== undefined && !!f.bt && !f.email1 && ((b.lastEnt || '') !== v.le || (b.lastOuts || '') !== v.lo || cad !== v.cad); };
+function editFacilityCheck(f, v) {
+  if (!f) return 'That facility isn\'t there anymore.';
+  const blank = (had, now, label) => had && !now ? label + ' can\'t be left blank. It was entered before; if it was wrong, change it, or put the task that entered it back in the queue.' : '';
+  const errs = [
+    blank(f.name, v.name, 'Facility name'), blank(f.portalName, v.pn, 'Portal name'), blank(f.address, v.addr, 'Address'),
+    blank(f.rep, v.rep, 'Intake rep'), blank(f.clin, v.clin, 'Clinical rep'), blank(f.acct, v.acct, 'Account manager'), blank(f.am, v.am, 'Transition lead'),
+    v.why !== undefined ? blank(f.why, v.why, 'Reason for transition') : ''
+  ];
+  for (const [k, label] of [['wound', 'Wound and Product Specialist'], ['regional', 'Regional Manager']]) {
+    if (v[k] === undefined) continue;
+    if (v[k + 'Raw'] && !v[k]) errs.push('Pick the ' + label + ' from the list (start typing their name).');
+    else errs.push(blank(f[k], v[k], label));
+  }
+  if (v.gdd !== undefined) { if (['Yes', 'No'].includes(f.gdd) && !v.gdd) errs.push('The GDD answer can\'t be left blank.'); if (v.gdd === 'Yes' && !v.gddWh) errs.push('Which GDD warehouse?'); }
+  if (v.addr && addressFormatProblem(v.addr)) errs.push(addressFormatProblem(v.addr));
+  if (btChanged(f, v)) errs.push(btProblem(f, v));
+  return errs.find(Boolean) || '';
+}
+function editFacility(f, v, by, byName) {
+  const err = editFacilityCheck(f, v); if (err) return err;
+  const btv = btChanged(f, v) ? v : null;
+  // what changes, and what each change sets off
+  if (v.addr) { v.addr = normAddr(v.addr); }
+  const state = v.addr ? stateFrom(v.addr) : f.state, oldState = f.state;
+  if (f.email1 && v.addr && state !== oldState) mail({ key: 'm:E13:state:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Address changed after the Chicago handoff email: ' + facName(f), body: '<p>' + esc(byName) + ' changed the state from ' + esc(oldState || '(none)') + ' to ' + esc(state) + '. The dates didn\'t change. Check the ship point and delivery date, and send Chicago a correction if they\'re wrong.</p>' });
+  if (f.email1 && v.rep && v.rep !== f.rep) mail({ key: 'm:E13:rep:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Intake rep changed after the Chicago handoff email: ' + facName(f), body: '<p>' + esc(byName) + ' changed the intake rep from ' + esc(nameOf(f.rep)) + ' to ' + esc(nameOf(v.rep)) + '. The Chicago handoff email (and the transfer notice to the facility) named ' + esc(nameOf(f.rep)) + '. Click "Dates changed: send correction" on the facility page to send Chicago the corrected email with the new rep, or let the facility know yourself.</p>' });
+  const oldAm = amOf(f);
+  f.name = v.name || f.name; if (v.pn) f.portalName = v.pn;
+  if (v.addr) { f.address = v.addr; f.state = state; }
+  if (v.rep) f.rep = v.rep; if (v.clin) f.clin = v.clin; if (v.acct) f.acct = v.acct; if (v.am) f.am = v.am;
+  if (v.none) { if (!G(f).standalone) makeStandalone(f); } else if (v.grp && lc(v.grp) !== lc(f.group) && grp(v.grp)) f.group = grp(v.grp).name;
+  if (v.wound) f.wound = v.wound; if (v.regional) f.regional = v.regional;
+  if (v.why) f.why = v.why;
+  if (v.gdd && (v.gdd !== f.gdd || (v.gdd === 'Yes' && v.gddWh !== f.gddWh))) {
+    const was = f.gdd === 'Yes' ? f.gddWh : '';
+    f.gdd = v.gdd; f.gddWh = v.gdd === 'Yes' ? v.gddWh : '';
+    if (was || f.gddWh) mail({ key: 'm:E11:' + f.id + ':' + hash(was + '>' + f.gddWh), code: 'E11', to: [roleEmail('gddInfo')], cc: [amOf(f)], fac: f.id, link: 'none', subject: 'GDD changed: ' + facName(f), body: `<p>Hi ${esc(first(roleName('gddInfo')))},</p><p>FYI, ${esc(byName)} changed the GDD answer for <b>${esc(facName(f))}</b>: ${f.gddWh ? 'it\'s serviced through <b>' + esc(f.gddWh) + '</b>' : 'it\'s <b>not</b> serviced through GDD'}${was ? ' (it was ' + esc(was) + ')' : ''}.</p>` });
+    if (!f.gddWh) tasksOf(f, 'GDD_PORTAL').forEach(t => { if (!done(t)) { t.status = 'Not needed'; t.doneOn = st.today; } });
+  }
+  let btRes = null; if (btv) btRes = updateBt(f, btv, by, byName);
+  if (amOf(f) !== oldAm) {
+    const open = tasksOf(f).filter(t => !done(t) && !t.archived && t.amTask);
+    mail({ key: 'm:E20:lead:' + f.id + ':' + uid(), code: 'E20', to: [amOf(f)], cc: [oldAm], fac: f.id, link: 'fac', subject: 'You\'re now the transition lead: ' + facName(f), body: `<p>${esc(byName)} made you the transition lead for <b>${esc(facName(f))}</b> (it was ${esc(nameOf(oldAm))}).</p>${open.length ? '<p>Its open tasks moved to you:</p>' + taskList(open.map(t => [esc(taskTitle(t)), t.key])) : '<p>No open tasks right now.</p>'}` });
+  }
+  return { ok: true, bt: btRes };
+}
+// contacts edited on the facility page. A contact that's new or changed goes on the next "Contacts into portal" task.
+function saveContacts(f, list, byName) {
+  const same = (a, b) => ['first', 'last', 'dept', 'note', 'email'].every(k => lc(a[k]) === lc(b[k]));
+  const old = f.contacts || [], used = new Set();
+  let fresh = 0;
+  f.contacts = list.map(c => { const o = old.find((x, i) => !used.has(i) && same(x, c) && used.add(i)); if (o) return o; fresh++; return { first: c.first || '', last: c.last || '', dept: c.dept || '', note: c.note || '', email: c.email || '', src: byName, inPortal: false }; });
+  // edited rows pair up with the old ones they replaced; only what's left over was removed
+  const goneInPortal = old.filter((o, i) => !used.has(i) && o.inPortal).length, gone = old.filter((o, i) => !used.has(i)).length;
+  return { removedInPortal: Math.max(0, Math.min(goneInPortal, gone - fresh)) };
+}
+
+// ---------- "Update the portal" after the portal setup ----------
+// The values the transition lead typed into the portal at setup. A snapshot is taken when the portal setup is done; when any of them
+// changes later (facility page, corporate page, tracker, a rule), an "Update the portal" task lists what changed. Changing it back takes it off.
+const PV_LABELS = { acct: '"Account Manager"', clin: '"Clinical Review"', rep: '"Insurance Specialist", "Intake Specialist"', price: '"Price Table"', vendor: '"Main Vendor"', ship: '"Ship Point"', shipOst: '"Ship Point- United Ostomy, Fordmed"', corp: 'Corporate', addr: 'Address (portal and Brightree)' };
+const pvLabel = k => PV_LABELS[k] || (k.startsWith('cov:') ? '"CoverageType": ' + k.slice(4) : k);
+function portalVals(f) {
+  const g = FG(f), o = { acct: nameOf(acctOf(f)), clin: nameOf(f.clin || f.rep), rep: nameOf(f.rep), price: G(f).price || '', vendor: f.gdd === 'Yes' ? (f.gddWh || '') : '',
+    ship: String(shipOf(st.settings.shipEnt, f.state) || ''), shipOst: String(shipOf(st.settings.shipOst, f.state) || ''), corp: f.group || '', addr: f.address || '' };
+  AREAS.forEach(a => o['cov:' + a] = (g.cov || {})[a] || '');
+  return o;
+}
+function trackPortal(f) {
+  if (f.deleted || f.archived) return;
+  if (!(done(fTask(f, 'PORTAL_SETUP')) || preDone(f, 'ps'))) return;
+  const cur = portalVals(f);
+  if (!f.portalSnap) { f.portalSnap = cur; return; } // first time (or portal setup done again): nothing to update
+  const diffs = Object.keys(cur).filter(k => cur[k] !== (f.portalSnap[k] ?? cur[k]));
+  Object.keys(cur).forEach(k => { if (!(k in f.portalSnap)) f.portalSnap[k] = cur[k]; }); // a value added to the list later starts as it is
+  if (!diffs.length) return;
+  let t = tasksOf(f, 'PORTAL_UPDATE').find(x => !done(x) && !x.archived), isNew = false;
+  if (!t) { t = newTask('PORTAL_UPDATE', { fac: f.id, assignee: amOf(f), amTask: true, items: [] }); isNew = true; }
+  t.items = t.items || [];
+  diffs.forEach(k => { const it = t.items.find(i => i.k === k); if (it) { it.to = cur[k]; it.on = st.today; } else t.items.push({ k, from: f.portalSnap[k], to: cur[k], on: st.today }); });
+  t.items = t.items.filter(i => i.from !== i.to);
+  f.portalSnap = Object.assign({}, f.portalSnap, cur);
+  if (!t.items.length) { if (isNew) st.tasks.splice(st.tasks.indexOf(t), 1); else { t.status = 'Not needed'; t.doneOn = st.today; } return; }
+  if (isNew) todo(t, 'update the portal for ' + facName(f), 'Some details for <b>' + esc(facName(f)) + '</b> changed after the portal setup. Update them in the portal.');
 }

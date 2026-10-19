@@ -60,6 +60,8 @@ function shotZone(ctx, which, s) {
 }
 const contactTable = list => `<div class="tablewrap"><table><tr><th>First</th><th>Last</th><th>Department</th><th>Email</th><th>From</th></tr>${list.map(c => `<tr><td>${esc(c.first) || '<span class="meta">no first name</span>'}</td><td>${esc(c.last)}</td><td>${esc(c.dept)}${c.note ? ' → "Note": ' + esc(c.note) : ''}</td><td>${esc(c.email)}</td><td>${esc(c.src)}</td></tr>`).join('')}</table></div>`;
 
+// FastCare asks for the corporate / address only while they're still missing (they can be filled on the facility page first)
+const fcNeed = t => { const n = t.need || {}, f = facById(t.fac) || {}; return { corp: !!n.corp && !f.group, addr: !!n.addr && !f.address }; };
 // ---------- the task types ----------
 const TT = {
   RULE: {
@@ -161,7 +163,7 @@ const TT = {
   FASTCARE: {
     title: t => 'FastCare: ' + facById(t.fac).name,
     form: t => {
-      const f = facById(t.fac), n = t.need || {};
+      const f = facById(t.fac), n = fcNeed(t);
       const corpOpts = [...Object.values(st.groups).filter(g => !g.standalone).map(g => g.name).sort(az), 'New corporate…', 'No corporate (Independent HQ)'];
       return `<div class="instr">fastcare.gentell.com → "Facility" → "Search:" (1 word if the full name doesn't come up).${n.corp ? ' Corporate = "Ownership-Headquarters" / "Purchasing Group-Chain". "Independent HQ" means no corporate.' : ''} "Actions" → "Edit Facility" for the wound rep + regional, "Actions" → "Contacts" for contacts.</div>
       ${n.corp ? `<div class="row">${fld('Corporate', sel('fc_grp', corpOpts, f.group && grp(f.group) && !grp(f.group).standalone ? grp(f.group).name : '', true))}<div class="field" id="fc_newbox" hidden><label>New corporate name</label>${txt('fc_new', '')}</div></div>` : ''}
@@ -173,9 +175,9 @@ const TT = {
       ${chk('fc_nocts', 'No FastCare contacts available')}
       ${e3List(f).length ? `<div class="note">These also go in the email (added on the request, facility page or corporate): ${e3List(f).map(c => esc((c.first + ' ' + c.last).trim() || c.email)).join(', ')}</div>` : ''}`;
     },
-    example: t => { const n = t.need || {}; const o = { w: 'Peter West <peter.west@demo.gentell.com>', r: 'Brian McCauley <brian.mccauley@demo.gentell.com>' }; if (n.corp) { o.fc_grp = 'New corporate…'; o.fc_new = 'Infinity Healthcare Management'; } if (n.addr) o.fc_addr = '123 Demo St, LaGrange, IN 46761'; o.fc_nocts = true; return o; },
+    example: t => { const n = fcNeed(t); const o = { w: 'Peter West <peter.west@demo.gentell.com>', r: 'Brian McCauley <brian.mccauley@demo.gentell.com>' }; if (n.corp) { o.fc_grp = 'New corporate…'; o.fc_new = 'Infinity Healthcare Management'; } if (n.addr) o.fc_addr = '123 Demo St, LaGrange, IN 46761'; o.fc_nocts = true; return o; },
     validate: t => {
-      const n = t.need || {};
+      const n = fcNeed(t);
       if (n.corp && !V('fc_grp')) return 'Pick the corporate (or "No corporate").';
       if (n.corp && V('fc_grp') === 'New corporate…' && !V('fc_new')) return 'Type the new corporate name.';
       // FastCare only needs an address it can read. A state with no ship point doesn't stop it: the transition lead gets an "Address" task that waits for one.
@@ -187,7 +189,7 @@ const TT = {
       return '';
     },
     done: t => {
-      const f = facById(t.fac), n = t.need || {};
+      const f = facById(t.fac), n = fcNeed(t);
       if (n.addr) { f.address = normAddr(V('fc_addr')); f.state = stateFrom(f.address); }
       if (n.corp) {
         const v = V('fc_grp');
@@ -208,7 +210,7 @@ const TT = {
       <div class="row">${fld('Enteral ships', sel('cad', ['Monthly', 'Weekly', 'Biweekly'], ({ 4: 'Monthly', 2: 'Biweekly', 1: 'Weekly' })[(f.bt || {}).cadence] || 'Monthly'))}</div>`; },
     example: () => ({ le: add(st.today, -19), lo: add(st.today, -23), cad: 'Monthly' }),
     validate: () => { if (!V('le') && !V('lo')) return 'Enter at least 1 last delivery date.'; if ((V('le') && V('le') > st.today) || (V('lo') && V('lo') > st.today)) return 'A last delivery date can\'t be in the future.'; if (!V('cad')) return 'Pick how often enteral ships.'; return ''; },
-    done: t => { facById(t.fac).bt = { lastEnt: V('le'), lastOuts: V('lo'), cadence: ({ Monthly: '4', Biweekly: '2', Weekly: '1' })[V('cad')] || '4' }; }
+    done: (t, ctx) => { const f = facById(t.fac); f.bt = { lastEnt: V('le'), lastOuts: V('lo'), cadence: ({ Monthly: '4', Biweekly: '2', Weekly: '1' })[V('cad')] || '4' }; f.btAt = nowIso(); f.btBy = ctx ? ctx.byName : ''; }
   },
   PORTAL_SETUP: {
     title: t => 'Portal setup: ' + facName(facById(t.fac)),
@@ -255,6 +257,11 @@ const TT = {
     done: t => { facById(t.fac).inservice = V('is'); },
     opens: t => { const f = facById(t.fac); return { subject: 'Follow up with ' + (f.wound && f.wound.name) + ' / ' + (f.regional && f.regional.name), body: '<p>No reply to the contacts request in 5 business days. Follow up, and mark the task done once the portal contacts are updated.</p>' }; }
   },
+  PORTAL_UPDATE: {
+    title: t => 'Update the portal: ' + facName(facById(t.fac)),
+    form: t => { const items = t.items || []; return `<div class="instr">These details changed after the portal setup was done. portal.isgmed.com → "Facilities" → "Facilities" → search 1 word → edit pencil. Change each field to the value under "Now".</div><div class="tablewrap"><table class="vals"><tr><th>Field</th><th>Was</th><th>Now</th></tr>${items.map(i => `<tr><td>${esc(pvLabel(i.k))}</td><td>${esc(i.from) || '<span class="meta">blank</span>'}</td><td><b>${esc(i.to) || 'blank'}</b></td></tr>`).join('')}</table></div>${items.some(i => i.k === 'addr' || i.k === 'corp') ? '<div class="note">Address or corporate: change it in Brightree too.</div>' : ''}<div class="note">If something else changes before you do this, it's added to this list. If a change is undone, it comes off.</div>${chk('ok', 'Updated in the portal')}`; },
+    example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when the portal is updated.', done: () => { }
+  },
   CHICAGO_FOLLOW: {
     title: t => 'Chicago hasn\'t sent the facility email: ' + facName(facById(t.fac)),
     form: () => `<div class="instr">The system nudged Chicago once. Reach out to ${esc(st.settings.chicagoGreeting)} directly.</div>${chk('ok', 'Chicago confirmed it went out')}`,
@@ -288,8 +295,15 @@ function dateEditor(f) {
   <details style="margin-top:6px"><summary class="meta">How the recommended dates were calculated</summary><ul class="meta">${(r || d).why.map(x => '<li>' + esc(x) + '</li>').join('')}</ul></details>
   <div class="row" style="margin-top:6px"><button type="button" class="btn sm pri" data-savedates="${f.id}">Save dates</button>${d.changed ? `<button type="button" class="btn sm" data-recdates="${f.id}">Back to recommended</button>` : ''}</div></div>`;
 }
+// the Brightree report's dates, editable on the schedule task. After 8 hours it opens with a warning to run the report again.
+function btRecheck(f) {
+  const b = f.bt || {}, w = btWhen(f), stale = btStale(f);
+  const fields = `<div class="row">${fld('Last enteral (Delivery Actual date)', dt('rc_le', b.lastEnt))}${fld('Last uro / ostomy / trach', dt('rc_lo', b.lastOuts))}${fld('Enteral ships', sel('rc_cad', ['Monthly', 'Weekly', 'Biweekly'], ({ 4: 'Monthly', 2: 'Biweekly', 1: 'Weekly' })[b.cadence] || 'Monthly'))}</div><div id="rc_err"></div><div class="row"><button type="button" class="btn sm pri" data-recheckbt="${f.id}">Save and recalculate</button></div><div class="meta">Saving with new dates recalculates the recommended dates below${f.dosChosen ? ' and replaces the date of service picked by hand (' + fmt(f.dosChosen) + ')' : ''}. Same dates? Saving just records that you rechecked.</div>`;
+  if (stale) return `<div class="card warnbox" id="btrc"><b>⚠ The Brightree report was run ${w ? esc(btWhenText(w)) : 'a while ago'}</b>${w && w.exact ? '' : ' <span class="meta">(time not recorded)</span>'}<div style="margin:4px 0 8px">That's more than 8 hours ago. Chicago may have shipped since, so the last delivery dates may have changed. Recommended: run the report again (same steps as the Brightree report task) and check the last delivery dates. Update them here if they changed.</div>${fields}</div>`;
+  return `<details class="card" style="padding:10px" id="btrc"><summary><b>Brightree report dates</b> <span class="meta">(run ${w ? esc(btWhenText(w)) : '-'}${f.btBy ? ' by ' + esc(f.btBy) : ''})</span></summary><div class="meta" style="margin:6px 0">Last enteral ${b.lastEnt ? fmtS(b.lastEnt) : '-'} · last uro / ostomy / trach ${b.lastOuts ? fmtS(b.lastOuts) : '-'}. Reran the report and something changed? Fix it here.</div>${fields}</details>`;
+}
 function scheduleForm(f) {
   const d = f.dates, b = f.bt;
-  return `${dateEditor(f)}<div class="instr"><ol><li>"Facilities" → schedule icon under "Actions" → "Facility Schedule".</li><li>"Start Date" <span class="q">${fmtS(d.del)}</span>, "Day of the Week" <span class="q">${d.day}</span>, "Weeks" <span class="q">4</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>${b.cadence !== '4' ? `<li>"Select Area of Care" → "Enteral" → "Add Schedule": same Start Date and day, "Weeks" <span class="q">${b.cadence}</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>` : ''}<li>"Generate Dates" → check "Override Manually" → "Save".</li><li>"Schedules" → Ordering Calendar → open the entry on ${fmt(d.ord)} and check the 3 dates match the ones above. Wrong? Recheck Start Date, Day of the Week and OS Days and generate again. Missing? The ordering date probably landed on a weekend.</li><li>Intake note: <span class="q">Transition from Chicago</span> + <span class="q">Email Shani the list of eligible pump fed and trach pts so she can review Chicago's billing</span> + anything useful from the report.</li></ol></div>
+  return `${btRecheck(f)}${dateEditor(f)}<div class="instr"><ol><li>"Facilities" → schedule icon under "Actions" → "Facility Schedule".</li><li>"Start Date" <span class="q">${fmtS(d.del)}</span>, "Day of the Week" <span class="q">${d.day}</span>, "Weeks" <span class="q">4</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>${b.cadence !== '4' ? `<li>"Select Area of Care" → "Enteral" → "Add Schedule": same Start Date and day, "Weeks" <span class="q">${b.cadence}</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>` : ''}<li>"Generate Dates" → check "Override Manually" → "Save".</li><li>"Schedules" → Ordering Calendar → open the entry on ${fmt(d.ord)} and check the 3 dates match the ones above. Wrong? Recheck Start Date, Day of the Week and OS Days and generate again. Missing? The ordering date probably landed on a weekend.</li><li>Intake note: <span class="q">Transition from Chicago</span> + <span class="q">Email Shani the list of eligible pump fed and trach pts so she can review Chicago's billing</span> + anything useful from the report.</li></ol></div>
   <div class="note">"Mark done" sends the Chicago handoff email with these dates. Changed a date above? Click "Save dates" first.</div>`;
 }

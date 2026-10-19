@@ -99,7 +99,8 @@ async function act2(fn, okMsg) {
   }
 }
 async function poll() {
-  if (ui.busy || document.visibilityState !== 'visible' || ui.openTask || ui.openFac || ui.openGroup || ['new', 'settings'].includes(ui.view)) return;
+  if (ui.busy || document.visibilityState !== 'visible' || ui.openTask || ui.openFac || ui.openGroup || ui.next || ['new', 'settings'].includes(ui.view)) return;
+  const a = document.activeElement; if (a && a.dataset && a.dataset.leadnote) return; // typing notes on the tracker
   try { ui.busy = true; await STORE.load({ full: true }); await settle(); ui.busy = false; render(); } catch (e) { ui.busy = false; console.error(e); }
 }
 function readLink() {
@@ -113,8 +114,9 @@ function readLink() {
 // ---------- lists used on screens ----------
 const forWho = () => ui.forWho || me();
 function openTasksFor(who) { return st.tasks.filter(t => t.assignee === who && !done(t) && !t.archived && !(t.fac && facById(t.fac) && facById(t.fac).hold)); }
-const urg = t => [isWaiting(t) ? 1 : 0, t.due];
-const cmp = (a, b) => { const x = urg(a), y = urg(b); return x[0] - y[0] || (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0); };
+const urg = t => [isWaiting(t) ? 1 : 0, isHighTask(t) ? 0 : 1, t.due];
+const cmp = (a, b) => { const x = urg(a), y = urg(b); return x[0] - y[0] || x[1] - y[1] || (x[2] < y[2] ? -1 : x[2] > y[2] ? 1 : 0); };
+const HIGH_PILL = '<span class="pill p-high" title="The Brightree report is done. Schedule as soon as possible, before the last delivery dates change.">High importance</span>';
 function waitingOn(f) {
   if (f.hold) return ['On hold'];
   if (f.complete) return [];
@@ -166,7 +168,7 @@ function blockHtml(k, arr, showWho) {
 function taskLine(t, showWho, showFac) {
   const f = t.fac ? facById(t.fac) : null, wait = isWaiting(t), over = !wait && st.today > t.due;
   const where = f ? (showFac ? esc(facName(f)) : esc(f.group)) : esc(t.group === '__nocorp' ? '' : (showFac ? 'Whole corporate' : t.group));
-  return `<div class="task ${wait ? 'wait' : ''} ${over ? 'over' : ''}" data-task="${esc(t.key)}" tabindex="0"><div style="min-width:0"><div class="t">${esc(taskTitle(t))}</div>${t.type === 'PUMPS' ? `<div class="m pumprule">${esc(PUMP_RULE)}</div>` : ''}<div class="m">${where}${showWho ? ' · <b>' + esc(nameOf(t.assignee)) + '</b>' : ''}${f ? ' · ' + facLink(f) : ''}</div></div><div class="r">${wait ? '<span class="pill p-chi">Starts ' + fmtS(t.opensOn) + '</span>' : over ? '<span class="pill p-hold">Overdue</span>' : ''}<div>Due ${fmtS(t.due)}</div>${showWho ? remindBtn(t) : ''}</div></div>`;
+  return `<div class="task ${wait ? 'wait' : ''} ${over ? 'over' : ''}" data-task="${esc(t.key)}" tabindex="0"><div style="min-width:0"><div class="t">${esc(taskTitle(t))}</div>${t.type === 'PUMPS' ? `<div class="m pumprule">${esc(PUMP_RULE)}</div>` : ''}<div class="m">${where}${showWho ? ' · <b>' + esc(nameOf(t.assignee)) + '</b>' : ''}${f ? ' · ' + facLink(f) : ''}</div></div><div class="r">${isHighTask(t) ? HIGH_PILL : ''}${wait ? '<span class="pill p-chi">Starts ' + fmtS(t.opensOn) + '</span>' : over ? '<span class="pill p-hold">Overdue</span>' : ''}<div>Due ${fmtS(t.due)}</div>${showWho ? remindBtn(t) : ''}</div></div>`;
 }
 
 // ---------- page ----------
@@ -239,14 +241,23 @@ function trackerHtml() {
   const q = lc(ui.q), F = ui.trackerFilter;
   const fs = st.facs.filter(f => !f.deleted && (F === 'all' || (F === 'active' && !f.complete && !f.hold) || (F === 'complete' && f.complete) || (F === 'hold' && f.hold)) && (!q || lc(facName(f) + ' ' + f.name + ' ' + f.group + ' CT-' + pad(f.id)).includes(q)));
   const R = peopleOpts(repList()), A = peopleOpts(amList());
-  return `<h1>Tracker</h1><p class="sub">Replaces both Chicago tabs on the sheet. Click a row for the facility page. Tick rows to change the rep, transition lead or stage for all of them at once.</p>
+  return `<h1>Tracker</h1><p class="sub">Replaces both Chicago tabs on the sheet. Click a row for the facility page; "Edit details" opens it with every detail ready to change. Type in "Transition lead notes" right here: it saves when you click out of the box. Tick rows to change the rep, transition lead or stage for all of them at once.</p>
   <div class="filters"><input type="text" id="tq" placeholder="Search facility, corporate, CT number" value="${esc(ui.q)}">${[['active', 'Active'], ['hold', 'On hold'], ['complete', 'Complete'], ['all', 'All']].map(([v, l]) => `<button class="btn sm ${F === v ? 'pri' : ''}" data-tfilter="${v}">${l}</button>`).join('')}<button class="btn sm" id="csv">Download as Excel (CSV)</button></div>
   <div class="bulk"><span class="meta">${ui.sel.size} selected</span><select id="bk_rep"><option value="">Set intake rep…</option>${R.map(r => `<option value="${esc(r[0])}">${esc(r[1])}</option>`).join('')}</select><select id="bk_am"><option value="">Set transition lead…</option>${A.map(r => `<option value="${esc(r[0])}">${esc(r[1])}</option>`).join('')}</select><button class="btn sm" id="bk_go">Apply to selected</button><select id="bk_hold"><option value="">Stage…</option><option>On hold</option><option>Take off hold</option></select><button class="btn sm" id="bk_hgo">Apply</button></div>
-  <div class="tablewrap"><table><tr><th></th><th>CT</th><th>Facility</th><th>Corporate</th><th>Stage</th><th>Intake rep</th><th>Account manager</th><th>Transition lead</th><th>First DOS</th><th>Ordering</th><th>Delivery</th></tr>${fs.map(f => { const [s, c] = stageOf(f); return `<tr class="click" data-fac="${f.id}"><td><input type="checkbox" data-selfac="${f.id}" ${ui.sel.has(f.id) ? 'checked' : ''} aria-label="select"></td><td class="num">${pad(f.id)}</td><td><b>${esc(facName(f))}</b></td><td>${esc(f.group)}</td><td><span class="pill ${c}">${s}</span>${atRisk(f) ? ' <span class="pill p-risk">At risk</span>' : ''}</td><td>${esc(nameOf(f.rep)) || '<span class="meta">none</span>'}</td><td>${esc(nameOf(acctOf(f)))}</td><td>${esc(nameOf(amOf(f)))}</td><td class="num">${f.dates ? fmtS(f.dates.dos) : ''}</td><td class="num">${f.dates ? fmtS(f.dates.ord) : ''}</td><td class="num">${f.dates ? fmtS(f.dates.del) : ''}</td></tr>`; }).join('') || '<tr><td colspan="11" class="meta">No facilities here.</td></tr>'}</table></div>`;
+  <div class="tablewrap"><table><tr><th></th><th>CT</th><th>Facility</th><th>Corporate</th><th>Stage</th><th>Intake rep</th><th>Account manager</th><th>Transition lead</th><th>First DOS</th><th>Ordering</th><th>Delivery</th><th>Transition lead notes</th></tr>${fs.map(f => { const [s, c] = stageOf(f); return `<tr class="click" data-fac="${f.id}"><td><input type="checkbox" data-selfac="${f.id}" ${ui.sel.has(f.id) ? 'checked' : ''} aria-label="select"></td><td class="num">${pad(f.id)}</td><td><b>${esc(facName(f))}</b><div><button class="linkish sm-link" data-editfac="${f.id}">Edit details</button></div></td><td>${esc(f.group)}</td><td><span class="pill ${c}">${s}</span>${atRisk(f) ? ' <span class="pill p-risk">At risk</span>' : ''}</td><td>${esc(nameOf(f.rep)) || '<span class="meta">none</span>'}</td><td>${esc(nameOf(acctOf(f)))}</td><td>${esc(nameOf(amOf(f)))}</td><td class="num">${f.dates ? fmtS(f.dates.dos) : ''}</td><td class="num">${f.dates ? fmtS(f.dates.ord) : ''}</td><td class="num">${f.dates ? fmtS(f.dates.del) : ''}</td><td class="notecell">${noteBox(f, 'tr')}</td></tr>`; }).join('') || '<tr><td colspan="12" class="meta">No facilities here.</td></tr>'}</table></div>`;
+}
+// transition lead notes: always editable (tracker, facility page, and every task assigned to the transition lead). Saves on blur or "Save notes".
+function noteBox(f, where) {
+  const by = f.leadNotesBy ? `<div class="meta notemeta">Last changed by ${esc(f.leadNotesBy)} ${fmtS(f.leadNotesOn)}</div>` : '';
+  if (where === 'tr') return `<textarea class="leadnote" data-leadnote="${f.id}" aria-label="Transition lead notes for ${esc(facName(f))}" placeholder="Add a note">${esc(f.leadNotes || '')}</textarea>`;
+  return `<div class="card" style="padding:10px"><b>Transition lead notes</b>${tip('The same notes as on the tracker. Anyone can read them; the transition lead keeps them up to date.')}<textarea id="ln_${where}" data-leadnote-f="${f.id}" style="margin-top:6px;min-height:60px" placeholder="Notes about this transition">${esc(f.leadNotes || '')}</textarea>${by}<div class="row" style="margin-top:6px"><button type="button" class="btn sm pri" data-savenote="${f.id}" data-notebox="ln_${where}">Save notes</button></div></div>`;
+}
+async function saveNote(id, val) {
+  return act(() => { const f = facById(id); if (!f || (f.leadNotes || '') === val) return false; f.leadNotes = val; f.leadNotesBy = meName(); f.leadNotesOn = st.today; }, 'Notes saved');
 }
 function trackerCsv() {
-  const rows = [['CT', 'Facility (portal)', 'Facility (sheet)', 'Corporate', 'Stage', 'Intake rep', 'Clinical rep', 'Account manager', 'Transition lead', 'First DOS', 'Ordering', 'Delivery', 'Chicago handoff email', 'Transfer notice to facility', 'Contacts request', 'Contacts done', 'GDD', 'Requested']];
-  st.facs.forEach(f => rows.push(['CT-' + pad(f.id), facName(f), f.name, f.group, stageOf(f)[0], nameOf(f.rep), nameOf(f.clin), nameOf(acctOf(f)), nameOf(amOf(f)), f.dates ? fmtS(f.dates.dos) : '', f.dates ? fmtS(f.dates.ord) : '', f.dates ? fmtS(f.dates.del) : '', fmtS(f.email1), fmtS(f.email2), fmtS(f.email3), fmtS(f.e3Done), f.gdd ? f.gdd + (f.gddWh ? ' (' + f.gddWh + ')' : '') : '', fmtS(f.requested)]));
+  const rows = [['CT', 'Facility (portal)', 'Facility (sheet)', 'Corporate', 'Stage', 'Intake rep', 'Clinical rep', 'Account manager', 'Transition lead', 'First DOS', 'Ordering', 'Delivery', 'Chicago handoff email', 'Transfer notice to facility', 'Contacts request', 'Contacts done', 'GDD', 'Requested', 'Transition lead notes']];
+  st.facs.forEach(f => rows.push(['CT-' + pad(f.id), facName(f), f.name, f.group, stageOf(f)[0], nameOf(f.rep), nameOf(f.clin), nameOf(acctOf(f)), nameOf(amOf(f)), f.dates ? fmtS(f.dates.dos) : '', f.dates ? fmtS(f.dates.ord) : '', f.dates ? fmtS(f.dates.del) : '', fmtS(f.email1), fmtS(f.email2), fmtS(f.email3), fmtS(f.e3Done), f.gdd ? f.gdd + (f.gddWh ? ' (' + f.gddWh + ')' : '') : '', fmtS(f.requested), f.leadNotes || '']));
   const csv = rows.map(r => r.map(x => '"' + String(x ?? '').replace(/"/g, '""') + '"').join(',')).join('\r\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' })); a.download = 'Chicago transitions ' + st.today + '.csv'; a.click();
 }
@@ -404,19 +415,34 @@ function readSettingsForm() {
 // ---------- drawers ----------
 function renderLayer() {
   const L = $('#layer');
-  if (ui.openTask) { const t = taskByKey(ui.openTask); L.innerHTML = t ? taskDrawer(t) : ''; if (!t) ui.openTask = null; }
+  if (ui.next) { const f = facById(ui.next.fac); L.innerHTML = f ? nextDrawer(f, ui.next.from) : ''; if (!f || !L.innerHTML) ui.next = null; }
+  else if (ui.openTask) { const t = taskByKey(ui.openTask); L.innerHTML = t ? taskDrawer(t) : ''; if (!t) ui.openTask = null; }
   else if (ui.openFac) { const f = facById(ui.openFac); L.innerHTML = f ? facDrawer(f) : ''; }
   else if (ui.openGroup) { const g = grp(ui.openGroup); L.innerHTML = g ? corpDrawer(g) : ''; }
   else L.innerHTML = '';
   if (ui.openTask) { const g = document.getElementById('g'); if (g && g.value === 'Yes') { const b = document.getElementById('whbox'); if (b) b.hidden = false; } }
 }
 const closeX = '<button class="btn sm" data-close aria-label="Close">✕</button>';
+// right after the Brightree report or the portal setup is done: recommend doing the next one now, with a button straight to it
+const NEXT_TXT = {
+  PORTAL_SETUP: ['Portal setup', 'The schedule is based on the dates in the Brightree report, and the portal setup is best done before scheduling so every detail is in. Doing all three together keeps the dates from changing (if Chicago ships again in the meantime, the dates move and billing overlaps).'],
+  SCHEDULE: ['Scheduling', 'The schedule is based on the dates in the Brightree report. Schedule now and the Chicago handoff email goes out right away, before Chicago ships again and the dates change (that would overlap billing).']
+};
+function nextDrawer(f, from) {
+  const n = nextStep(f, from); if (!n) return '';
+  const [label, why] = NEXT_TXT[n.to], t = n.task, mine = t && t.assignee === me();
+  const body = t ? `<div class="row" style="margin-top:10px"><button class="btn pri" data-gotask="${esc(t.key)}">Go to the ${label.toLowerCase()} task</button><button class="btn" data-close>Not now</button></div>${mine ? '' : `<div class="meta" style="margin-top:6px">It's assigned to ${esc(nameOf(t.assignee))}. You can still do it.</div>`}`
+    : `<div class="note" style="margin-top:8px">The ${label.toLowerCase()} task isn't ready yet.${n.waiting.length ? ' Still waiting on: ' + n.waiting.map(esc).join(' · ') + '.' : ''} You'll get an email as soon as it is.</div><div class="row" style="margin-top:10px"><button class="btn" data-close>OK</button></div>`;
+  return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="Next step"><header><div style="flex:1;min-width:0"><div class="meta">${esc(facName(f))} · CT-${pad(f.id)}</div><h1 style="font-size:17px">${from === 'BRIGHTREE' ? 'Brightree report saved' : 'Portal setup done'}</h1></div>${closeX}</header><div class="body">
+  <div class="okmsg">Done. Recorded as done by ${esc(meName())}.</div>
+  <div class="card" style="padding:12px;border-color:var(--accent)"><b>Recommended: do the ${label.toLowerCase()} now</b><div style="margin-top:4px">${esc(why)}</div>${n.to === 'SCHEDULE' && t ? '<div class="meta" style="margin-top:4px">The scheduling task is marked high importance.</div>' : ''}${body}</div></div></div>`;
+}
 function taskDrawer(t) {
   const def = TT[t.type], f = t.fac ? facById(t.fac) : null, isDone = done(t);
   const ppl = [...new Map([[t.assignee, nameOf(t.assignee)], ...people().filter(p => validEmail(p.email)).map(p => [lc(p.email), p.name])]).entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), undefined, { sensitivity: 'base' }));
   const req = f && f.req ? st.reqs.find(r => r.key === f.req) : null;
   const quick = ui.answer && def.quick && !isDone ? `<div class="card" style="padding:12px;border-color:var(--accent)"><b>Record "${esc(ui.answer)}" for this task?</b><div class="meta">You clicked "${esc(ui.answer)}" in the email.</div><div class="row" style="margin-top:8px"><button class="btn pri" data-quick="${esc(ui.answer)}">Yes, record "${esc(ui.answer)}"</button><button class="btn" data-noquick>No, let me fill the form</button></div></div>` : '';
-  return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="Task"><header><div style="min-width:0;flex:1"><div class="meta">${f ? `<span class="linkish" data-fac="${f.id}">${esc(facName(f))}</span> · CT-${pad(f.id)} · ${esc(f.group)} · ${facLink(f).replace('Facility page', 'Open facility page')}` : 'Corporate: ' + esc(t.group === '__nocorp' ? 'not known yet' : t.group)}</div><h1 style="font-size:17px">${esc(def.title(t))}</h1><div class="meta">Assigned to <b>${esc(nameOf(t.assignee))}</b> · due ${fmt(t.due)}${isWaiting(t) ? ' · starts ' + fmt(t.opensOn) : ''} · ${esc(t.status)}</div></div>${closeX}</header><div class="body">
+  return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="Task"><header><div style="min-width:0;flex:1"><div class="meta">${f ? `<span class="linkish" data-fac="${f.id}">${esc(facName(f))}</span> · CT-${pad(f.id)} · ${esc(f.group)} · ${facLink(f).replace('Facility page', 'Open facility page')}` : 'Corporate: ' + esc(t.group === '__nocorp' ? 'not known yet' : t.group)}</div><h1 style="font-size:17px">${esc(def.title(t))}</h1><div class="meta">Assigned to <b>${esc(nameOf(t.assignee))}</b> · due ${fmt(t.due)}${isWaiting(t) ? ' · starts ' + fmt(t.opensOn) : ''} · ${esc(t.status)}</div>${isHighTask(t) ? HIGH_PILL : ''}</div>${closeX}</header><div class="body">
   ${isDone ? `<div class="okmsg">${t.status === 'Not needed' ? 'Not needed anymore' : 'Done by <b>' + esc(t.doneByName || nameOf(t.doneBy)) + '</b>'} on ${fmt(t.doneOn)}${t.doneBy && t.doneBy !== t.assignee ? ' (assigned to ' + esc(nameOf(t.assignee)) + ')' : ''}${t.closedOnFac ? ', marked done on the facility page' : ''}.</div>${reopenCard(t, ppl)}` : `
   ${t.reopened ? `<div class="note">Put back in the queue ${fmt(t.reopened)}${(t.history || []).length ? ' by ' + esc(t.history[t.history.length - 1].reopenedByName) : ''}. What was entered last time is filled in below: change only what was wrong.</div>` : ''}
   ${quick}
@@ -425,6 +451,7 @@ function taskDrawer(t) {
   ${f && (f.why || (f.files || []).length) ? `<div class="meta">${f.why ? '<b>Why:</b> ' + esc(f.why) : ''}${(f.files || []).length ? ' · <b>Attachments:</b> ' + f.files.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>`).join(', ') : ''}</div>` : ''}
   <form id="tf" style="display:flex;flex-direction:column;gap:12px">${def.form(t)}<div id="tf_err"></div><div class="row" style="align-items:center"><button class="btn pri" type="submit">Mark done</button>${STORE.mode === 'demo' ? '<button class="btn" type="button" id="tf_ex">Fill example</button>' : ''}</div></form>
   ${mayRemind(t) ? `<div class="card" style="padding:10px"><div class="row" style="align-items:center;justify-content:space-between"><span class="meta">${(() => { const l = lastReminder(t); return l ? 'Last reminder ' + esc(whenET(remAt(l))) + '.' : 'No reminder sent yet.'; })()} ${canRemind(t) ? '' : 'Next one possible ' + esc(whenET(nextReminderAt(t))) + '.'}</span>${remindBtn(t)}</div></div>` : ''}
+  ${f && t.assignee === amOf(f) ? noteBox(f, 'task') : ''}
   <div class="card" style="padding:10px"><div class="row" style="align-items:center"><label for="re" class="meta">Reassign to</label><select id="re">${ppl.map(([e, n]) => `<option value="${esc(e)}" ${e === t.assignee ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select><button class="btn sm" id="re_go">Reassign</button></div></div>`}
   </div></div>`;
 }
@@ -460,21 +487,35 @@ function facDrawer(f) {
   const ins = st.inbox.filter(m => m.fac === f.id);
   const R = peopleOpts(repList()), A = peopleOpts(amList()), demo = STORE.mode === 'demo';
   return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="Facility"><header><div style="flex:1;min-width:0"><div class="meta">CT-${pad(f.id)} · ${esc(f.group || 'corporate not known yet')}</div><h1 style="font-size:17px">${esc(facName(f))}</h1><span class="pill ${c}">${s}</span>${atRisk(f) ? ' <span class="pill p-risk">At risk</span>' : ''}</div>${closeX}</header><div class="body">
-  <details class="card" style="padding:10px"><summary><b>Edit details</b> <span class="meta">(changes here don't touch the portal or Brightree; fix those yourself)</span></summary><form id="fdet" style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
-    <div class="row">${fld('Facility name', txt('fd_name', f.name))}${fld('Portal name', txt('fd_pn', f.portalName))}</div>
-    <div class="row">${fld('Address', txt('fd_addr', f.address, '123 Main St, City, ST 12345'), 'The state (' + esc(f.state || 'none yet') + ') comes from the end of the address (2 letters or the full name, then the zip). It decides the ship point and delivery date.')}</div>
-    <div class="row">${fld('Corporate', sel('fd_grp', Object.values(st.groups).filter(x => !x.standalone || lc(x.name) === lc(f.group)).map(x => x.name).sort(az), g.name, true))}</div>${chk('fd_none', 'No corporate (standalone)', g.standalone)}
-    <div class="row">${fld('Intake rep', sel('fd_rep', R, f.rep, true))}${fld('Clinical rep', sel('fd_clin', R, f.clin, true))}${fld('Account manager', sel('fd_acct', R, acctOf(f), true))}${fld('Transition lead', sel('fd_am', A, f.am || amOf(f), true))}</div>
-    <div><button class="btn sm pri" type="submit">Save details</button></div></form></details>
+  ${editDetails(f, R, A)}
   <div class="kv"><div>Sheet name</div><div>${esc(f.name)}</div><div>Address</div><div>${esc(f.address) || '-'} ${f.state ? '(' + esc(f.state) + ')' : ''}</div><div>Intake / clinical rep</div><div>${esc(nameOf(f.rep) || 'none')} / ${esc(nameOf(f.clin) || '-')}</div><div>Account manager</div><div>${esc(nameOf(acctOf(f)) || '-')}</div><div>Transition lead</div><div>${esc(nameOf(amOf(f)))}</div><div>Wound rep / regional</div><div>${esc(f.wound ? f.wound.name : '-')} / ${esc(f.regional ? f.regional.name : '-')}</div><div>Why</div><div>${esc(f.why) || '-'}</div>${(f.files || []).length ? `<div>Attachments</div><div>${f.files.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>`).join(', ')}</div>` : ''}<div>Pumps checked / GDD</div><div>${f.pumps === 'already done' ? 'Yes (already done when requested)' : f.pumps ? 'Yes' : 'not yet'} / ${esc(f.gdd || '?')}${f.gddWh ? ' (' + esc(f.gddWh) + ')' : ''}</div>${f.dates ? `<div>First DOS</div><div class="num">${fmt(f.dates.dos)}</div><div>Ordering</div><div class="num">${fmt(f.dates.ord)}</div><div>Delivery</div><div class="num">${fmt(f.dates.del)} · OS Days ${f.dates.os}</div>` : ''}<div>Chicago handoff email</div><div class="num">${fmtS(f.email1) || '-'}</div><div>Transfer notice to facility</div><div class="num">${fmtS(f.email2) || '-'}${f.email2By ? ' (' + esc(f.email2By) + ')' : ''}</div><div>Contacts request</div><div class="num">${fmtS(f.email3) || '-'}</div>${f.email3 ? `<div>Their reply</div><div>${f.e3Done ? 'Taken care of ' + fmtS(f.e3Done) + (f.e3DoneBy ? ' (' + esc(nameOf(f.e3DoneBy) || f.e3DoneBy) + ')' : '') : f.e3Reply ? 'Replied ' + fmtS(f.e3Reply.at) + ', the transition lead is putting it in' : 'Waiting for their reply'}</div>` : ''}${f.pre ? `<div>Done before the request</div><div>${esc(preList(f).join(', '))}</div>` : ''}</div>
   <div class="row">${f.email1 && !f.email2 ? '<button class="btn pri sm" data-fact="e2">Chicago sent the transfer notice</button>' : ''}${f.email1 ? '<button class="btn sm" data-fact="corr">Dates changed: send correction</button>' : ''}${f.email3 && !f.e3Done ? '<button class="btn sm" data-fact="e3done">Contacts: taken care of</button>' : ''}<button class="btn sm" data-fact="hold">${f.hold ? 'Take off hold' : 'Put on hold'}</button>${isAdmin(me()) ? '<button class="btn sm" data-fact="del" style="margin-left:auto">Delete (test or mistake)</button>' : ''}${demo && f.email1 && !f.email2 ? '<button class="btn sm" data-fact="sim_e2">Demo: Chicago CCs the mailbox on the transfer notice</button>' : ''}${demo && f.email3 && !f.e3Done && !f.e3Reply ? '<button class="btn sm" data-fact="sim_e3">Demo: wound rep replies to the contacts request</button>' : ''}</div>
+  ${noteBox(f, 'fac')}
   ${stepsCard(f)}
   ${f.dates ? dateEditor(f) : ''}
   <div class="card" style="padding:10px"><b>Areas of care</b><div class="meta">From ${esc(f.group || 'the corporate')} unless changed here. A change here is for this facility only.${f.email1 ? ' The Chicago handoff email already went out: dates won\'t recalculate.' : ' Dates recalculate.'}</div><form id="fcov"><div class="row">${AREAS.map(a => fld(a + ((f.cov && f.cov[a]) ? ' <span class="tag">this facility</span>' : ''), sel('fc_' + a, covOpts(a), FG(f).cov[a], true))).join('')}</div><div class="row" style="margin-top:6px"><button class="btn sm pri" type="submit">Save areas of care</button><button class="btn sm" type="button" data-covreset="1">Use the corporate's</button></div></form></div>
-  <div class="card" style="padding:10px"><b>Contacts</b>${f.contacts.length ? contactTable(f.contacts) : '<div class="meta">None yet.</div>'}<div class="sect" style="margin-top:8px">Add contacts${tip('Add contacts any time. They go on the next "Contacts into portal" task' + (f.email3 ? '' : ' and in the contacts request') + '.')}</div>${contactEditor('fac_cts', '', false)}<div class="row" style="margin-top:6px"><button class="btn sm pri" data-addcts="1">Add contacts</button></div><div id="fac_err"></div></div>
+  <div class="card" style="padding:10px"><b>Contacts</b>${f.contacts.length ? contactTable(f.contacts) : '<div class="meta">None yet.</div>'}${f.contacts.length ? `<details style="margin-top:6px"><summary class="linkish">Edit these contacts</summary><div class="meta" style="margin:4px 0">A changed contact goes on the next "Contacts into portal" task. Removing one here doesn't remove it from the portal.</div>${contactEditor('fac_edcts', '', false, f.contacts)}<div class="row" style="margin-top:6px"><button class="btn sm pri" data-savects="1">Save contacts</button></div><div id="fac_ederr"></div></details>` : ''}<div class="sect" style="margin-top:8px">Add contacts${tip('Add contacts any time. They go on the next "Contacts into portal" task' + (f.email3 ? '' : ' and in the contacts request') + '.')}</div>${contactEditor('fac_cts', '', false)}<div class="row" style="margin-top:6px"><button class="btn sm pri" data-addcts="1">Add contacts</button></div><div id="fac_err"></div></div>
   <h2 style="margin:4px 0 0">Tasks</h2><div class="tablewrap"><table><tr><th>Task</th><th>Assigned</th><th>Status</th><th>Done by</th></tr>${ts.map(t => `<tr class="click" data-task="${esc(t.key)}"><td>${esc(taskTitle(t))}</td><td>${esc(nameOf(t.assignee))}</td><td>${isWaiting(t) ? 'Starts ' + fmtS(t.opensOn) : esc(t.status)}</td><td>${esc(t.doneByName || nameOf(t.doneBy) || '')}</td></tr>`).join('')}</table></div>
   <h2 style="margin:4px 0 0">Mailbox (emails that came in)</h2>${ins.length ? `<div class="tablewrap"><table><tr><th>Received</th><th>From</th><th>Subject</th><th></th></tr>${ins.map(m => `<tr><td class="num">${esc((m.received || '').slice(0, 10))}</td><td>${esc(m.from)}</td><td>${esc(m.subject)}<div class="meta">${esc((m.preview || '').slice(0, 200))}</div></td><td>${m.path ? `<a href="${esc(STORE.fileUrl(m.path))}" target="_blank" rel="noopener">Open</a>` : ''}</td></tr>`).join('')}</table></div>` : '<div class="meta">None yet.</div>'}
   <h2 style="margin:4px 0 0">Emails from the app</h2>${ms.some(m => m.status !== 'Cancelled') ? mailSections(ms, isAdmin(me()), 'h3') : '<div class="meta">None yet.</div>'}</div></div>`;
+}
+// a dropdown always has the facility's current person, even if they're no longer ticked as a rep / transition lead in Settings
+const withCur = (opts, v) => !v || opts.some(o => o[0] === v) ? opts : [...opts, [v, nameOf(v)]];
+// every detail entered for the facility; nothing that was filled in can be cleared (a done task stays done)
+function editDetails(f, R, A) {
+  const g = G(f), b = f.bt || {}, cadV = ({ 4: 'Monthly', 2: 'Biweekly', 1: 'Weekly' })[b.cadence] || 'Monthly';
+  const bt = !f.bt ? '' : f.email1 ? `<div class="meta">Brightree report: last enteral ${b.lastEnt ? fmtS(b.lastEnt) : '-'}, last uro / ostomy / trach ${b.lastOuts ? fmtS(b.lastOuts) : '-'}. The Chicago handoff email went out, so these can't change here.</div>`
+    : `<div class="sect">Brightree report${tip('Changing a date recalculates the recommended dates. A date of service picked by hand goes back to the new recommended one.')}</div><div class="row">${fld('Last enteral (Delivery Actual date)', dt('fd_le', b.lastEnt))}${fld('Last uro / ostomy / trach', dt('fd_lo', b.lastOuts))}${fld('Enteral ships', sel('fd_cad', ['Monthly', 'Weekly', 'Biweekly'], cadV))}</div>`;
+  const gdd = f.gdd ? `<div class="row">${fld('GDD orders?', sel('fd_gdd', ['Yes', 'No'], ['Yes', 'No'].includes(f.gdd) ? f.gdd : '', true), f.gdd === 'Already done' ? 'Marked "already done" on the request. Pick Yes or No only if you know.' : '')}<div class="field" id="fd_whbox" ${f.gdd === 'Yes' ? '' : 'hidden'}><label>GDD warehouse</label>${sel('fd_wh', st.settings.warehouses, f.gddWh || '', true)}</div></div>` : '';
+  return `<details class="card" style="padding:10px" id="fdetbox" ${ui.editOpen === f.id ? 'open' : ''}><summary><b>Edit details</b> <span class="meta">(changes here don't touch the portal or Brightree. Changed after the portal setup? You get an "Update the portal" task)</span></summary><form id="fdet" style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+    <div class="row">${fld('Facility name', txt('fd_name', f.name))}${fld('Portal name', txt('fd_pn', f.portalName))}</div>
+    <div class="row">${fld('Address', txt('fd_addr', f.address, '123 Main St, City, ST 12345'), 'The state (' + esc(f.state || 'none yet') + ') comes from the end of the address (2 letters or the full name, then the zip). It decides the ship point and delivery date.')}</div>
+    <div class="row">${fld('Corporate', sel('fd_grp', Object.values(st.groups).filter(x => !x.standalone || lc(x.name) === lc(f.group)).map(x => x.name).sort(az), g.name, true))}</div>${chk('fd_none', 'No corporate (standalone)', g.standalone)}
+    <div class="row">${fld('Intake rep', sel('fd_rep', withCur(R, f.rep), f.rep, true))}${fld('Clinical rep', sel('fd_clin', withCur(R, f.clin), f.clin, true))}${fld('Account manager', sel('fd_acct', withCur(R, acctOf(f)), acctOf(f), true))}${fld('Transition lead', sel('fd_am', withCur(A, f.am || amOf(f)), f.am || amOf(f), true))}</div>
+    ${f.wound || f.regional || done(fTask(f, 'FASTCARE')) ? `<div class="row">${fld('Wound and Product Specialist', personPick('fd_w', f.wound))}${fld('Regional Manager', personPick('fd_r', f.regional))}</div>${f.email3 && !f.e3Done ? '<div class="meta">The contacts request already went out. A change here only affects its follow-ups.</div>' : ''}` : ''}
+    ${gdd}${bt}
+    <div class="row">${fld('Reason for transition', txt('fd_why', f.why))}</div>
+    <div id="fd_err"></div><div><button class="btn sm pri" type="submit">Save details</button></div></form></details>`;
 }
 function deLive(changed) {
   const f = facById(+document.querySelector('[data-savedates]').dataset.savedates); if (!f) return;
@@ -498,8 +539,22 @@ function fillExample(t) {
 // ---------- clicks ----------
 document.addEventListener('click', async e => {
   const T = e.target;
-  const v = T.closest('[data-view]'); if (v) { ui.view = v.dataset.view; if (v.dataset.outfilter) ui.outFilter = v.dataset.outfilter; ui.openTask = ui.openFac = ui.openGroup = null; render(); return; }
-  if (T.closest('[data-close]')) { ui.openTask = ui.openFac = ui.openGroup = null; ui.answer = null; renderLayer(); return; }
+  const v = T.closest('[data-view]'); if (v) { ui.view = v.dataset.view; if (v.dataset.outfilter) ui.outFilter = v.dataset.outfilter; ui.openTask = ui.openFac = ui.openGroup = ui.next = null; render(); return; }
+  if (T.closest('[data-close]')) { ui.openTask = ui.openFac = ui.openGroup = ui.next = null; ui.answer = null; renderLayer(); return; }
+  const gt = T.closest('[data-gotask]'); if (gt) { ui.next = null; ui.openTask = gt.dataset.gotask; ui.openFac = ui.openGroup = null; ui.answer = null; renderLayer(); return; }
+  if (T.closest('[data-leadnote]')) { e.stopPropagation(); return; } // typing in the tracker notes box doesn't open the facility
+  const ef = T.closest('[data-editfac]'); if (ef) { e.stopPropagation(); ui.openFac = +ef.dataset.editfac; ui.editOpen = ui.openFac; ui.openTask = ui.openGroup = null; renderLayer(); const b = document.getElementById('fdetbox'); if (b) b.scrollIntoView({ block: 'start' }); return; }
+  const sn = T.closest('[data-savenote]'); if (sn) { const id = +sn.dataset.savenote, box = document.getElementById(sn.dataset.notebox); if (!box) return; const ok = await saveNote(id, box.value.trim()); if (!ok && !ui.errors.length) toast('No changes to save.'); return; }
+  const rc = T.closest('[data-recheckbt]'); if (rc) { const id = +rc.dataset.recheckbt, vals = { le: V('rc_le'), lo: V('rc_lo'), cad: V('rc_cad') }; let res = null;
+    const f0 = facById(id), pre = f0 && (updateBtCheck(f0, vals)); if (pre) { $('#rc_err').innerHTML = '<div class="err">' + esc(pre) + '</div>'; return; }
+    await act(() => { res = updateBt(facById(id), vals, me(), meName()); if (res.err) return false; });
+    if (res && res.err) { toast(res.err); return; }
+    if (res && !ui.errors.length) { const f = facById(id); toast(!res.changed ? 'Rechecked. The last delivery dates are the same' + (res.cadChanged ? ' (enteral frequency updated)' : '') + '.' : 'Dates recalculated. Recommended date of service: ' + (f.dates ? fmt(f.dates.dos) : 'none yet') + (res.dropped ? '. The date picked by hand was replaced.' : '.')); }
+    return; }
+  const svc = T.closest('[data-savects]'); if (svc) { const id = ui.openFac, list = readContacts('fac_edcts'), er = ceErr('fac_edcts'); if (er) { $('#fac_ederr').innerHTML = '<div class="err">' + esc(er) + '</div>'; return; } let r = null;
+    await act(() => { r = saveContacts(facById(id), list, meName()); }, 'Contacts saved');
+    if (r && r.removedInPortal && !ui.errors.length) toast('Saved. ' + r.removedInPortal + ' removed contact' + (r.removedInPortal > 1 ? 's are' : ' is') + ' still in the portal: remove ' + (r.removedInPortal > 1 ? 'them' : 'it') + ' there yourself.');
+    return; }
   const cb = T.closest('[data-selfac]'); if (cb) { const i = +cb.dataset.selfac; cb.checked ? ui.sel.add(i) : ui.sel.delete(i); e.stopPropagation(); render(); return; }
   // "Facility page" link inside a task row: opens the facility, not the task (Ctrl/middle-click still opens a new tab)
   const fp = T.closest('[data-facpage]'); if (fp) { if (e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); ui.openFac = +fp.dataset.facpage; ui.openTask = ui.openGroup = null; ui.answer = null; renderLayer(); return; }
@@ -512,7 +567,7 @@ document.addEventListener('click', async e => {
   if (T.closest('[data-doneall]')) { ui.doneAll = !ui.doneAll; render(); return; }
   if (typeof analyticsClick === 'function' && analyticsClick(T)) return;
   const tk = T.closest('[data-task]'); if (tk) { ui.openTask = tk.dataset.task; ui.openFac = ui.openGroup = null; ui.answer = null; renderLayer(); return; }
-  const fr = T.closest('[data-fac]'); if (fr && !T.closest('select')) { ui.openFac = +fr.dataset.fac; ui.openTask = ui.openGroup = null; renderLayer(); return; }
+  const fr = T.closest('[data-fac]'); if (fr && !T.closest('select') && !T.closest('textarea')) { ui.editOpen = null; ui.openFac = +fr.dataset.fac; ui.openTask = ui.openGroup = null; renderLayer(); return; }
   const eg = T.closest('[data-editgrp]'); if (eg) { ui.openGroup = eg.dataset.editgrp; ui.openTask = ui.openFac = null; renderLayer(); return; }
   if (T.id === 'reload') { ui.errors = []; await act(async () => { }); return; }
   if (T.id === 'refresh') { await act(async () => { }, 'Up to date'); return; }
@@ -604,16 +659,23 @@ document.addEventListener('submit', async e => {
       catch (e) { btnLoading($('#tf button[type=submit]'), false); $('#tf_err').innerHTML = '<div class="err">A screenshot didn\'t upload: ' + esc(e.message || e) + '. Try again.</div>'; return; }
     }
     const ok = await act(() => { const t2 = taskByKey(key); if (!t2 || done(t2)) { toast('Someone already finished this task.'); return false; } TT[t2.type].done(t2, { by: me(), byName: meName() }); finishTask(t2, me(), meName()); }, 'Done. Recorded as done by ' + meName() + '.');
-    if (ok) { if (t.type === 'FASTCARE') { delete ui.shots.fc_fac; delete ui.shots.fc_corp; } ui.openTask = null; renderLayer(); }
+    if (ok) { if (t.type === 'FASTCARE') { delete ui.shots.fc_fac; delete ui.shots.fc_corp; } ui.openTask = null;
+      if (['BRIGHTREE', 'PORTAL_SETUP'].includes(t.type) && !ui.errors.length && nextStep(facById(t.fac), t.type)) ui.next = { fac: t.fac, from: t.type };
+      renderLayer(); }
     return;
   }
   if (id === 'fdet') {
-    const fid = ui.openFac, vals = { name: V('fd_name'), pn: V('fd_pn'), addr: V('fd_addr'), state: '', grp: V('fd_grp'), none: V('fd_none'), rep: V('fd_rep'), clin: V('fd_clin'), am: V('fd_am'), acct: V('fd_acct') };
-    if (vals.addr && addressFormatProblem(vals.addr)) { toast(addressFormatProblem(vals.addr)); return; }
-    if (vals.addr) { vals.addr = normAddr(vals.addr); vals.state = stateFrom(vals.addr); }
-    if (vals.state && !/^[A-Z]{2}$/.test(vals.state)) { toast('State is 2 letters.'); return; }
-    await act(() => { const f = facById(fid), oldState = f.state;
-      if (f.email1 && vals.state && vals.state !== oldState) mail({ key: 'm:E13:state:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Address changed after the Chicago handoff email: ' + facName(f), body: '<p>' + esc(meName()) + ' changed the state from ' + esc(oldState || '(none)') + ' to ' + esc(vals.state) + '. The dates didn\'t change. Check the ship point and delivery date, and send Chicago a correction if they\'re wrong.</p>' }); f.name = vals.name || f.name; f.portalName = vals.pn; f.address = vals.addr; f.state = vals.addr ? vals.state : ''; f.rep = vals.rep || f.rep; f.clin = vals.clin || f.clin; f.am = vals.am || f.am; f.acct = vals.acct; if (vals.none) { if (!G(f).standalone) makeStandalone(f); } else if (vals.grp && lc(vals.grp) !== lc(f.group)) f.group = grp(vals.grp).name; }, 'Saved');
+    const fid = ui.openFac, f0 = facById(fid), has = x => !!document.getElementById(x);
+    const vals = { name: V('fd_name'), pn: V('fd_pn'), addr: V('fd_addr'), grp: V('fd_grp'), none: V('fd_none'), rep: V('fd_rep'), clin: V('fd_clin'), am: V('fd_am'), acct: V('fd_acct'), why: V('fd_why') };
+    if (has('fd_w')) { vals.wound = readPerson('fd_w'); vals.woundRaw = V('fd_w'); vals.regional = readPerson('fd_r'); vals.regionalRaw = V('fd_r'); }
+    if (has('fd_gdd')) { vals.gdd = V('fd_gdd'); vals.gddWh = V('fd_wh'); }
+    if (has('fd_le')) { vals.le = V('fd_le'); vals.lo = V('fd_lo'); vals.cad = V('fd_cad'); }
+    // check against what's on screen first, so a mistake shows next to the form; checked again on the latest data when saving
+    let err = editFacilityCheck(f0, vals); if (err) { $('#fd_err').innerHTML = '<div class="err">' + esc(err) + '</div>'; return; }
+    let res = null;
+    await act(() => { res = editFacility(facById(fid), Object.assign({}, vals), me(), meName()); if (typeof res === 'string') return false; }, 'Saved');
+    if (typeof res === 'string') { toast(res); return; }
+    if (res && res.bt && res.bt.changed && !ui.errors.length) toast('Saved. Dates recalculated' + (res.bt.dropped ? ': the date picked by hand was replaced by the new recommended one.' : '.'));
     return;
   }
   if (id === 'fcov') { const fid = ui.openFac, vals = {}; AREAS.forEach(a => vals[a] = V('fc_' + a)); await act(() => { const f = facById(fid), g = G(f); f.cov = {}; AREAS.forEach(a => { if (vals[a] && vals[a] !== (g.cov || {})[a]) f.cov[a] = vals[a]; }); }, 'Areas of care saved'); return; }
@@ -665,6 +727,8 @@ document.addEventListener('change', async e => {
   if (e.target.type === 'hidden') segSync(id);
   if (e.target.classList.contains('ce-dept')) { const n = e.target.closest('.ce-row').querySelector('.ce-note'); n.hidden = e.target.value !== 'Other'; }
   if (id === 'g') { const b = $('#whbox'); if (b) b.hidden = e.target.value !== 'Yes'; }
+  if (id === 'fd_gdd') { const b = $('#fd_whbox'); if (b) b.hidden = e.target.value !== 'Yes'; }
+  const ln = e.target.dataset && e.target.dataset.leadnote; if (ln) { const val = e.target.value.trim(); setTimeout(async () => { const nx = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.leadnote : null; await saveNote(+ln, val); if (nx) { const el = document.querySelector(`[data-leadnote="${nx}"]`); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } } }); }
   if (id === 'who') { const p = person(e.target.value); st.me = { email: lc(p.email), name: p.name }; ui.openTask = ui.openFac = ui.openGroup = null; render(); }
   if (id === 'forwho') { ui.forWho = e.target.value === me() ? null : e.target.value; Object.assign(ui.myF, { fac: '', corp: '' }); render(); }
   if (id === 'mt_fac' || id === 'mt_corp') { ui.myF[id.slice(3)] = e.target.value; render(); }
@@ -672,7 +736,7 @@ document.addEventListener('change', async e => {
   if (typeof analyticsChange === 'function') analyticsChange(e.target);
   const li = e.target.closest && e.target.closest('[data-linkin]'); if (li && li.value) { const mid = li.dataset.linkin, fid = +li.value; await act(() => { const m = st.inbox.find(x => String(x._id) === String(mid)); if (m) { m.fac = fid; m.processed = true; } }, 'Linked'); }
 });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && (ui.openTask || ui.openFac || ui.openGroup)) { ui.openTask = ui.openFac = ui.openGroup = null; renderLayer(); } if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('task')) e.target.click(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && (ui.openTask || ui.openFac || ui.openGroup || ui.next)) { ui.openTask = ui.openFac = ui.openGroup = ui.next = null; renderLayer(); } if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('task')) e.target.click(); });
 function addFiles(list) { ui.dropped = [...ui.dropped, ...list]; const l = $('#rq_list'); if (l) l.textContent = ui.dropped.map(f => f.name).join(', '); }
 document.addEventListener('dragover', e => { const z = e.target.closest && e.target.closest('#rq_drop'); if (z) { e.preventDefault(); z.classList.add('over'); } });
 document.addEventListener('dragleave', e => { const z = e.target.closest && e.target.closest('#rq_drop'); if (z) z.classList.remove('over'); });

@@ -74,6 +74,19 @@ Saving no longer re-downloads everything: after a save, `SPStore.save` updates i
 ## Completion
 A facility is never marked complete while its FastCare task is open (since Oct 15 2026). Facilities already complete stay as they are.
 
+## Brightree report → portal setup → schedule (Oct 19 2026)
+- Done together when possible: the schedule is based on the report's last delivery dates, and they change if Chicago ships again (overlapping billing). Order stays BT → portal setup → schedule (schedule still waits for portal setup).
+- Finishing BRIGHTREE or PORTAL_SETUP opens `nextDrawer` (`ui.next`, `nextStep(f, from)`): "Recommended: do the … now" + a button straight to the next task, or what it still waits on (`psWaiting`).
+- SCHEDULE is "High importance" (`isHighTask`, orange `p-high`, never "At risk"), sorts first, its to-do email is High.
+- `f.btAt` / `f.btBy` = when the report dates were entered or rechecked; `t.doneAt` = exact time any task was done (older ones only have `doneOn`, so `btWhen` falls back to the day). After 8 hours (`btStale`) the schedule task shows a warning with fields to recheck the dates (`btRecheck`, `updateBt`): new dates recalc and replace a hand-picked DOS (`f.dosChosen` cleared); old values kept in `f.btHistory`. Report dates can't be cleared, and can't change after the handoff email.
+
+## Transition lead notes and editing facility details (Oct 19 2026)
+- `f.leadNotes` (+ `leadNotesBy`, `leadNotesOn`): textarea on every tracker row (saves on change/blur; `poll` skips while it's focused), on the facility page, and on any task assigned to the facility's transition lead (`noteBox`). In the CSV.
+- Facility page "Edit details" (`editDetails`, `editFacilityCheck`, `editFacility` in engine.js) edits everything entered: names, address, corporate, the 4 reps, wound rep, regional, GDD answer/warehouse, Brightree dates, reason. Contacts edit separately (`saveContacts`: a changed contact goes back to "not in portal" → "Contacts into portal" task). Tracker "Edit details" opens it expanded (`ui.editOpen`).
+- Nothing that was entered can be cleared (wrong from the start → put the task back in the queue). Dropdowns always include the current person (`withCur`).
+- Side effects: transition lead change → E20 to the new lead (amTask tasks follow); intake rep or state change after the handoff email → E13 to the lead to send a correction; GDD change → E11 FYI (and GDD_PORTAL closed if no longer GDD). FastCare only asks for the corporate/address while still missing (`fcNeed`).
+- "Update the portal" (`PORTAL_UPDATE`, repeatable): `trackPortal` (end of `run()`) keeps `f.portalSnap` of what was typed into the portal at setup (`portalVals`: account manager, clinical, intake, price table, Main Vendor, both ship points, coverage per area, corporate, address). Snapshot is taken silently the first time (so existing facilities get no task); later differences from anywhere (facility page, corporate page, tracker bulk, Settings ship points) go on 1 open task for the lead; a change undone comes off. Portal setup put back in the queue drops the snapshot and closes the open update task. The GDD task answering after setup updates the snapshot itself (GDD_PORTAL covers it).
+
 ## Cache
 `index.html` loads the css/js with `?v=N`. Bump N on every push that changes css or js, or people keep the old version for up to 10 minutes.
 
