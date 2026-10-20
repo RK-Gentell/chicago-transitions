@@ -213,10 +213,18 @@ function calcDates(f) {
   const weekPush = wk !== plain ? { from: plain, fromOrd: addBiz(plain, -back) } : null;
   if (weekPush && !f.noPush) { dos = wk; why.push('Ordering date ' + fmtS(weekPush.fromOrd) + ' is within a week of today → pushed so ordering is ' + fmtS(addBiz(dos, -back)) + ', a week out (time to process the first order). DOS ' + fmtS(dos)); }
   else if (weekPush) why.push('Ordering date is within a week of today, but "Push out a week" is unticked (rush), so it stays');
+  // David's facilities: the intake rep is picked now, so the date moves on until someone on his team has room that day
+  let capFrom = '';
+  if (autoPending(f)) {
+    const cd = autoDos(f, dos, back);
+    if (cd !== dos) { capFrom = dos; why.push('Everyone on ' + first(nameOf(autoAcct())) + '\'s team already has ' + AUTO_REP_FULL + ' or more facilities ordering ' + fmtS(addBiz(dos, -back)) + ' → pushed so ordering is ' + fmtS(addBiz(cd, -back)) + '. DOS ' + fmtS(cd)); dos = cd; }
+    const p = autoPick(addBiz(dos, -back), f.id);
+    if (p) why.push('Intake rep: ' + nameOf(p) + ' (' + (repLoad(addBiz(dos, -back), f.id)[p] || 0) + ' other facilities ordering that day)');
+  }
   const sp = shipOf(st.settings.shipEnt, f.state) || 1;
   why.push((pb ? 'Part B only → ordering 2 business days' : 'Not Part B only → ordering 1 business day') + ' before DOS');
   why.push('Ship Point ' + f.state + ' = ' + sp + ' → delivery DOS + ' + sp + ' business day' + (sp > 1 ? 's' : ''));
-  return Object.assign(derive(f, dos), { why, weekPush, pushedWeek: !!weekPush && !f.noPush });
+  return Object.assign(derive(f, dos), { why, weekPush, pushedWeek: !!weekPush && !f.noPush, capFrom });
 }
 function derive(f, dos) {
   const g = FG(f), pb = partB(g), back = pb ? 2 : 1, sp = shipOf(st.settings.shipEnt, f.state) || 1;
@@ -232,7 +240,10 @@ function basisText(f) {
 }
 function dateWarn(f, dos) {
   const r = f.rec, w = []; if (!r) return w;
-  if (dos < r.dos) { const n = diff(dos, r.dos); w.push('This DOS is ' + n + ' day' + (n > 1 ? 's' : '') + ' earlier than the recommended ' + fmt(r.dos) + ', which is ' + basisText(f) + '. Chicago\'s last delivery may not be used up yet, so this order could overlap their billing.'); }
+  // pushed only because David's team was full that day: earlier is a capacity question, not a billing one
+  if (r.capFrom && dos < r.dos && dos >= r.capFrom) w.push('The recommended ' + fmt(r.dos) + ' was pushed out because ' + first(nameOf(autoAcct())) + '\'s team was full on the earlier days. Check the intake rep below.');
+  const billDos = r.capFrom || r.dos;
+  if (dos < billDos) { const n = diff(dos, billDos); w.push('This DOS is ' + n + ' day' + (n > 1 ? 's' : '') + ' earlier than the recommended ' + fmt(billDos) + ', which is ' + basisText(f) + '. Chicago\'s last delivery may not be used up yet, so this order could overlap their billing.'); }
   if (isWE(dos)) w.push('This DOS is on a ' + WD[dow(dos)] + '.');
   const d = derive(f, dos); if (d.ord < addBiz(st.today, 1)) w.push('The ordering date (' + fmt(d.ord) + ') has already passed or is today.');
   else if (d.ord < add(st.today, 7) && !f.noPush) w.push('The ordering date (' + fmt(d.ord) + ') is less than a week from today. First orders usually start processing a week before the ordering date.');
@@ -668,7 +679,7 @@ const partialRule = g => !!(g && Array.isArray(g.ruleIndiv));
 // what this facility still needs picked by hand. The intake rep always; the rule's blank positions until the Chicago handoff email.
 function ruleNeeds(f) {
   const g = f.group ? G(f) : null, n = [];
-  if (!f.rep) n.push('rep');
+  if (!f.rep && !autoPending(f)) n.push('rep'); // David's facilities: the intake rep is picked at scheduling
   if (partialRule(g) && !f.email1 && !f.complete) {
     if (g.ruleIndiv.includes('clin') && !f.clin) n.push('clin');
     if (g.ruleIndiv.includes('acct') && !f.acct) n.push('acct');
@@ -678,6 +689,7 @@ function ruleNeeds(f) {
 }
 // fills a facility's empty positions from the corporate's rule (never overwrites what a facility already has)
 function applyRule(f, g) {
+  if (autoPending(f)) { if (!f.am && g.am) f.am = g.am; if (!f.clin && g.clin && !g.clinSame) f.clin = g.clin; return; } // intake rep waits for scheduling
   if (!partialRule(g)) { if (!f.rep && g.rep) { f.rep = g.rep; f.clin = g.clin || g.rep; if (!f.am && g.am) f.am = g.am; } return; } // older rules: unchanged
   if (!f.rep && g.rep) f.rep = g.rep;
   if (!f.clin && f.rep && (g.clin || g.clinSame)) f.clin = g.clinSame ? f.rep : g.clin;
@@ -690,7 +702,76 @@ function setRule(g, v) {
   g.ruleIndiv = RULE_POS.map(x => x[0]).filter(p => p === 'clin' ? !v.clin : !v[p]);
 }
 const ruleText = g => { if (!g.rep && !g.clin && !g.clinSame && !g.acct && !g.am) return ''; return RULE_POS.map(([p, l]) => { const v = p === 'clin' && g.clinSame ? 'same as intake' : g[p] ? nameOf(g[p]) : (partialRule(g) ? 'per facility' : (p === 'acct' ? 'none' : '-')); return l + ': ' + v; }).join(' · '); };
-function ruleFacs(t) { return st.facs.filter(f => !f.hold && !f.archived && (t.group === '__nocorp' ? !f.group && !f.rep : lc(f.group) === lc(t.group) && ruleNeeds(f).length)); }
+function ruleFacs(t) { return st.facs.filter(f => !f.hold && !f.archived && (t.group === '__nocorp' ? !f.group && !f.rep && !autoPending(f) : lc(f.group) === lc(t.group) && ruleNeeds(f).length)); }
+
+// ---------- intake rep picked automatically at scheduling (David's team, Oct 20 2026) ----------
+// Settings "autoRep": { acct: the account manager's email, reps: [emails, in the order they get picked] }.
+// A facility whose account manager is that person gets no intake rep until it's scheduled. Then the rep with the fewest
+// facilities ordering that day gets it: 0 or 1 first (first in the list wins a tie), else 2. Everyone at 3+ → the next business day.
+// Facilities already scheduled (or with the Chicago handoff email sent) keep the rep they have and count toward that rep's day.
+const AUTO_REP_FULL = 3; // facilities ordering the same day before a rep counts as full
+const autoCfg = () => (st && st.settings && st.settings.autoRep) || null;
+const autoReps = () => { const c = autoCfg(); return c ? (c.reps || []).map(lc).filter(e => validEmail(e) && person(e)) : []; };
+const autoAcct = () => { const c = autoCfg(); return c && validEmail(c.acct) && autoReps().length ? lc(c.acct) : ''; };
+const isAutoAcct = email => !!autoAcct() && lc(email) === autoAcct();
+// scheduled = its dates won't move anymore (handoff email sent and scheduled, or dates typed in as already scheduled)
+const isScheduled = f => !!((f.email1 && !handoffOnly(f)) || f.manualDates);
+// the intake rep waits for scheduling: account manager is David, not scheduled, no handoff email yet
+const autoPending = f => !!f && !f.deleted && !f.complete && !f.email1 && !f.manualDates && isAutoAcct(acctOf(f));
+// facilities each rep has ordering on that day (scheduled ones only). except = a facility id to leave out (the one being scheduled)
+function repLoad(ord, except) {
+  const n = {};
+  st.facs.forEach(f => { if (f.deleted || f.id === except || !f.rep || !f.dates || f.dates.ord !== ord || !isScheduled(f)) return; n[lc(f.rep)] = (n[lc(f.rep)] || 0) + 1; });
+  return n;
+}
+// the rep the rules pick for that ordering day, or '' when everyone on the team already has 3 or more
+function autoPick(ord, except) {
+  const n = repLoad(ord, except), team = autoReps(), c = e => n[e] || 0;
+  return team.find(e => c(e) <= 1) || team.find(e => c(e) === 2) || '';
+}
+// David's facilities only: the first ordering day (from the recommended DOS on) where someone on the team has room
+function autoDos(f, dos, back) {
+  let d = dos, k = 0;
+  while (!autoPick(addBiz(d, -back), f.id) && k < 60) { d = addBiz(d, 1); k++; }
+  return d;
+}
+// warnings for the intake rep + ordering date picked on the schedule task
+function autoRepWarn(f, rep, ord) {
+  const w = [], n = repLoad(ord, f.id), c = e => n[lc(e)] || 0, team = autoReps();
+  if (!rep) return w;
+  if (c(rep) >= AUTO_REP_FULL) w.push('There ' + (c(rep) === 1 ? 'is' : 'are') + ' already ' + c(rep) + ' facilit' + (c(rep) === 1 ? 'y' : 'ies') + ' assigned to ' + nameOf(rep) + ' ordering on ' + fmt(ord) + '.');
+  if (team.length && !team.includes(lc(rep))) w.push(nameOf(rep) + ' isn\'t on ' + first(nameOf(autoAcct())) + '\'s team (Settings, "Intake reps picked at scheduling").');
+  const freer = lc(rep) === autoPick(ord, f.id) ? [] : team.filter(e => e !== lc(rep) && c(e) < c(rep));
+  if (freer.length) { const best = freer.reduce((a, e) => c(e) < c(a) ? e : a); w.push(nameOf(best) + ' has more time that day (' + c(best) + ' facilit' + (c(best) === 1 ? 'y' : 'ies') + ' ordering ' + fmt(ord) + ', ' + nameOf(rep) + ' has ' + c(rep) + ').'); }
+  if (!autoPick(ord, f.id)) w.push('Everyone on ' + first(nameOf(autoAcct())) + '\'s team already has ' + AUTO_REP_FULL + ' or more facilities ordering on ' + fmt(ord) + '.');
+  return w;
+}
+// keeps David's not-yet-scheduled facilities without an intake rep (the old one is kept in f.repHistory) and with David as clinical rep
+function autoRepPrep(f) {
+  if (!autoPending(f)) return;
+  const acct = autoAcct();
+  if (f.rep) {
+    const was = f.rep;
+    (f.repHistory = f.repHistory || []).push({ rep: was, clin: f.clin || '', on: st.today, why: 'Cleared: account manager ' + nameOf(acct) + ', intake rep picked at scheduling' });
+    if (!f.clin || lc(f.clin) === lc(was)) f.clin = acct;
+    f.rep = '';
+  }
+  if (!f.clin) f.clin = acct;
+}
+// gives the facility its intake rep at scheduling. rep = picked on the schedule task ('' = the rules pick). Returns the rep.
+function autoAssign(f, rep, by) {
+  const ord = f.dates.ord, pick = autoPick(ord, f.id), n = repLoad(ord, f.id);
+  let r = lc(rep) || pick;
+  // nobody has room that day (dates typed in as already scheduled): the least busy, first in the list on a tie
+  if (!r) r = autoReps().reduce((a, e) => (n[e] || 0) < (n[a] || 0) ? e : a, autoReps()[0]) || '';
+  if (!r) return '';
+  f.rep = r;
+  if (!f.clin) f.clin = autoAcct() || r;
+  f.repAuto = { rep: r, pick, ord, load: n[r] || 0, by: by || '', on: st.today, override: !!rep && lc(rep) !== pick };
+  // the schedule task says to type the intake rep (and clinical) into the portal, so it doesn't need an "Update the portal" task
+  if (f.portalSnap) { const cur = portalVals(f); f.portalSnap.rep = cur.rep; f.portalSnap.clin = cur.clin; }
+  return r;
+}
 
 // ---------- inbox (emails that arrived in the shared mailbox) ----------
 function processInbox() {
@@ -749,11 +830,33 @@ function importShip20261016() {
   s.imported = [...(s.imported || []), 'ship-2026-10-16'];
 }
 
+// One-time add (10/20/2026): David Alan's intake reps, ticked as Rep / account manager (added if missing, ticked if not),
+// and the "Intake reps picked at scheduling" setting (account manager David Alan, these 5 in this order). Runs once.
+const AUTO_REP_2026_10_20 = { acct: 'David Alan,david@gentell.com', reps: 'Shalini Srinivas,shalini@gentell.com|Manjunath Ranganath,manjunath@gentell.com|Kalavathi Venkatesh,kalavathi@gentell.com|Malini Dorairaj,malini@gentell.com|Swapna Rawal,swapna@gentell.com' };
+function importAutoRep20261020() {
+  const s = st.settings; if (!s || (s.imported || []).includes('autorep-2026-10-20')) return;
+  const add = x => {
+    let [name, email] = x.split(',');
+    if (st.demo) email = lc(name).replace(/[^a-z ]/g, '').trim().replace(/\s+/g, '.') + '@demo.gentell.com'; // demo never uses real addresses
+    let p = s.people.find(q => lc(q.email) === lc(email)) || s.people.find(q => lc(q.name) === lc(name));
+    if (!p) { p = { name, email, rep: true, ext: '' }; s.people.push(p); }
+    if (!p.rep) p.rep = true;
+    if (!validEmail(p.email)) p.email = email;
+    return lc(p.email);
+  };
+  const reps = AUTO_REP_2026_10_20.reps.split('|').map(add);
+  if (!s.autoRep) s.autoRep = { acct: add(AUTO_REP_2026_10_20.acct), reps };
+  s.imported = [...(s.imported || []), 'autorep-2026-10-20'];
+}
+
 function run() {
   if (!st || !st.settings) return;
   importTeam20261015();
   importShip20261016();
+  importAutoRep20261020();
   processInbox();
+  // David's facilities not scheduled yet: no intake rep until scheduling (on hold too, so it never shows a rep that isn't theirs)
+  st.facs.forEach(autoRepPrep);
   const groupsSeen = {};
   st.facs.forEach(f => {
     if (f.hold || f.complete || f.archived) return;
@@ -776,7 +879,7 @@ function run() {
 
     // corporate not known yet: Malka picks reps per facility; corporate asks wait for the FastCare task
     if (!f.group) {
-      if (!f.rep && !st.tasks.some(t => t.group === '__nocorp' && t.type === 'RULE' && !done(t))) {
+      if (!f.rep && !autoPending(f) && !st.tasks.some(t => t.group === '__nocorp' && t.type === 'RULE' && !done(t))) {
         const t = newTask('RULE', { group: '__nocorp', assignee: roleEmail('rules') });
         mail({ key: 'm:E3:' + t.key, code: 'E3', to: [t.assignee], task: t.key, cond: { task: t.key }, subject: 'Pick a rep: corporate not known yet', body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>These facilities don't have a corporate yet, so there's no corporate rule to use. Pick the reps per facility.</p><ul>${ruleFacs(t).map(x => '<li>' + esc(facName(x)) + '</li>').join('')}</ul>` });
       }
@@ -839,7 +942,7 @@ function run() {
         : { code: 'E9', to: [ts[0].assignee], link: 'none', subject: 'Pumps: ' + fs.length + ' facilities', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>These are in the portal now. Please check if GNS Chicago sent them pumps and add any to "Pump Tracking". Click "Checked" next to each one when you're done.</p><p><b>${PUMP_RULE_MANY}</b></p>${taskList(fs.map((x, i) => ['<b>' + esc(facName(x)) + '</b>', ts[i].key]), ['Checked'])}` });
     }
     // portal setup: rep + price table + all areas of care + in the portal + dates
-    if (!fTask(f, 'PORTAL_SETUP') && !preDone(f, 'ps') && f.rep && hasPrice(g) && covKnown(FG(f)) && f.inPortal && f.dates && f.bt) {
+    if (!fTask(f, 'PORTAL_SETUP') && !preDone(f, 'ps') && (f.rep || autoPending(f)) && hasPrice(g) && covKnown(FG(f)) && f.inPortal && f.dates && f.bt) {
       const t = newTask('PORTAL_SETUP', { fac: f.id, assignee: am, amTask: true });
       todo(t, 'portal setup for ' + facName(f), 'Set up <b>' + esc(facName(f)) + '</b> in the portal.');
     }
@@ -859,6 +962,8 @@ function run() {
       todo(t, 'schedule ' + facName(f), 'Schedule <b>' + esc(facName(f)) + '</b>. The Brightree report is done, so schedule it as soon as you can: the longer it waits, the more likely the last delivery dates change.', 'High');
     }
     // already scheduled, handoff email not sent: it goes out by itself once it has what it needs
+    // David's facility typed in as already scheduled: its intake rep is picked by the same rules, for the ordering date typed in
+    if (!f.email1 && f.manualDates && preDone(f, 'sched') && f.dates && !f.rep && isAutoAcct(acctOf(f))) autoAssign(f, '', 'Automatic (already scheduled)');
     if (!f.email1 && f.manualDates && preDone(f, 'sched') && f.dates && f.rep && covKnown(FG(f)) && !settingsProblems().length) { sendEmail1(f); f.email1By = 'Sent automatically (already scheduled)'; }
     // Email 3 to the wound rep + regional: as soon as the FastCare task is done (or its info was filled in), unless no contacts request is needed
     const fcIn = done(fTask(f, 'FASTCARE')) || preDone(f, 'wr');
@@ -1052,7 +1157,7 @@ const btWhenText = w => w.exact ? whenET(w.ms) : fmt(w.day);
 function psWaiting(f) {
   const g = f.group ? G(f) : null, w = [];
   if (!f.group) w.push('The corporate (FastCare task)');
-  if (!f.rep) w.push('The intake rep (' + roleName('rules') + ', "Pick the reps")');
+  if (!f.rep && !autoPending(f)) w.push('The intake rep (' + roleName('rules') + ', "Pick the reps")');
   if (g && !covKnown(FG(f))) w.push('The areas of care');
   if (g && !hasPrice(g)) w.push('The price table (' + roleName('price') + ')');
   if (!f.inPortal) w.push('Adding it to Brightree (' + roleName('portal') + ')');
@@ -1106,7 +1211,7 @@ function editFacilityCheck(f, v) {
   const blank = (had, now, label) => had && !now ? label + ' can\'t be left blank. It was entered before; if it was wrong, change it, or put the task that entered it back in the queue.' : '';
   const errs = [
     blank(f.name, v.name, 'Facility name'), blank(f.portalName, v.pn, 'Portal name'), blank(f.address, v.addr, 'Address'),
-    blank(f.rep, v.rep, 'Intake rep'), blank(f.clin, v.clin, 'Clinical rep'), blank(f.acct, v.acct, 'Account manager'), blank(f.am, v.am, 'Transition lead'),
+    autoPending(Object.assign({}, f, { acct: v.acct || f.acct })) ? '' : blank(f.rep, v.rep, 'Intake rep'), // David's facilities: picked at scheduling blank(f.clin, v.clin, 'Clinical rep'), blank(f.acct, v.acct, 'Account manager'), blank(f.am, v.am, 'Transition lead'),
     v.why !== undefined ? blank(f.why, v.why, 'Reason for transition') : ''
   ];
   for (const [k, label] of [['wound', 'Wound and Product Specialist'], ['regional', 'Regional Manager']]) {
@@ -1184,6 +1289,8 @@ function trackPortal(f) {
   if (f.deleted || f.archived) return;
   if (!(done(fTask(f, 'PORTAL_SETUP')) || preDone(f, 'ps'))) return;
   const cur = portalVals(f);
+  // David's facilities waiting for scheduling: the intake rep (and clinical) go into the portal on the schedule task, not here
+  if (autoPending(f) && f.portalSnap) { cur.rep = f.portalSnap.rep ?? cur.rep; cur.clin = f.portalSnap.clin ?? cur.clin; }
   if (!f.portalSnap) { f.portalSnap = cur; return; } // first time (or portal setup done again): nothing to update
   const diffs = Object.keys(cur).filter(k => cur[k] !== (f.portalSnap[k] ?? cur[k]));
   Object.keys(cur).forEach(k => { if (!(k in f.portalSnap)) f.portalSnap[k] = cur[k]; }); // a value added to the list later starts as it is

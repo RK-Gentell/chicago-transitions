@@ -72,7 +72,8 @@ const TT = {
       const fs = ruleFacs(t), R = peopleOpts(repList()), A = peopleOpts(amList()), g = t.group === '__nocorp' ? null : grp(t.group);
       const has = g && partialRule(g) && ruleText(g);
       // a row's box: needed → a dropdown; already set (by the rule or on the facility) → shown, still changeable
-      const cell = (f, p) => { const opts = p === 'am' ? A : R, v = p === 'clin' ? f.clin : p === 'acct' ? f.acct : p === 'am' ? f.am : f.rep, need = ruleNeeds(f).includes(p) || (p === 'am' && !f.am && !(g && g.am)) || (p === 'rep' && !f.rep);
+      const cell = (f, p) => { const opts = p === 'am' ? A : R, v = p === 'clin' ? f.clin : p === 'acct' ? f.acct : p === 'am' ? f.am : f.rep, need = ruleNeeds(f).includes(p) || (p === 'am' && !f.am && !(g && g.am)) || (p === 'rep' && !f.rep && !autoPending(f));
+        if (p === 'rep' && autoPending(f)) return `<td>${sel(p + '_' + f.id, opts, '', true)}</td>`; // locked by syncRepLocks: picked at scheduling
         return `<td class="${need ? 'need' : ''}">${sel(p + '_' + f.id, opts, v, true)}${!v && !need ? `<div class="meta">${p === 'clin' ? 'same as intake' : p === 'acct' ? (g && g.acct ? 'from the rule' : 'none') : 'from the rule'}</div>` : ''}</td>`; };
       return `<div class="instr">${fs.length} facilit${fs.length === 1 ? 'y needs' : 'ies need'} reps picked.${has ? ' The corporate rule fills some positions (' + esc(ruleText(g)) + '); pick the rest per facility.' : ''} Same people for all? Fill the top row and click "Apply to all" (blank boxes in the top row are skipped). Different per facility? Change the rows below. Boxes outlined in blue are the ones still needed.</div>
       <div class="card" style="padding:10px"><b>All facilities</b><div class="row">${fld('Intake rep', selPer('rep', R, has ? g.rep : ''))}${fld('Clinical rep', selPer('clin', [['__same', 'Same as intake rep'], ...R], has ? (g.clinSame ? '__same' : g.clin) : '__same'))}${fld('Account manager', selPer('acct', R, has ? g.acct : ''))}${fld('Transition lead', selPer('am', A, has ? g.am : ''))}</div><button type="button" class="btn sm" data-applyall="1">Apply to all ↓</button></div>
@@ -89,7 +90,8 @@ const TT = {
         const willRule = p => V('rule') && g && (p === 'clin' ? !!V('clin') : !!top(p));
         const has = p => !!(V(p + '_' + f.id) || top(p) || willRule(p) || (p === 'clin' && V('clin') === '__same') || (p === 'am' && (f.am || (!V('rule') && g && g.am))) || (p !== 'am' && f[p]));
         const need = [...new Set(['rep', 'am', ...(V('rule') && g ? ['rep', 'clin', 'acct', 'am'].filter(p => p === 'clin' ? !V('clin') : !top(p)) : ruleNeeds(f))])];
-        const miss = need.filter(p => !has(p));
+        const rowAcct = V('acct_' + f.id) || top('acct') || f.acct || (g && g.acct) || '';
+        const miss = need.filter(p => !has(p) && !(p === 'rep' && !f.email1 && !f.manualDates && isAutoAcct(rowAcct)));
         if (miss.length) return facName(f) + ': pick the ' + miss.map(posName).join(', ') + ' (or fill the top row).';
       }
       return '';
@@ -99,14 +101,18 @@ const TT = {
       if (g && V('rule')) setRule(g, { rep: V('rep'), clin: V('clin'), acct: V('acct'), am: V('am') });
       const byAm = {};
       ruleFacs(t).forEach(f => {
+        f.acct = V('acct_' + f.id) || top('acct') || f.acct || '';
+        // account manager David: no intake rep until scheduling, David is the clinical rep (run() keeps it that way)
+        if (autoPending(f)) { f.rep = ''; f.clin = V('clin_' + f.id) || top('clin') || f.clin || acctOf(f); }
+        else {
         f.rep = V('rep_' + f.id) || top('rep') || f.rep || (g && g.rep) || '';
         f.clin = V('clin_' + f.id) || top('clin') || f.clin || (g && g.clin && !g.clinSame ? g.clin : '') || f.rep;
-        f.acct = V('acct_' + f.id) || top('acct') || f.acct || '';
+        }
         f.am = V('am_' + f.id) || top('am') || f.am || (g && g.am) || '';
         const a = amOf(f); (byAm[a] = byAm[a] || []).push(f);
       });
       // skip facilities this transition lead already got a "New transition" for when the request came in
-      Object.entries(byAm).map(([am, list]) => [am, list.filter(f => !st.mails.some(m => m.key === 'm:E2:' + f.req + ':' + lc(am)))]).filter(([, list]) => list.length).forEach(([am, list]) => mail({ key: 'm:E2:' + t.key + ':' + am, code: 'E2', to: [am], link: 'none', subject: 'New transition: ' + list.map(f => f.name).join(', '), body: `<p>${esc(ctx.byName)} assigned you ${list.length} facilit${list.length > 1 ? 'ies' : 'y'}${t.group === '__nocorp' ? '' : ' from <b>' + esc(t.group) + '</b>'}: ${list.map(f => esc(f.name) + ' (intake rep ' + esc(nameOf(f.rep)) + ')').join(', ')}.</p>${V('why') ? '<p><b>Why these reps:</b> ' + esc(V('why')) + '</p>' : ''}<p><b>Background:</b> ${esc(list[0].why) || '-'}</p><p>All requests already went out.</p>${amFirstTasks(list)}` }));
+      Object.entries(byAm).map(([am, list]) => [am, list.filter(f => !st.mails.some(m => m.key === 'm:E2:' + f.req + ':' + lc(am)))]).filter(([, list]) => list.length).forEach(([am, list]) => mail({ key: 'm:E2:' + t.key + ':' + am, code: 'E2', to: [am], link: 'none', subject: 'New transition: ' + list.map(f => f.name).join(', '), body: `<p>${esc(ctx.byName)} assigned you ${list.length} facilit${list.length > 1 ? 'ies' : 'y'}${t.group === '__nocorp' ? '' : ' from <b>' + esc(t.group) + '</b>'}: ${list.map(f => esc(f.name) + ' (intake rep ' + (autoPending(f) ? 'picked at scheduling' : esc(nameOf(f.rep))) + ')').join(', ')}.</p>${V('why') ? '<p><b>Why these reps:</b> ' + esc(V('why')) + '</p>' : ''}<p><b>Background:</b> ${esc(list[0].why) || '-'}</p><p>All requests already went out.</p>${amFirstTasks(list)}` }));
     }
   },
   AREAS: {
@@ -244,9 +250,10 @@ const TT = {
   SCHEDULE: {
     title: t => 'Schedule: ' + facName(facById(t.fac)),
     form: t => { const f = facById(t.fac); return f.dates ? scheduleForm(f) : '<div class="err">No dates yet: the facility needs a full address with a state that has a ship point. Fix it on the facility page.</div>'; }, example: () => ({}),
-    validate: t => { const f = facById(t.fac); if (!f.dates || !stateOK(f)) return 'No dates yet: fix the address on the facility page first.'; if (f.email1) return ''; const s = settingsProblems(); if (s.length) return 'The Chicago handoff email can\'t go out until Settings are finished: ' + s.join(' '); if (!f.rep) return 'The facility has no intake rep.'; if (f.dates.ord < st.today) return 'The ordering date has passed. Change the dates above and click "Save dates" first.'; return ''; },
+    validate: t => { const f = facById(t.fac); if (!f.dates || !stateOK(f)) return 'No dates yet: fix the address on the facility page first.'; if (f.email1) return ''; const s = settingsProblems(); if (s.length) return 'The Chicago handoff email can\'t go out until Settings are finished: ' + s.join(' '); if (autoPending(f) && !V('sc_rep')) return 'Pick the intake rep.'; if (!f.rep && !autoPending(f)) return 'The facility has no intake rep.'; if (f.dates.ord < st.today) return 'The ordering date has passed. Change the dates above and click "Save dates" first.'; return ''; },
     // the handoff email was already marked sent: done only records the schedule
-    done: t => { const f = facById(t.fac); if (f.email1) f.schedDone = st.today; else sendEmail1(f); }
+    // David's facilities: the intake rep is set now. Left as the rules picked it → picked again with the latest numbers (someone may have scheduled in between).
+    done: (t, ctx) => { const f = facById(t.fac); if (autoPending(f)) autoAssign(f, V('sc_auto') === V('sc_rep') ? '' : V('sc_rep'), ctx ? ctx.byName : ''); if (f.email1) f.schedDone = st.today; else sendEmail1(f); }
   },
   ADDRESS: {
     title: t => 'Address: ' + facName(facById(t.fac)),
@@ -287,7 +294,7 @@ const TT = {
 function portalForm(f) {
   const g = FG(f), d = f.dates, rep = nameOf(f.rep);
   const nonCovEnt = g.cov.Enteral === 'Covered and Noncovered';
-  const rows = [['"Account Manager"', nameOf(acctOf(f)) || '(none picked. Pick one on the facility page)'], ['"Biller"', st.settings.biller], ['"Clinical Review"', nameOf(f.clin || f.rep)], ['"Insurance Specialist", "Intake Specialist"', rep], ['"Price Table"', g.price ? g.price + ' (Amy usually fills it. Empty → type it)' : 'Already set up for this corporate. Leave it as it is.'], ['"Pricing Group"', 'Placeholder Pricing Group'],
+  const rows = [['"Account Manager"', nameOf(acctOf(f)) || '(none picked. Pick one on the facility page)'], ['"Biller"', st.settings.biller], ['"Clinical Review"', nameOf(f.clin || f.rep) || 'Leave it for now (picked on the schedule task)'], ['"Insurance Specialist", "Intake Specialist"', autoPending(f) ? 'Leave it for now. It\'s picked automatically on the schedule task, and that task says to put it in.' : rep], ['"Price Table"', g.price ? g.price + ' (Amy usually fills it. Empty → type it)' : 'Already set up for this corporate. Leave it as it is.'], ['"Pricing Group"', 'Placeholder Pricing Group'],
     ['"Main Vendor"', f.gdd === 'Yes' ? f.gddWh : f.gdd === 'No' ? 'Not GDD. Leave it as it is' : 'Chris hasn\'t answered yet. Leave it. If he says GDD, you get a separate task'],
     ['"Emergency Supply Days"', '4'], ['"Ship Point"', String(d.ship) + ' (' + f.state + ')'], ['"Ship Point- United Ostomy, Fordmed"', String(d.shipOst || '')],
     ['"Pump Brand"', 'Brand in the feed set name on the report (Cardinal KGR Omni Feed Set → Omni). No spike set on the report → from "Pump Tracking" (Eduardo: ' + (f.pumps === 'checked' ? 'checked ✓' : 'not checked yet') + ')'],
@@ -319,8 +326,21 @@ function btRecheck(f) {
   if (stale) return `<div class="card warnbox" id="btrc"><b>⚠ The Brightree report was run ${w ? esc(btWhenText(w)) : 'a while ago'}</b>${w && w.exact ? '' : ' <span class="meta">(time not recorded)</span>'}<div style="margin:4px 0 8px">That's more than 8 hours ago. Chicago may have shipped since, so the last delivery dates may have changed. Recommended: run the report again (same steps as the Brightree report task) and check the last delivery dates. Update them here if they changed.</div>${fields}</div>`;
   return `<details class="card" style="padding:10px" id="btrc"><summary><b>Brightree report dates</b> <span class="meta">(run ${w ? esc(btWhenText(w)) : '-'}${f.btBy ? ' by ' + esc(f.btBy) : ''})</span></summary><div class="meta" style="margin:6px 0">Last enteral ${b.lastEnt ? fmtS(b.lastEnt) : '-'} · last uro / ostomy / trach ${b.lastOuts ? fmtS(b.lastOuts) : '-'}. Reran the report and something changed? Fix it here.</div>${fields}</details>`;
 }
+// David's facilities: who has room on the ordering date, the rep the rules pick, and warnings when someone else is picked
+const AUTO_REP_TIP = 'This rep will be assigned automatically during scheduling.';
+function autoRepBox(f) {
+  const ord = f.dates.ord, pick = autoPick(ord, f.id), n = repLoad(ord, f.id), team = autoReps(), c = e => n[e] || 0;
+  const mine = typeof ui !== 'undefined' && ui.scRep && ui.scRep.fac === f.id ? ui.scRep.rep : '';
+  const cur = mine || pick;
+  const opts = [...team.map(e => [e, nameOf(e)]), ...repList().filter(p => !team.includes(lc(p.email))).map(p => [lc(p.email), p.name + ' (not on the team)'])];
+  return `<div class="card" style="padding:10px" id="screp"><b>Intake rep</b>${tip('Account manager ' + esc(nameOf(autoAcct())) + ': the intake rep is picked at scheduling. The rules: the first rep on the team with 0 or 1 facilities ordering that day, otherwise the first with 2. Everyone at 3 or more: the recommended date moves to the next business day. You can pick someone else or change the date; you\'ll see a warning.')}
+  <div class="meta" style="margin:2px 0 6px">Facilities each rep already has ordering on <b>${fmt(ord)}</b> (Chicago transitions in this app). Changed the date above? Click "Save dates" and this updates.</div>
+  <div class="tablewrap"><table class="vals"><tr><th>Rep</th><th>Ordering ${fmtS(ord)}</th></tr>${team.map(e => `<tr><td>${esc(nameOf(e))}${e === pick ? ' <span class="tag">picked by the rules</span>' : ''}</td><td class="num">${c(e)}${c(e) >= AUTO_REP_FULL ? ' (full)' : ''}</td></tr>`).join('')}</table></div>
+  ${fld('Intake rep for ' + esc(facName(f)), sel('sc_rep', withCur(opts, cur), cur, true), pick ? '' : 'Everyone is full that day. Pick a rep anyway, or change the date above.')}<input type="hidden" id="sc_auto" value="${esc(pick)}">
+  <div id="sc_warn">${autoRepWarn(f, cur, ord).map(x => '<div class="err" style="margin-top:6px">' + esc(x) + '</div>').join('')}</div></div>`;
+}
 function scheduleForm(f) {
-  const d = f.dates, b = f.bt;
-  return `${btRecheck(f)}${dateEditor(f)}<div class="instr"><ol><li>"Facilities" → schedule icon under "Actions" → "Facility Schedule".</li><li>"Start Date" <span class="q">${fmtS(d.del)}</span>, "Day of the Week" <span class="q">${d.day}</span>, "Weeks" <span class="q">4</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>${b.cadence !== '4' ? `<li>"Select Area of Care" → "Enteral" → "Add Schedule": same Start Date and day, "Weeks" <span class="q">${b.cadence}</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>` : ''}<li>"Generate Dates" → check "Override Manually" → "Save".</li><li>"Schedules" → Ordering Calendar → open the entry on ${fmt(d.ord)} and check the 3 dates match the ones above. Wrong? Recheck Start Date, Day of the Week and OS Days and generate again. Missing? The ordering date probably landed on a weekend.</li><li>In the calendar pop-up for the ordering date, add the notes: <span class="q">Chicago transition</span> + <span class="q">Email Shani the list of eligible pump fed and trach pts so she can review Chicago's billing</span> + anything useful from the report.</li></ol></div>
-  ${f.email1 ? '<div class="note">The Chicago handoff email was already marked sent, so "Mark done" only records the schedule. No email goes out. Changed a date above? Click "Save dates" first.</div>' : '<div class="note">"Mark done" sends the Chicago handoff email with these dates. Changed a date above? Click "Save dates" first.</div>'}`;
+  const d = f.dates, b = f.bt, auto = !f.email1 && autoPending(f);
+  return `${btRecheck(f)}${dateEditor(f)}${auto ? autoRepBox(f) : ''}<div class="instr"><ol><li>"Facilities" → schedule icon under "Actions" → "Facility Schedule".</li><li>"Start Date" <span class="q">${fmtS(d.del)}</span>, "Day of the Week" <span class="q">${d.day}</span>, "Weeks" <span class="q">4</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>${b.cadence !== '4' ? `<li>"Select Area of Care" → "Enteral" → "Add Schedule": same Start Date and day, "Weeks" <span class="q">${b.cadence}</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>` : ''}<li>"Generate Dates" → check "Override Manually" → "Save".</li><li>"Schedules" → Ordering Calendar → open the entry on ${fmt(d.ord)} and check the 3 dates match the ones above. Wrong? Recheck Start Date, Day of the Week and OS Days and generate again. Missing? The ordering date probably landed on a weekend.</li>${auto ? `<li>"Facilities" → edit pencil: "Insurance Specialist" and "Intake Specialist" = the intake rep picked above. "Clinical Review" <span class="q">${esc(nameOf(f.clin || autoAcct()))}</span>. "Save".</li>` : ''}<li>In the calendar pop-up for the ordering date, add the notes: <span class="q">Chicago transition</span> + <span class="q">Email Shani the list of eligible pump fed and trach pts so she can review Chicago's billing</span> + anything useful from the report.</li></ol></div>
+  ${f.email1 ? '<div class="note">The Chicago handoff email was already marked sent, so "Mark done" only records the schedule. No email goes out. Changed a date above? Click "Save dates" first.</div>' : '<div class="note">"Mark done" sends the Chicago handoff email with these dates' + (auto ? ' and the intake rep picked above' : '') + '. Changed a date above? Click "Save dates" first.</div>'}`;
 }
