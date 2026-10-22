@@ -334,7 +334,7 @@ function autoRepBox(f) {
   const cur = mine || pick;
   const opts = [...team.map(e => [e, nameOf(e)]), ...repList().filter(p => !team.includes(lc(p.email))).map(p => [lc(p.email), p.name + ' (not on the team)'])];
   return `<div class="card" style="padding:10px" id="screp"><b>Intake rep</b>${tip('Account manager ' + esc(nameOf(autoAcct())) + ': the intake rep is picked at scheduling. The rules: the first rep on the team with 0 or 1 facilities ordering that day, otherwise the first with 2. Everyone at 3 or more: the recommended date moves to the next business day. You can pick someone else or change the date; you\'ll see a warning.')}
-  <div class="meta" style="margin:2px 0 6px">Facilities each rep already has ordering on <b>${fmt(ord)}</b> (Chicago transitions in this app). Changed the date above? Click "Save dates" and this updates.</div>
+  <div class="meta" style="margin:2px 0 6px">Facilities each rep already has ordering on <b>${fmt(ord)}</b> (Chicago transitions and new facilities in this app). Changed the date above? Click "Save dates" and this updates.</div>
   <div class="tablewrap"><table class="vals"><tr><th>Rep</th><th>Ordering ${fmtS(ord)}</th></tr>${team.map(e => `<tr><td>${esc(nameOf(e))}${e === pick ? ' <span class="tag">picked by the rules</span>' : ''}</td><td class="num">${c(e)}${c(e) >= AUTO_REP_FULL ? ' (full)' : ''}</td></tr>`).join('')}</table></div>
   ${fld('Intake rep for ' + esc(facName(f)), sel('sc_rep', withCur(opts, cur), cur, true), pick ? '' : 'Everyone is full that day. Pick a rep anyway, or change the date above.')}<input type="hidden" id="sc_auto" value="${esc(pick)}">
   <div id="sc_warn">${autoRepWarn(f, cur, ord).map(x => '<div class="err" style="margin-top:6px">' + esc(x) + '</div>').join('')}</div></div>`;

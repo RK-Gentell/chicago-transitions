@@ -63,7 +63,7 @@ function anData() {
   const facs = allFacs.filter(f => !L || amOf(f) === L);
   const leads = [...new Set(allFacs.map(amOf))].sort(leadSort);
   const facIds = new Set(facs.map(f => f.id));
-  const tasks = st.tasks.filter(t => t.status !== 'Not needed' && (t.fac ? facIds.has(t.fac) : (!L || taskLeads(t).includes(L))));
+  const tasks = st.tasks.filter(t => !t.nf && t.status !== 'Not needed' && (t.fac ? facIds.has(t.fac) : (!L || taskLeads(t).includes(L))));
   return { L, facs, allFacs, leads, tasks };
 }
 // everything waiting on someone right now: open tasks (by assignee) + the 2 outside waits (GNS Chicago, wound rep / regional)

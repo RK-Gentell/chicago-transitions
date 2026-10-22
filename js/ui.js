@@ -99,7 +99,7 @@ async function act2(fn, okMsg) {
   }
 }
 async function poll() {
-  if (ui.busy || document.visibilityState !== 'visible' || ui.openTask || ui.openFac || ui.openGroup || ui.next || ['new', 'settings'].includes(ui.view)) return;
+  if (ui.busy || document.visibilityState !== 'visible' || ui.openTask || ui.openFac || ui.openGroup || ui.openNf || ui.next || ['new', 'nfnew', 'settings'].includes(ui.view)) return;
   const a = document.activeElement; if (a && a.dataset && a.dataset.leadnote) return; // typing notes on the tracker
   try { ui.busy = true; await STORE.load({ full: true }); await settle(); ui.busy = false; render(); } catch (e) { ui.busy = false; console.error(e); }
 }
@@ -132,22 +132,25 @@ function waitingOn(f) {
 // facOk(f): which facilities to list under allFacs (the ones with nothing to do right now)
 function groupedTasks(ts, showWho, allFacs, facOk, by) {
   if (by === 'corp') return corpBlocks(ts, showWho);
-  const g = {}; ts.forEach(t => { const k = t.fac ? 'f' + t.fac : 'g' + t.group; (g[k] = g[k] || []).push(t); });
+  const g = {}; ts.forEach(t => { const k = t.fac ? 'f' + t.fac : t.nf ? 'n' + t.nf : 'g' + t.group; (g[k] = g[k] || []).push(t); });
   const blocks = Object.entries(g).map(([k, arr]) => [k, arr.sort(cmp)]).sort((a, b) => cmp(a[1][0], b[1][0]));
   let html = blocks.map(([k, arr]) => blockHtml(k, arr, showWho)).join('');
   if (allFacs) html += st.facs.filter(f => !f.complete && !f.archived && !g['f' + f.id] && (!facOk || facOk(f))).map(f => { const [s2, c2] = stageOf(f); const w = waitingOn(f); return `<div class="fgroup"><div class="fhead"><b class="linkish" data-fac="${f.id}">${esc(facName(f))}</b><span class="meta">${esc(f.group)}</span><span class="pill ${c2}">${s2}</span></div>${chiTag(f)}<div class="instr">Nothing to do on this facility right now.${w.length ? ' Waiting on: ' + w.map(esc).join(' · ') : ''}</div></div>`; }).join('');
   return html;
 }
-const corpKey = t => { const f = t.fac ? facById(t.fac) : null; return lc(f ? (f.group || '__nocorp') : t.group); };
+const corpKey = t => { const f = t.fac ? facById(t.fac) : null, n = t.nf ? nfById(t.nf) : null; return lc(f ? (f.group || '__nocorp') : n ? (n.group || '__nocorp') : t.group); };
+// a corporate key's name: the app's corporate, or as typed on a new facility
+const corpLabel = k => k === '__nocorp' ? 'No corporate yet' : grp(k) ? grp(k).name : ((nfs().find(n => lc(n.group) === k) || {}).group || k);
 function corpBlocks(ts, showWho) {
   const g = {}; ts.forEach(t => { const k = corpKey(t); (g[k] = g[k] || []).push(t); });
   return Object.entries(g).map(([k, arr]) => [k, arr.sort(cmp)]).sort((a, b) => cmp(a[1][0], b[1][0])).map(([k, arr]) => {
-    const gr = grp(k), name = k === '__nocorp' ? 'No corporate yet' : (gr ? gr.name : arr[0].group || k), nf = new Set(arr.filter(t => t.fac).map(t => t.fac)).size;
+    const name = corpLabel(k), nf = new Set(arr.filter(t => t.fac || t.nf).map(t => t.fac ? 'f' + t.fac : 'n' + t.nf)).size;
     return `<div class="fgroup"><div class="fhead"><b>${esc(name)}</b><span class="meta">${nf ? nf + ' facilit' + (nf > 1 ? 'ies' : 'y') : 'whole corporate'}</span><span class="meta" style="margin-left:auto">${arr.length} task${arr.length > 1 ? 's' : ''}</span></div>${arr.map(t => taskLine(t, showWho, true)).join('')}</div>`;
   }).join('');
 }
 // the transition lead(s) running a task: the facility's, or for a corporate task the corporate's and its facilities'
 function taskLeads(t) {
+  if (t.nf) { const n = nfById(t.nf); return n && n.lead ? [n.lead] : []; }
   if (t.fac) { const f = facById(t.fac); return f ? [amOf(f)] : []; }
   const g = grp(t.group); return [...new Set([g && g.am, ...(g ? facsOfGroup(g.name).map(amOf) : [])].filter(Boolean))];
 }
@@ -161,13 +164,15 @@ function remindBtn(t) {
 }
 const facLink = f => `<a class="linkish faclink" href="?${STORE && STORE.mode === 'demo' ? 'demo&' : ''}fac=${f.id}" data-facpage="${f.id}">Facility page</a>`;
 function blockHtml(k, arr, showWho) {
+  if (k[0] === 'n') { const n = nfById(+k.slice(1)), [s1, c1] = n ? nfStage(n) : ['', '']; return `<div class="fgroup"><div class="fhead"><b ${n ? `class="linkish" data-nf="${n.id}"` : ''}>${esc(n ? n.name : 'New facility')}</b><span class="meta">${esc(n ? n.group : '')}</span><span class="pill p-req">New facility</span>${s1 ? `<span class="pill ${c1}">${s1}</span>` : ''}<span class="meta" style="margin-left:auto">${arr.length} task${arr.length > 1 ? 's' : ''}</span></div>${arr.map(t => taskLine(t, showWho)).join('')}</div>`; }
   const f = k[0] === 'f' ? facById(+k.slice(1)) : null; const [s, c] = f ? stageOf(f) : ['Corporate task', 'p-req'];
   const w = f ? waitingOn(f) : [];
   return `<div class="fgroup"><div class="fhead"><b ${f ? `class="linkish" data-fac="${f.id}"` : ''}>${esc(f ? facName(f) : (arr[0].group === '__nocorp' ? 'No corporate yet' : arr[0].group))}</b>${f ? chiTag(f) : ''}<span class="meta">${f ? esc(f.group || 'corporate not known yet') : 'whole corporate'}</span><span class="pill ${c}">${s}</span>${f && atRisk(f) ? '<span class="pill p-risk">At risk</span>' : ''}<span class="meta" style="margin-left:auto">${arr.length} task${arr.length > 1 ? 's' : ''}</span></div>${arr.map(t => taskLine(t, showWho)).join('')}${w.length ? `<div class="meta" style="padding-left:4px">Also waiting on: ${w.map(esc).join(' · ')}</div>` : ''}</div>`;
 }
 function taskLine(t, showWho, showFac) {
   const f = t.fac ? facById(t.fac) : null, wait = isWaiting(t), over = !wait && st.today > t.due;
- const where = f ? (showFac ? esc(facName(f)) + (chiName(f) ? ' (Chicago: ' + esc(f.name) + ')' : '') : esc(f.group)) : esc(t.group === '__nocorp' ? '' : (showFac ? 'Whole corporate' : t.group));
+ const nfr = t.nf ? nfById(t.nf) : null;
+ const where = f ? (showFac ? esc(facName(f)) + (chiName(f) ? ' (Chicago: ' + esc(f.name) + ')' : '') : esc(f.group)) : nfr ? (showFac ? esc(nfr.name) : esc(nfr.group)) + ' · new facility' : esc(t.group === '__nocorp' ? '' : (showFac ? 'Whole corporate' : t.group));
   return `<div class="task ${wait ? 'wait' : ''} ${over ? 'over' : ''}" data-task="${esc(t.key)}" tabindex="0"><div style="min-width:0"><div class="t">${esc(taskTitle(t))}</div>${t.type === 'PUMPS' ? `<div class="m pumprule">${esc(PUMP_RULE)}</div>` : ''}<div class="m">${where}${showWho ? ' · <b>' + esc(nameOf(t.assignee)) + '</b>' : ''}${f ? ' · ' + facLink(f) : ''}</div></div><div class="r">${isHighTask(t) ? HIGH_PILL : ''}${wait ? '<span class="pill p-chi">Starts ' + fmtS(t.opensOn) + '</span>' : over ? '<span class="pill p-hold">Overdue</span>' : ''}<div>Due ${fmtS(t.due)}</div>${showWho ? remindBtn(t) : ''}</div></div>`;
 }
 
@@ -188,7 +193,7 @@ function render() {
   // nav
   const mine = openTasksFor(forWho()).filter(t => !isWaiting(t)).length;
   const open = st.tasks.filter(t => !done(t) && !t.archived).length;
-  const nav = [['mytasks', 'My tasks', mine], ['tracker', 'Tracker', st.facs.filter(f => !f.complete).length], ['all', 'All open tasks', open], ['groups', 'Corporates', Object.keys(st.groups).length], ['analytics', 'Analytics', ''], ['sep'], ['inbox', 'Mailbox', st.inbox.length], ['outbox', 'Outbox', st.mails.filter(m => m.status === 'Queued').length || ''], ...(admin ? [['settings', 'Settings', '']] : []), ['sep'], ['new', '+ New transition request', '']];
+  const nav = [['mytasks', 'My tasks', mine], ['tracker', 'Tracker', st.facs.filter(f => !f.complete).length], ['nftracker', 'New facilities tracker', nfs().filter(n => !n.scheduled && !n.deleted).length], ['all', 'All open tasks', open], ['groups', 'Corporates', Object.keys(st.groups).length], ['analytics', 'Analytics', ''], ['sep'], ['inbox', 'Mailbox', st.inbox.length], ['outbox', 'Outbox', st.mails.filter(m => m.status === 'Queued').length || ''], ...(admin ? [['settings', 'Settings', '']] : []), ['sep'], ['new', '+ New transition request', ''], ['nfnew', '+ New facility scheduling request', '']];
   $('#nav').innerHTML = nav.map(n => n[0] === 'sep' ? '<div class="sep"></div>' : `<button class="${ui.view === n[0] ? 'on' : ''}" data-view="${n[0]}"><span>${n[1]}</span><span class="count">${n[2]}</span></button>`).join('');
   const m = $('#main');
   if (ui.view === 'mytasks') {
@@ -214,6 +219,8 @@ function render() {
   else if (ui.view === 'outbox') m.innerHTML = outboxHtml();
   else if (ui.view === 'settings') m.innerHTML = admin ? settingsHtml() : '<div class="empty">Only admins can change settings.</div>';
   else if (ui.view === 'new') { m.innerHTML = requestHtml(); corpInfo(); }
+  else if (ui.view === 'nftracker') m.innerHTML = nfTrackerHtml();
+  else if (ui.view === 'nfnew') { m.innerHTML = nfRequestHtml(); nfPreview('nf_'); }
   renderLayer();
   syncRepLocks();
 }
@@ -224,11 +231,11 @@ function facSel(id, ts, v, extra) {
 }
 function corpSel(id, ts, v, extra) {
   const ks = [...new Set([...ts.map(corpKey), ...(extra || []).map(f => lc(f.group || '__nocorp'))])].filter(Boolean);
-  const label = k => k === '__nocorp' ? 'No corporate yet' : (grp(k) ? grp(k).name : k);
+  const label = corpLabel;
   return `<select id="${id}" aria-label="Corporate"><option value="">All corporates</option>${ks.sort((a, b) => label(a).localeCompare(label(b))).map(k => `<option value="${esc(k)}" ${k === v ? 'selected' : ''}>${esc(label(k))}</option>`).join('')}</select>`;
 }
 // sortable by task, assigned to, done by, date; newest first by default
-const DONE_COLS = [['task', 'Task', t => taskTitle(t)], ['fac', 'Facility', t => { const f = t.fac && facById(t.fac); return f ? facName(f) : ''; }], ['who', 'Assigned to', t => nameOf(t.assignee)], ['by', 'Done by', t => t.doneByName || nameOf(t.doneBy)], ['on', 'On', t => t.doneOn || '']];
+const DONE_COLS = [['task', 'Task', t => taskTitle(t)], ['fac', 'Facility', t => { const f = t.fac && facById(t.fac), n = t.nf && nfById(t.nf); return f ? facName(f) : n ? n.name : ''; }], ['who', 'Assigned to', t => nameOf(t.assignee)], ['by', 'Done by', t => t.doneByName || nameOf(t.doneBy)], ['on', 'On', t => t.doneOn || '']];
 function doneTable() {
   const all = st.tasks.filter(t => t.status === 'Done' && !t.archived);
   if (!all.length) return '';
@@ -236,7 +243,7 @@ function doneTable() {
   const ts = all.slice().sort((a, b) => { const x = col[2](a), y = col[2](b); return (x < y ? -1 : x > y ? 1 : 0) * S.dir || (b.doneOn || '').localeCompare(a.doneOn || '') || idx.get(b) - idx.get(a); });
   const shown = ui.doneAll ? ts : ts.slice(0, 25);
   const th = ([k, l]) => `<th aria-sort="${S.k === k ? (S.dir > 0 ? 'ascending' : 'descending') : 'none'}">${k === 'fac' ? l : `<button class="thsort" data-donesort="${k}">${l}${S.k === k ? (S.dir > 0 ? ' ▲' : ' ▼') : ''}</button>`}</th>`;
-  return `<h2>Recently done <span class="meta">${all.length}</span></h2><div class="tablewrap"><table><tr>${DONE_COLS.map(th).join('')}</tr>${shown.map(t => { const f = t.fac && facById(t.fac); return `<tr class="click" data-task="${esc(t.key)}"><td>${esc(taskTitle(t))}</td><td>${f ? facLink(f).replace('Facility page', esc(facName(f))) + chiTag(f) : '<span class="meta">' + esc(t.group === '__nocorp' ? '' : t.group) + '</span>'}</td><td>${esc(nameOf(t.assignee))}</td><td>${t.doneBy !== t.assignee ? '<b>' + esc(t.doneByName || nameOf(t.doneBy)) + '</b>' : esc(t.doneByName || nameOf(t.doneBy))}</td><td class="num">${fmtS(t.doneOn)}</td></tr>`; }).join('')}</table></div>${ts.length > 25 ? `<div style="margin-top:8px"><button class="btn sm" data-doneall>${ui.doneAll ? 'Show the latest 25' : 'Show all ' + ts.length}</button></div>` : ''}`;
+  return `<h2>Recently done <span class="meta">${all.length}</span></h2><div class="tablewrap"><table><tr>${DONE_COLS.map(th).join('')}</tr>${shown.map(t => { const f = t.fac && facById(t.fac); const nd = t.nf && nfById(t.nf); return `<tr class="click" data-task="${esc(t.key)}"><td>${esc(taskTitle(t))}</td><td>${f ? facLink(f).replace('Facility page', esc(facName(f))) + chiTag(f) : nd ? esc(nd.name) + ' <span class="meta">(new facility)</span>' : '<span class="meta">' + esc(t.group === '__nocorp' ? '' : t.group) + '</span>'}</td><td>${esc(nameOf(t.assignee))}</td><td>${t.doneBy !== t.assignee ? '<b>' + esc(t.doneByName || nameOf(t.doneBy)) + '</b>' : esc(t.doneByName || nameOf(t.doneBy))}</td><td class="num">${fmtS(t.doneOn)}</td></tr>`; }).join('')}</table></div>${ts.length > 25 ? `<div style="margin-top:8px"><button class="btn sm" data-doneall>${ui.doneAll ? 'Show the latest 25' : 'Show all ' + ts.length}</button></div>` : ''}`;
 }
 function trackerHtml() {
   const q = lc(ui.q), F = ui.trackerFilter;
@@ -330,7 +337,7 @@ function requestHtml() {
     <section><h2 class="rqh">Reason for transition</h2><textarea id="rq_why" class="plain" aria-label="Reason for transition">${demo ? 'Infinity is moving its Indiana buildings to Lakewood. Chicago already knows (demo).' : ''}</textarea></section>
     <section><h2 class="rqh">Areas of care${tip('Leave "Not sure" and the app asks you later.')}</h2><div class="areas">${AREAS.map(a => fld(a, sel('rq_' + a, [...covOpts(a), 'Not sure'], 'Not sure', true))).join('')}</div></section>
     <section><h2 class="rqh">GNS Lakewood roles${tip('All optional. No intake rep: the corporate rule, or ' + esc(roleName('rules')) + ' picks one. The account manager gets copied on the emails the intake rep gets. The transition lead runs this transition: gets the tasks and emails.')}</h2>
-      <div class="row">${fld('Intake rep', sel('rq_rep', peopleOpts(repList()), '', true))}${fld('Account manager', sel('rq_acct', peopleOpts(repList()), '', true))}${fld('Transition lead', sel('rq_am', peopleOpts(amList()), '', true))}</div></section>
+      <div class="row">${fld('Account manager', sel('rq_acct', peopleOpts(repList()), '', true))}${fld('Intake rep', sel('rq_rep', peopleOpts(repList()), '', true))}${fld('Transition lead', sel('rq_am', peopleOpts(amList()), '', true))}</div></section>
     <section><h2 class="rqh">Contacts${tip('Optional. Only if you have them.')}</h2>
       <div class="row"><button type="button" class="btn sm" data-showce="rq_corpbox">+ Add corporate contact</button><button type="button" class="btn sm" data-showce="rq_fctsbox">+ Add facility contact</button></div>
       <div class="field" id="rq_corpbox" hidden><label>Corporate contacts</label>${contactEditor('rq_corp', 'Corporate', false)}<div class="hint">Put first the person we ask for things, like adding a facility to their EMR login. Not needed if the corporate already has contacts in the app.</div></div>
@@ -417,6 +424,7 @@ function settingsHtml() {
     <div class="tablewrap" style="margin-top:8px"><table class="team"><tr><th>Name</th><th>Email</th><th>Transition lead</th><th>Rep / account manager</th><th>Ext</th><th>Admin</th><th></th></tr>${P.map((p, i) => `<tr data-pi="${i}"><td><input type="text" class="p-name" value="${esc(p.name)}"></td><td><input type="text" class="p-email" value="${esc(p.email)}" placeholder="name@gentell.com"></td><td><input type="checkbox" class="p-am" ${p.am ? 'checked' : ''} aria-label="Transition lead"></td><td><input type="checkbox" class="p-rep" ${p.rep ? 'checked' : ''} aria-label="Intake rep"></td><td><input type="text" class="p-ext" value="${esc(p.ext || '')}" style="width:60px"></td><td><input type="checkbox" class="p-admin" ${p.admin ? 'checked' : ''} aria-label="Admin"></td><td><button type="button" class="btn sm" data-delperson="${i}">Remove</button></td></tr>`).join('')}</table></div>
     <div class="row" style="margin-top:8px"><button type="button" class="btn sm" id="addperson">+ Add a person</button><button type="button" class="btn sm" id="findemails">Find missing emails</button></div></div>
   <div class="card"><b>Intake reps picked at scheduling</b>${tip('Facilities with this account manager get no intake rep until they\'re scheduled. On the schedule task, the first rep below with 0 or 1 facilities ordering that day gets it, otherwise the first with 2. Everyone at 3 or more: the date moves to the next business day. Facilities already scheduled keep their rep.')}<div class="row" style="margin-top:8px">${fld('Account manager', sel('s_autoacct', [...P].filter(p => p.rep && validEmail(p.email)).sort(byName).map(p => [lc(p.email), p.name]), (s.autoRep || {}).acct || '', true), 'Blank = off: every facility gets its intake rep the usual way.')}${fld('Their reps, in the order they get picked (1 name per line)', `<textarea id="s_autoreps" class="plain">${esc(((s.autoRep || {}).reps || []).map(e => nameOf(e)).join('\n'))}</textarea>`, 'Each one needs "Rep / account manager" ticked under Team.')}</div></div>
+  <div class="card"><b>New facility scheduling</b>${tip('When a new facility (not from GNS Chicago) is scheduled, the account manager and intake rep get an email, plus these people. The schedule lead is CC\'d.')}<div class="row" style="margin-top:8px">${fld('"Scheduled" email also goes to (1 email per line)', `<textarea id="s_nfnotify" class="plain">${esc((s.nfNotify || []).join('\n'))}</textarea>`)}</div></div>
   <div class="card"><b>Who does what</b><div class="row" style="margin-top:8px">${Object.entries(ROLES).map(([r, l]) => fld(esc(l), sel('role_' + r, personOpts, s.roles[r], true))).join('')}</div></div>
   <div class="card"><b>Chicago handoff email</b><div class="row" style="margin-top:8px">${fld('Greeting name', txt('s_greet', s.chicagoGreeting), '"Hi ___,"')}${fld('Greeting name when we don\'t take enteral', txt('s_greet2', s.chicagoGreetingNoEnt || 'Brittany'), 'Used when enteral is "Don\'t Supply".')}</div><div class="row">${fld('To (1 email per line)', `<textarea id="s_e1to" class="plain">${esc(s.e1To.join('\n'))}</textarea>`, 'The new intake rep is added automatically.')}${fld('CC (1 email per line)', `<textarea id="s_e1cc" class="plain">${esc(s.e1Cc.join('\n'))}</textarea>`, 'The transition lead and account manager are added automatically.')}</div></div>
   <div class="card"><b>Values</b><div class="row" style="margin-top:8px">${fld('In-service booking link', txt('s_inservice', s.inserviceUrl, 'https://…'), 'The "Click Here to Schedule an In-Service Call" link in the Chicago handoff email (the email to the facility, and the in-service ask to the wound rep and regional).')}${fld('"Biller" in the portal', txt('s_biller', s.biller))}${fld('Default price table', txt('s_tier2', s.tier2Price || '2022 Tier 2'), 'Used when every area of care except wound care is Covered Only or Don\'t Supply.')}</div><div class="row">${fld('Business days to do a task: helpers', txt('s_hdays', String(s.helperDays)))}${fld('Business days to do a task: transition leads', txt('s_adays', String(s.amDays)))}</div></div>
@@ -436,7 +444,8 @@ function readSettingsForm() {
   const names = rows.map(p => lc(p.name)); if (new Set(names).size !== names.length) errs.push('2 people have the same name. Make them different (add a last initial).');
   if (!rows.some(p => p.admin && lc(p.email) === me())) errs.push('Keep yourself as an admin, or you\'ll lose access to Settings.');
   const emails = id => V(id).split(/[\n;,]+/).map(x => lc(x)).filter(Boolean);
-  const e1To = emails('s_e1to'), e1Cc = emails('s_e1cc');
+  const e1To = emails('s_e1to'), e1Cc = emails('s_e1cc'), nfNotify = emails('s_nfnotify');
+  nfNotify.forEach(e => { if (!validEmail(e)) errs.push('New facility scheduling: "' + e + '" isn\'t an email.'); });
   [...e1To, ...e1Cc].forEach(e => { if (!validEmail(e)) errs.push('Chicago handoff email list: "' + e + '" isn\'t an email.'); });
   const roles = {}; for (const r in ROLES) roles[r] = V('role_' + r);
   const lines = id => V(id).split('\n').map(x => x.trim()).filter(Boolean);
@@ -450,7 +459,7 @@ function readSettingsForm() {
   const autoReps = lines('s_autoreps').map(n => { const p = rows.find(r => lc(r.name) === lc(n)) || rows.find(r => lc(r.email) === lc(n)); if (!p) errs.push('Intake reps picked at scheduling: "' + n + '" isn\'t on the Team list.'); else if (!p.rep || !validEmail(p.email)) errs.push('Intake reps picked at scheduling: ' + p.name + ' needs an email and "Rep / account manager" ticked.'); return p ? lc(p.email) : ''; }).filter(Boolean);
   if (V('s_autoacct') && !autoReps.length) errs.push('Intake reps picked at scheduling: add at least 1 rep, or leave the account manager blank.');
   if (new Set(autoReps).size !== autoReps.length) errs.push('Intake reps picked at scheduling: a rep is listed twice.');
-  return { errs, val: { people: rows, roles, chicagoGreeting: V('s_greet'), chicagoGreetingNoEnt: V('s_greet2') || 'Brittany', e1To, e1Cc, inserviceUrl: V('s_inservice'), biller: V('s_biller'), tier2Price: V('s_tier2') || '2022 Tier 2', helperDays: hd, amDays: ad, warehouses: lines('s_wh'), depts, shipEnt, shipOst, autoRep: { acct: V('s_autoacct'), reps: autoReps } } };
+  return { errs, val: { people: rows, roles, chicagoGreeting: V('s_greet'), chicagoGreetingNoEnt: V('s_greet2') || 'Brittany', e1To, e1Cc, inserviceUrl: V('s_inservice'), biller: V('s_biller'), tier2Price: V('s_tier2') || '2022 Tier 2', helperDays: hd, amDays: ad, warehouses: lines('s_wh'), depts, shipEnt, shipOst, autoRep: { acct: V('s_autoacct'), reps: autoReps }, nfNotify } };
 }
 
 // ---------- drawers ----------
@@ -460,6 +469,7 @@ function renderLayer() {
   else if (ui.openTask) { const t = taskByKey(ui.openTask); L.innerHTML = t ? taskDrawer(t) : ''; if (!t) ui.openTask = null; }
   else if (ui.openFac) { const f = facById(ui.openFac); L.innerHTML = f ? facDrawer(f) : ''; }
   else if (ui.openGroup) { const g = grp(ui.openGroup); L.innerHTML = g ? corpDrawer(g) : ''; }
+  else if (ui.openNf) { const n = nfById(ui.openNf); L.innerHTML = n ? nfDrawer(n) : ''; if (!n) ui.openNf = null; else nfPreview('nfe_', n.id); }
   else L.innerHTML = '';
   if (ui.openTask) { const g = document.getElementById('g'); if (g && g.value === 'Yes') { const b = document.getElementById('whbox'); if (b) b.hidden = false; } }
   syncRepLocks();
@@ -484,7 +494,7 @@ function taskDrawer(t) {
   const ppl = [...new Map([[t.assignee, nameOf(t.assignee)], ...people().filter(p => validEmail(p.email)).map(p => [lc(p.email), p.name])]).entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), undefined, { sensitivity: 'base' }));
   const req = f && f.req ? st.reqs.find(r => r.key === f.req) : null;
   const quick = ui.answer && def.quick && !isDone ? `<div class="card" style="padding:12px;border-color:var(--accent)"><b>Record "${esc(ui.answer)}" for this task?</b><div class="meta">You clicked "${esc(ui.answer)}" in the email.</div><div class="row" style="margin-top:8px"><button class="btn pri" data-quick="${esc(ui.answer)}">Yes, record "${esc(ui.answer)}"</button><button class="btn" data-noquick>No, let me fill the form</button></div></div>` : '';
-  return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="Task"><header><div style="min-width:0;flex:1"><div class="meta">${f ? `<span class="linkish" data-fac="${f.id}">${esc(facName(f))}</span>${chiName(f) ? ' (Chicago: ' + esc(f.name) + ')' : ''} · CT-${pad(f.id)} · ${esc(f.group)} · ${facLink(f).replace('Facility page', 'Open facility page')}` : 'Corporate: ' + esc(t.group === '__nocorp' ? 'not known yet' : t.group)}</div><h1 style="font-size:17px">${esc(def.title(t))}</h1><div class="meta">Assigned to <b>${esc(nameOf(t.assignee))}</b> · due ${fmt(t.due)}${isWaiting(t) ? ' · starts ' + fmt(t.opensOn) : ''} · ${esc(t.status)}</div>${isHighTask(t) ? HIGH_PILL : ''}</div>${closeX}</header><div class="body">
+  return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="Task"><header><div style="min-width:0;flex:1"><div class="meta">${t.nf ? (() => { const n = nfById(t.nf); return n ? `<span class="linkish" data-nf="${n.id}">${esc(n.name)}</span> · ${nfNo(n)} · new facility · ${esc(n.group)}` : 'New facility'; })() : f ? `<span class="linkish" data-fac="${f.id}">${esc(facName(f))}</span>${chiName(f) ? ' (Chicago: ' + esc(f.name) + ')' : ''} · CT-${pad(f.id)} · ${esc(f.group)} · ${facLink(f).replace('Facility page', 'Open facility page')}` : 'Corporate: ' + esc(t.group === '__nocorp' ? 'not known yet' : t.group)}</div><h1 style="font-size:17px">${esc(def.title(t))}</h1><div class="meta">Assigned to <b>${esc(nameOf(t.assignee))}</b> · due ${fmt(t.due)}${isWaiting(t) ? ' · starts ' + fmt(t.opensOn) : ''} · ${esc(t.status)}</div>${isHighTask(t) ? HIGH_PILL : ''}</div>${closeX}</header><div class="body">
   ${isDone ? `<div class="okmsg">${t.status === 'Not needed' ? 'Not needed anymore' : 'Done by <b>' + esc(t.doneByName || nameOf(t.doneBy)) + '</b>'} on ${fmt(t.doneOn)}${t.doneBy && t.doneBy !== t.assignee ? ' (assigned to ' + esc(nameOf(t.assignee)) + ')' : ''}${t.closedOnFac ? ', marked done on the facility page' : ''}.</div>${reopenCard(t, ppl)}` : `
   ${t.reopened ? `<div class="note">Put back in the queue ${fmt(t.reopened)}${(t.history || []).length ? ' by ' + esc(t.history[t.history.length - 1].reopenedByName) : ''}. What was entered last time is filled in below: change only what was wrong.</div>` : ''}
   ${quick}
@@ -561,6 +571,8 @@ function syncRepLocks() {
   if (!st || !st.settings) return;
   const $id = x => document.getElementById(x);
   if ($id('rq_rep')) lockRep($id('rq_rep'), isAutoAcct(V('rq_acct')));
+  if ($id('nf_rep')) lockRep($id('nf_rep'), isAutoAcct(V('nf_acct')));
+  if ($id('nfe_rep')) lockRep($id('nfe_rep'), isAutoAcct(V('nfe_acct')));
   if ($id('ge_rep')) lockRep($id('ge_rep'), isAutoAcct(V('ge_acct')));
   if ($id('fd_rep') && ui.openFac) { const f = facById(ui.openFac); if (f) lockRep($id('fd_rep'), !f.email1 && !f.manualDates && isAutoAcct(V('fd_acct') || acctOf(f))); }
   const t = ui.openTask && taskByKey(ui.openTask);
@@ -612,8 +624,8 @@ function fillExample(t) {
 // ---------- clicks ----------
 document.addEventListener('click', async e => {
   const T = e.target;
-  const v = T.closest('[data-view]'); if (v) { ui.view = v.dataset.view; if (v.dataset.outfilter) ui.outFilter = v.dataset.outfilter; ui.openTask = ui.openFac = ui.openGroup = ui.next = null; render(); return; }
-  if (T.closest('[data-close]')) { ui.openTask = ui.openFac = ui.openGroup = ui.next = null; ui.answer = null; renderLayer(); return; }
+  const v = T.closest('[data-view]'); if (v) { ui.view = v.dataset.view; if (v.dataset.outfilter) ui.outFilter = v.dataset.outfilter; ui.openTask = ui.openFac = ui.openGroup = ui.openNf = ui.next = null; render(); return; }
+  if (T.closest('[data-close]')) { ui.openTask = ui.openFac = ui.openGroup = ui.openNf = ui.next = null; ui.answer = null; renderLayer(); return; }
   const gt = T.closest('[data-gotask]'); if (gt) { ui.next = null; ui.openTask = gt.dataset.gotask; ui.openFac = ui.openGroup = null; ui.answer = null; renderLayer(); return; }
   if (T.closest('[data-leadnote]')) { e.stopPropagation(); return; } // typing in the tracker notes box doesn't open the facility
   const ef = T.closest('[data-editfac]'); if (ef) { e.stopPropagation(); ui.openFac = +ef.dataset.editfac; ui.editOpen = ui.openFac; ui.openTask = ui.openGroup = null; renderLayer(); const b = document.getElementById('fdetbox'); if (b) b.scrollIntoView({ block: 'start' }); return; }
@@ -639,8 +651,8 @@ document.addEventListener('click', async e => {
   const ds = T.closest('[data-donesort]'); if (ds) { const k = ds.dataset.donesort; ui.doneSort = ui.doneSort.k === k ? { k, dir: -ui.doneSort.dir } : { k, dir: k === 'on' ? -1 : 1 }; render(); return; }
   if (T.closest('[data-doneall]')) { ui.doneAll = !ui.doneAll; render(); return; }
   if (typeof analyticsClick === 'function' && analyticsClick(T)) return;
-  const tk = T.closest('[data-task]'); if (tk) { ui.openTask = tk.dataset.task; ui.openFac = ui.openGroup = null; ui.answer = null; renderLayer(); return; }
-  const fr = T.closest('[data-fac]'); if (fr && !T.closest('select') && !T.closest('textarea')) { ui.editOpen = null; ui.openFac = +fr.dataset.fac; ui.openTask = ui.openGroup = null; renderLayer(); return; }
+  const tk = T.closest('[data-task]'); if (tk) { ui.openTask = tk.dataset.task; ui.openFac = ui.openGroup = ui.openNf = null; ui.answer = null; renderLayer(); return; }
+  const fr = T.closest('[data-fac]'); if (fr && !T.closest('select') && !T.closest('textarea')) { ui.editOpen = null; ui.openFac = +fr.dataset.fac; ui.openTask = ui.openGroup = ui.openNf = null; renderLayer(); return; }
   const eg = T.closest('[data-editgrp]'); if (eg) { ui.openGroup = eg.dataset.editgrp; ui.openTask = ui.openFac = null; renderLayer(); return; }
   if (T.id === 'reload') { ui.errors = []; await act(async () => { }); return; }
   if (T.id === 'refresh') { await act(async () => { }, 'Up to date'); return; }
@@ -806,7 +818,7 @@ document.addEventListener('change', async e => {
   if (id === 'fc_grp') { const b = $('#fc_newbox'); if (b) b.hidden = e.target.value !== 'New corporate…'; }
   if (['de_ord', 'de_dos', 'de_del'].includes(id)) deLive(id);
   if (/(^|_)acct(_\d+)?$/.test(id)) syncRepLocks();
-  if (id === 'sc_rep') { const t = taskByKey(ui.openTask), f = t && facById(t.fac); if (f && f.dates) { ui.scRep = e.target.value && e.target.value !== V('sc_auto') ? { fac: f.id, rep: e.target.value } : null; const w = $('#sc_warn'); if (w) w.innerHTML = autoRepWarn(f, e.target.value, f.dates.ord).map(x => '<div class="err" style="margin-top:6px">' + esc(x) + '</div>').join(''); } }
+  if (id === 'sc_rep') { const t = taskByKey(ui.openTask), f = t && (t.nf ? nfById(t.nf) : facById(t.fac)); if (f && f.dates) { ui.scRep = e.target.value && e.target.value !== V('sc_auto') ? { fac: f.id, rep: e.target.value } : null; const w = $('#sc_warn'); if (w) w.innerHTML = autoRepWarn(f, e.target.value, f.dates.ord).map(x => '<div class="err" style="margin-top:6px">' + esc(x) + '</div>').join(''); } }
   if (e.target.type === 'hidden') segSync(id);
   if (e.target.classList.contains('ce-dept')) { const n = e.target.closest('.ce-row').querySelector('.ce-note'); n.hidden = e.target.value !== 'Other'; }
   if (id === 'g') { const b = $('#whbox'); if (b) b.hidden = e.target.value !== 'Yes'; }
@@ -820,7 +832,7 @@ document.addEventListener('change', async e => {
   if (typeof analyticsChange === 'function') analyticsChange(e.target);
   const li = e.target.closest && e.target.closest('[data-linkin]'); if (li && li.value) { const mid = li.dataset.linkin, fid = +li.value; await act(() => { const m = st.inbox.find(x => String(x._id) === String(mid)); if (m) { m.fac = fid; m.processed = true; } }, 'Linked'); }
 });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && (ui.openTask || ui.openFac || ui.openGroup || ui.next)) { ui.openTask = ui.openFac = ui.openGroup = ui.next = null; renderLayer(); } if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('task')) e.target.click(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && (ui.openTask || ui.openFac || ui.openGroup || ui.openNf || ui.next)) { ui.openTask = ui.openFac = ui.openGroup = ui.openNf = ui.next = null; renderLayer(); } if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('task')) e.target.click(); });
 function addFiles(list) { ui.dropped = [...ui.dropped, ...list]; const l = $('#rq_list'); if (l) l.textContent = ui.dropped.map(f => f.name).join(', '); }
 document.addEventListener('dragover', e => { const z = e.target.closest && e.target.closest('#rq_drop'); if (z) { e.preventDefault(); z.classList.add('over'); } });
 document.addEventListener('dragleave', e => { const z = e.target.closest && e.target.closest('#rq_drop'); if (z) z.classList.remove('over'); });

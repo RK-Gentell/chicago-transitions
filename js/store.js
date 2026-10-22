@@ -31,6 +31,8 @@ function dataRecords() {
   st.facs.forEach(f => out.push({ key: 'fac:' + pad(f.id), kind: 'fac', obj: f, cols: { Ct: 'CT-' + pad(f.id), Am: amOf(f), Archived: f.archived ? 'Yes' : 'No' } }));
   st.tasks.forEach(t => out.push({ key: t.key, kind: 'task', obj: t, cols: { Archived: t.archived ? 'Yes' : 'No' } }));
   st.reqs.forEach(r => out.push({ key: r.key, kind: 'req', obj: r }));
+  // new facility scheduling (Oct 22 2026): 1 row per facility, Kind "nf". No Ct / Am (those are for Chicago transitions; the mailbox flow reads them).
+  (st.nfs || []).forEach(n => out.push({ key: 'nf:' + pad(n.id), kind: 'nf', obj: n, cols: { Archived: n.deleted ? 'Yes' : 'No' } }));
   return out;
 }
 let hasImportance = false; // the Importance column was added later; old lists get it on first sign-in
@@ -42,7 +44,7 @@ const mailCols = m => Object.assign({ Title: m.key.slice(0, 250), Key: m.key, Co
 // noGraph: the row was loaded without GraphMessage (quick loads), so it can't tell whether it's missing
 const mailFrom = (id, f, noGraph) => ({ _id: id, graphMissing: !noGraph && !f.GraphMessage, importance: f.Importance || 'Normal', attachPath: f.AttachPath || '', attachName: f.AttachName || '', attachPath2: f.AttachPath2 || '', attachName2: f.AttachName2 || '', key: f.Key, code: f.Code, to: (f.ToList || '').split(';').filter(Boolean), cc: (f.CcList || '').split(';').filter(Boolean), subject: f.Subject || '', body: f.HtmlBody || '', sendOn: f.SendOn, day: f.SendOn ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(f.SendOn)) : '', status: f.SendStatus, fac: f.Facility ? +f.Facility : null, task: f.TaskKey || null, cond: f.Cond ? JSON.parse(f.Cond) : null, error: f.ErrorText || '' });
 const inboxFrom = (id, f) => ({ _id: id, subject: f.Title || '', from: f.FromAddress || '', to: (f.ToAddresses || '').split(/[;,]/).map(s => s.trim()).filter(Boolean), cc: (f.CcAddresses || '').split(/[;,]/).map(s => s.trim()).filter(Boolean), received: f.Received || '', preview: f.Preview || '', path: f.FilePath || '', processed: f.Processed === 'Yes', fac: f.Facility ? +f.Facility : null });
-function emptyState(today, me) { return { today, me, settings: null, groups: {}, facs: [], tasks: [], reqs: [], mails: [], inbox: [], names: {} }; }
+function emptyState(today, me) { return { today, me, settings: null, groups: {}, facs: [], nfs: [], tasks: [], reqs: [], mails: [], inbox: [], names: {} }; }
 function applyRecords(rows) {
   rows.forEach(r => {
     const o = r.obj;
@@ -51,9 +53,12 @@ function applyRecords(rows) {
     else if (r.kind === 'fac') st.facs.push(o);
     else if (r.kind === 'task') st.tasks.push(o);
     else if (r.kind === 'req') st.reqs.push(o);
+    else if (r.kind === 'nf') st.nfs.push(o);
   });
   st.facs = st.facs.filter(f => !f.deleted); st.tasks = st.tasks.filter(t => !(t.fac && !st.facs.some(f => f.id === t.fac) && t.archived));
   st.facs.sort((a, b) => a.id - b.id);
+  st.nfs = st.nfs.filter(n => !n.deleted).sort((a, b) => a.id - b.id);
+  st.tasks = st.tasks.filter(t => !(t.nf && !st.nfs.some(n => n.id === t.nf) && t.archived));
   st.reqs.forEach(r => { if (r.by) st.names[lc(r.by)] = r.byName; });
   st.tasks.forEach(t => { if (t.doneBy) st.names[lc(t.doneBy)] = t.doneByName; });
   if (st.me) st.names[lc(st.me.email)] = st.me.name;

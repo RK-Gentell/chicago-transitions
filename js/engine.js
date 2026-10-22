@@ -394,6 +394,7 @@ function mailStillValid(m) {
     if (c.due && t.due !== c.due) return false;
     if (c.opensOn && t.opensOn !== c.opensOn) return false;
     const f = t.fac && facById(t.fac); if (f && (f.hold || f.deleted)) return false;
+    if (t.nf && typeof nfById === 'function') { const n = nfById(t.nf); if (!n || n.deleted) return false; }
   }
   if (c.fac) {
     const f = facById(c.fac); if (!f || f.hold || f.complete || f.deleted) return false;
@@ -409,7 +410,7 @@ function mailStillValid(m) {
 // ---------- tasks ----------
 const REPEATABLE = new Set(['PRICE', 'RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS', 'PORTAL_UPDATE']);
 function newTask(type, o) {
-  const base = 't:' + type + ':' + (o.fac ? 'f' + o.fac : 'g' + lc(o.group));
+  const base = 't:' + type + ':' + (o.fac ? 'f' + o.fac : o.nf ? 'n' + o.nf : 'g' + lc(o.group));
   let key = base;
   if (REPEATABLE.has(type)) { const n = st.tasks.filter(t => t.key === base || t.key.startsWith(base + '#')).length; if (n) key = base + '#' + (n + 1); }
   const existing = taskByKey(key); if (existing) return existing;
@@ -447,7 +448,7 @@ function ensureTaskMails() {
     const rk = t.assignee + '|' + t.due, days = [1, 2, 4];
     if (t.remFor !== rk) { t.remFor = rk; t.remNext = 0; }
     while (t.remNext < days.length && (t.remNext === 0 || st.today >= addBiz(t.due, days[t.remNext - 1]))) {
-      const i = t.remNext, am = f ? amOf(f) : (grp(t.group) && grp(t.group).am) || fallbackOwner();
+      const i = t.remNext, am = f ? amOf(f) : t.nf ? ((typeof nfById === 'function' && nfById(t.nf)) || {}).lead || fallbackOwner() : (grp(t.group) && grp(t.group).am) || fallbackOwner();
       mail({
         key: 'm:E17:' + t.key + ':' + hash(rk) + ':' + (i + 1), code: 'E17', to: [t.assignee],
         cc: [i >= 1 && am !== t.assignee ? am : '', i >= 2 ? roleEmail('escalate') : ''],
@@ -722,6 +723,8 @@ const autoPending = f => !!f && !f.deleted && !f.complete && !f.email1 && !f.man
 function repLoad(ord, except) {
   const n = {};
   st.facs.forEach(f => { if (f.deleted || f.id === except || !f.rep || !f.dates || f.dates.ord !== ord || !isScheduled(f)) return; n[lc(f.rep)] = (n[lc(f.rep)] || 0) + 1; });
+  // new facility scheduling (Oct 22 2026) counts toward the same day: both kinds share the team's capacity
+  (st.nfs || []).forEach(x => { if (x.deleted || x.id === except || !x.rep || !x.dates || x.dates.ord !== ord || !x.scheduled) return; n[lc(x.rep)] = (n[lc(x.rep)] || 0) + 1; });
   return n;
 }
 // the rep the rules pick for that ordering day, or '' when everyone on the team already has 3 or more
@@ -855,6 +858,8 @@ function run() {
   importShip20261016();
   importAutoRep20261020();
   processInbox();
+  // new facility scheduling: dates and the schedule lead's task (js/newfac.js)
+  if (typeof nfRun === 'function') nfRun();
   // David's facilities not scheduled yet: no intake rep until scheduling (on hold too, so it never shows a rep that isn't theirs)
   st.facs.forEach(autoRepPrep);
   const groupsSeen = {};
@@ -1211,7 +1216,8 @@ function editFacilityCheck(f, v) {
   const blank = (had, now, label) => had && !now ? label + ' can\'t be left blank. It was entered before; if it was wrong, change it, or put the task that entered it back in the queue.' : '';
   const errs = [
     blank(f.name, v.name, 'Facility name'), blank(f.portalName, v.pn, 'Portal name'), blank(f.address, v.addr, 'Address'),
-    autoPending(Object.assign({}, f, { acct: v.acct || f.acct })) ? '' : blank(f.rep, v.rep, 'Intake rep'), // David's facilities: picked at scheduling blank(f.clin, v.clin, 'Clinical rep'), blank(f.acct, v.acct, 'Account manager'), blank(f.am, v.am, 'Transition lead'),
+    autoPending(Object.assign({}, f, { acct: v.acct || f.acct })) ? '' : blank(f.rep, v.rep, 'Intake rep'), // David's facilities: picked at scheduling
+    blank(f.clin, v.clin, 'Clinical rep'), blank(f.acct, v.acct, 'Account manager'), blank(f.am, v.am, 'Transition lead'),
     v.why !== undefined ? blank(f.why, v.why, 'Reason for transition') : ''
   ];
   for (const [k, label] of [['wound', 'Wound and Product Specialist'], ['regional', 'Regional Manager']]) {
