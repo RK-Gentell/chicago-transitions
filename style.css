@@ -279,6 +279,7 @@ h1 .tip{font-size:13px}
 .combo-opt.blank{color:var(--muted)}
 .combo-none{padding:6px 10px;color:var(--muted)}
 .ruletbl td.need .combo-in,.ruletbl td.need select{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.field.need .combo-in,.field.need select{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
 /* high importance (schedule task once the Brightree report is done): orange, not the red "At risk" */
 .p-high{background:var(--warn);color:var(--panel)}
 .task .r .p-high{margin-bottom:2px}

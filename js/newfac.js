@@ -69,7 +69,11 @@ function nfSaveDates(n, dos, byName) {
   n.dosChosen = dos; n.dosBy = byName;
   n.dates = Object.assign(nfDerive(n, dos), { why: [...(n.rec ? n.rec.why : []), 'Changed by ' + byName + (n.rec ? ' from the recommended ' + fmtS(n.rec.dos) : '')], changed: true });
 }
-const nfStage = n => n.deleted ? ['Deleted', 'p-req'] : n.scheduled ? ['Scheduled', 'p-done'] : !n.dates ? ['Needs dates', 'p-hold'] : ['Ready to schedule', 'p-ready'];
+// positions left blank on the request: Malka ("Picks the reps") gets a task; scheduling waits for it
+const NF_POS = [['acct', 'account manager'], ['rep', 'intake rep'], ['lead', 'schedule lead']];
+const nfNeeds = n => NF_POS.map(x => x[0]).filter(k => k === 'rep' ? !n.rep && !nfAutoPending(n) : !n[k]);
+const nfRepsTask = n => st.tasks.find(t => t.nf === n.id && t.type === 'NF_REPS' && !done(t) && !t.archived);
+const nfStage = n => n.deleted ? ['Deleted', 'p-req'] : n.scheduled ? ['Scheduled', 'p-done'] : nfNeeds(n).length ? ['Needs reps', 'p-setup'] : !n.dates ? ['Needs dates', 'p-hold'] : ['Ready to schedule', 'p-ready'];
 const nfRepTxt = n => n.rep ? esc(nameOf(n.rep)) : nfAutoPending(n) ? '<span class="meta" title="' + esc(AUTO_REP_TIP) + '">Picked at scheduling</span>' : '<span class="meta">none</span>';
 
 // One-time (10/22/2026): who else gets the "Scheduled" email. Naomi Cohen and Malka Heiman. Runs once, then Settings has it.
@@ -88,6 +92,13 @@ function nfRun() {
     if (nfAutoPending(n) && n.rep) { (n.repHistory = n.repHistory || []).push({ rep: n.rep, on: st.today, why: 'Cleared: account manager ' + nameOf(autoAcct()) + ', intake rep picked at scheduling' }); n.rep = ''; }
     const r = nfCalc(n); n.rec = r || null;
     n.dates = !r ? null : n.dosChosen ? Object.assign(nfDerive(n, n.dosChosen), { why: [...r.why, 'Changed by ' + (n.dosBy || 'someone') + ' from the recommended ' + fmtS(r.dos)], changed: true }) : r;
+    const need = nfNeeds(n), rt = nfRepsTask(n);
+    if (need.length && !rt && !st.tasks.some(x => x.nf === n.id && x.type === 'NF_REPS' && !done(x))) {
+      const t2 = newTask('NF_REPS', { nf: n.id, assignee: roleEmail('rules') });
+      todo(t2, 'pick the reps for ' + n.name + ' (new facility)', 'Pick the ' + need.map(k => NF_POS.find(x => x[0] === k)[1]).join(', ') + ' for the new facility <b>' + esc(n.name) + '</b>' + (n.group ? ' (' + esc(n.group) + ')' : '') + '. It gets scheduled once they\'re in.');
+    }
+    if (!need.length && rt) { rt.status = 'Not needed'; rt.doneOn = st.today; } // filled in some other way (Edit details)
+    if (need.length) return;
     let t = nfTask(n);
     if (!t) { t = newTask('NF_SCHEDULE', { nf: n.id, assignee: n.lead || fallbackOwner(), amTask: true }); todo(t, 'schedule ' + n.name + ' (new facility)', 'Schedule the new facility <b>' + esc(n.name) + '</b>' + (n.group ? ' (' + esc(n.group) + ')' : '') + '.'); }
     // the task follows the schedule lead if it changes
@@ -118,12 +129,12 @@ function nfFields(p, n) {
     <div class="row">${fld('Part B only?' + tip('Part B only: the ordering date is 2 business days before the date of service. Not Part B only: 1 business day.'), sel(p + 'pb', [['yes', 'Part B only'], ['no', 'Not Part B only']], n.partB === true ? 'yes' : n.partB === false ? 'no' : ''))}${fld('Enteral ships', sel(p + 'cad', ['Monthly', 'Weekly', 'Biweekly'], CAD_L[n.cad] || 'Monthly', true))}</div></section>
     <section><h2 class="rqh">Previous provider${tip('The first date of service can be 30 days after the last supply date with the previous provider. No previous provider: as soon as possible. Either way, the ordering date is at least a week from today.')}</h2>
     <div class="row" style="align-items:flex-end">${fld('Last supply date with previous provider', dt(p + 'last', n.noPrev ? '' : n.last))}</div>${chk(p + 'noprev', 'No previous provider (schedule as soon as possible)', !!n.noPrev)}</section>
-    <section><h2 class="rqh">GNS Lakewood roles${tip('The account manager comes first: for ' + esc(nameOf(autoAcct()) || 'some account managers') + ', the intake rep is picked automatically at scheduling. The schedule lead gets the task to schedule it.')}</h2>
+    <section><h2 class="rqh">GNS Lakewood roles${tip('All optional. Anything left blank goes to ' + esc(roleName('rules')) + ' on a "Pick the reps" task, and scheduling waits for it. The account manager comes first: for ' + esc(nameOf(autoAcct()) || 'some account managers') + ', the intake rep is picked automatically at scheduling. The schedule lead gets the task to schedule it.')}</h2>
     <div class="row">${fld('Account manager', sel(p + 'acct', withCur(R, n.acct), n.acct, true))}${fld('Intake rep', sel(p + 'rep', withCur(R, n.rep), n.rep, true))}${fld('Schedule lead', sel(p + 'lead', withCur(A, n.lead), n.lead, true))}</div></section>
     <div id="${p}prev"></div>`;
 }
 function nfRead(p) { return { name: V(p + 'name'), addr: V(p + 'addr'), corp: V(p + 'corp'), pb: V(p + 'pb'), last: V(p + 'noprev') ? '' : V(p + 'last'), noPrev: !!V(p + 'noprev'), cad: CAD_V[V(p + 'cad')] || '4', acct: V(p + 'acct'), rep: V(p + 'rep'), lead: V(p + 'lead') }; }
-function nfProblem(v) {
+function nfProblem(v, old) {
   if (!v.name) return 'Type the facility name.';
   if (!v.corp) return 'Type the corporate. No corporate? Type the facility name.';
   if (!v.addr) return 'Type the address.';
@@ -131,9 +142,8 @@ function nfProblem(v) {
   if (!['yes', 'no'].includes(v.pb)) return 'Pick "Part B only" or "Not Part B only".';
   if (!v.noPrev && !v.last) return 'Enter the last supply date with the previous provider, or tick "No previous provider".';
   if (v.last && v.last > st.today) return 'The last supply date can\'t be in the future.';
-  if (!v.acct) return 'Pick the account manager.';
-  if (!isAutoAcct(v.acct) && !v.rep) return 'Pick the intake rep.';
-  if (!v.lead) return 'Pick the schedule lead.';
+  // reps are optional on the request (left blank → "Pick the reps" task), but once entered they can't be cleared
+  if (old) for (const [k, l] of NF_POS) if (old[k] && !v[k] && !(k === 'rep' && isAutoAcct(v.acct))) return 'The ' + l + ' can\'t be left blank. It was entered before; change it to someone else if it\'s wrong.';
   return '';
 }
 // what the form would schedule (no saving)
@@ -149,7 +159,7 @@ function nfPreview(p, id) {
 
 // ---------- screens ----------
 function nfRequestHtml() {
-  return `<h1>New facility scheduling request</h1><p class="sub">For facilities new to GNS that aren't coming from GNS Chicago. The schedule lead gets a task to schedule it, and once it's scheduled the account manager, intake rep, ${nfNotify().map(nameOf).join(' and ') || 'the people in Settings'} get an email.</p>
+  return `<h1>New facility scheduling request</h1><p class="sub">For facilities new to GNS that aren't coming from GNS Chicago. Leave a rep blank if you don't know it: ${esc(roleName('rules'))} gets a task to pick it. The schedule lead gets a task to schedule it, and once it's scheduled the account manager, intake rep, ${nfNotify().map(nameOf).join(' and ') || 'the people in Settings'} get an email.</p>
   <form id="nff" class="card rqform">${nfFields('nf_')}<div id="nf_err"></div><div><button class="btn pri" type="submit">Submit scheduling request</button></div></form>`;
 }
 function nfTrackerHtml() {
@@ -171,6 +181,7 @@ function nfDrawer(n) {
   const ms = st.mails.filter(m => m.key === 'm:E30:' + n.id || (t && m.task === t.key));
   const edit = n.scheduled ? '<div class="meta">It\'s scheduled, so the details can\'t change here anymore.</div>' : `<details class="card" style="padding:10px" id="nfedbox"><summary><b>Edit details</b> <span class="meta">(dates recalculate)</span></summary><form id="nfe" style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${nfFields('nfe_', n)}<div id="nfe_err"></div><div><button class="btn sm pri" type="submit">Save details</button></div></form></details>`;
   return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="New facility"><header><div style="flex:1;min-width:0"><div class="meta">${nfNo(n)} · new facility · ${esc(n.group || '')}</div><h1 style="font-size:17px">${esc(n.name)}</h1><span class="pill ${c}">${s}</span></div>${closeX}</header><div class="body">
+  ${nfRepsTask(n) ? `<div class="row"><button class="btn pri sm" data-task="${esc(nfRepsTask(n).key)}">Open the "Pick the reps" task</button><span class="meta">Assigned to ${esc(nameOf(nfRepsTask(n).assignee))}. Still needed: ${esc(nfNeeds(n).map(k => NF_POS.find(x => x[0] === k)[1]).join(', '))}</span></div>` : ''}
   ${t && !done(t) ? `<div class="row"><button class="btn pri sm" data-task="${esc(t.key)}">Open the schedule task</button><span class="meta">Assigned to ${esc(nameOf(t.assignee))}, due ${fmtS(t.due)}</span></div>` : ''}
   ${kv}${edit}
   ${isAdmin(me()) && !n.scheduled ? '<div class="row"><button class="btn sm" data-nfdel="' + n.id + '" style="margin-left:auto">Delete (test or mistake)</button></div>' : ''}
@@ -226,6 +237,27 @@ TT.NF_SCHEDULE = {
 };
 NO_REOPEN.add('NF_SCHEDULE');
 
+TT.NF_REPS = {
+  title: t => 'Pick the reps for new facility: ' + ((nfById(t.nf) || {}).name || nfNo({ id: t.nf })),
+  form: t => {
+    const n = nfById(t.nf); if (!n) return '<div class="err">This facility isn\'t there anymore.</div>';
+    const R = peopleOpts(repList()), A = peopleOpts(amList()), need = nfNeeds(n), box = (k, html) => need.includes(k) ? html.replace('<div class="field">', '<div class="field need">') : html;
+    return `<div class="instr">The request for <b>${esc(n.name)}</b>${n.group ? ' (' + esc(n.group) + ')' : ''} left ${esc(need.map(k => NF_POS.find(x => x[0] === k)[1]).join(', ')) || 'nothing'} blank. Pick ${need.length > 1 ? 'them' : 'it'} and it goes to the schedule lead to schedule.</div>
+    <div class="kv"><div>Address</div><div>${esc(n.address)}</div><div>Part B only</div><div>${n.partB ? 'Yes' : 'No'}</div>${n.dates ? `<div>Recommended DOS</div><div>${fmt(n.dates.dos)}</div>` : ''}<div>Requested by</div><div>${esc(n.requesterName || nameOf(n.requester))}</div></div>
+    <div class="row">${box('acct', fld('Account manager', sel('nr_acct', withCur(R, n.acct), n.acct, true)))}${box('rep', fld('Intake rep', sel('nr_rep', withCur(R, n.rep), n.rep, true)))}${box('lead', fld('Schedule lead', sel('nr_lead', withCur(A, n.lead), n.lead, true)))}</div><div class="meta">Boxes outlined in blue are the ones still needed.</div>`;
+  },
+  example: () => ({ nr_acct: lc(repList()[0].email), nr_rep: lc(repList()[0].email), nr_lead: lc(amList()[0].email) }),
+  validate: t => {
+    const n = nfById(t.nf); if (!n || n.deleted) return 'This facility isn\'t there anymore.';
+    if (!V('nr_acct')) return 'Pick the account manager.';
+    if (!isAutoAcct(V('nr_acct')) && !V('nr_rep')) return 'Pick the intake rep.';
+    if (!V('nr_lead')) return 'Pick the schedule lead.';
+    return '';
+  },
+  done: t => { const n = nfById(t.nf); n.acct = V('nr_acct'); n.rep = isAutoAcct(n.acct) ? '' : V('nr_rep'); n.lead = V('nr_lead'); }
+};
+NO_REOPEN.add('NF_REPS');
+
 // ---------- clicks, typing, forms ----------
 document.addEventListener('click', async e => {
   const T = e.target;
@@ -264,7 +296,7 @@ document.addEventListener('submit', async e => {
     return;
   }
   if (id === 'nfe') {
-    const nid = ui.openNf, v = nfRead('nfe_'), err = nfProblem(v);
+    const nid = ui.openNf, v = nfRead('nfe_'), err = nfProblem(v, nfById(nid));
     if (err) { $('#nfe_err').innerHTML = '<div class="err">' + esc(err) + '</div>'; return; }
     await act(() => {
       const n = nfById(nid); if (!n || n.scheduled || n.deleted) { toast('It\'s scheduled already, so it can\'t change.'); return false; }
@@ -273,6 +305,11 @@ document.addEventListener('submit', async e => {
       if (a !== n.address || pb !== !!n.partB || v.last !== (n.last || '') || v.noPrev !== !!n.noPrev) { n.dosChosen = ''; n.dosBy = ''; }
       Object.assign(n, { name: v.name, address: a, state: stateFrom(a), group: v.corp, partB: pb, last: v.last, noPrev: v.noPrev, cad: v.cad, acct: v.acct, lead: v.lead, editedBy: meName(), editedOn: st.today });
       if (!isAutoAcct(v.acct)) n.rep = v.rep;
+      const rt = nfRepsTask(n);
+      if (rt && !nfNeeds(n).length) {
+        rt.status = 'Done'; rt.doneBy = me(); rt.doneByName = meName(); rt.doneOn = st.today; rt.doneAt = nowIso(); rt.closedOnFac = true;
+        if (rt.assignee && rt.assignee !== me()) mail({ key: 'm:E25:' + rt.key + ':' + uid(), code: 'E25', to: [rt.assignee], link: 'none', subject: 'Not needed anymore: ' + taskTitle(rt), body: `<p>Hi ${esc(first(nameOf(rt.assignee)))},</p><p>${esc(meName())} filled in the reps for the new facility <b>${esc(n.name)}</b>, so you don't need to do this task.</p>` });
+      }
     }, 'Saved');
   }
 });

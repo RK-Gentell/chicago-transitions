@@ -119,6 +119,7 @@ A facility is never marked complete while its FastCare task is open (since Oct 1
 - Task: 1 `NF_SCHEDULE` per facility (`t.nf`), for the schedule lead (follows a lead change). Mark done → `n.scheduled`, E30 "Scheduled: <name>" to acct + rep + Settings `nfNotify` (seeded once by `importNf20261022`: Naomi Cohen, Malka Heiman), CC the lead. Can't be put back in the queue.
 - Screens: "New facilities tracker" (`nftracker`, rows open `nfDrawer`: details, Edit details before scheduling, admin Delete) and "+ New facility scheduling request" (`nfnew`). Tracker and Analytics stay Chicago only (analytics skips `t.nf` tasks). Task lists group nf tasks as their own block (`'n' + id`).
 - Chicago request form: Account manager now comes before Intake rep.
+- Reps optional (Oct 22 2026, later): account manager, intake rep, schedule lead can be left blank on the request. `nfNeeds(n)` (rep not needed for David) → 1 `NF_REPS` "Pick the reps" task for the "Picks the reps" role (Malka); `NF_SCHEDULE` isn't made until nothing is missing. Filled on Edit details instead → the task closes (E25 to Malka). Once entered, a position can't be cleared on Edit details. Stage "Needs reps".
 
 ## Cache
 `index.html` loads the css/js with `?v=N`. Bump N on every push that changes css or js, or people keep the old version for up to 10 minutes.

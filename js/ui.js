@@ -573,6 +573,7 @@ function syncRepLocks() {
   if ($id('rq_rep')) lockRep($id('rq_rep'), isAutoAcct(V('rq_acct')));
   if ($id('nf_rep')) lockRep($id('nf_rep'), isAutoAcct(V('nf_acct')));
   if ($id('nfe_rep')) lockRep($id('nfe_rep'), isAutoAcct(V('nfe_acct')));
+  if ($id('nr_rep')) lockRep($id('nr_rep'), isAutoAcct(V('nr_acct')));
   if ($id('ge_rep')) lockRep($id('ge_rep'), isAutoAcct(V('ge_acct')));
   if ($id('fd_rep') && ui.openFac) { const f = facById(ui.openFac); if (f) lockRep($id('fd_rep'), !f.email1 && !f.manualDates && isAutoAcct(V('fd_acct') || acctOf(f))); }
   const t = ui.openTask && taskByKey(ui.openTask);
