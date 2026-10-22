@@ -378,7 +378,8 @@ function queue(code, to, f, task, make) { pending.push({ code, to, f, task, make
 function flush() {
   // 1 email per helper per request when several facilities need the same ask
   const groups = {};
-  pending.forEach(p => { const k = p.code + '|' + p.to + '|' + (p.f.req || ''); (groups[k] = groups[k] || []).push(p); });
+  // "Pick a rep" is 1 email per corporate (its body and task are that corporate's), so a request with several corporates gets 1 each
+  pending.forEach(p => { const k = p.code + '|' + p.to + '|' + (p.f.req || '') + (p.code === 'E3' ? '|' + lc(p.task.group) : ''); (groups[k] = groups[k] || []).push(p); });
   Object.values(groups).forEach(arr => {
     const m = arr[0].make(arr.map(a => a.f), arr.map(a => a.task));
     m.key = 'm:' + arr[0].code + ':' + hash(arr.map(a => a.task.key).sort().join(','));

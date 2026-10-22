@@ -300,3 +300,7 @@ textarea.leadnote:focus{height:72px}
 /* intake rep locked: picked at scheduling */
 select:disabled,.combo-in:disabled{background:var(--soft);color:var(--muted);cursor:not-allowed}
 .replock{margin-top:4px}
+
+/* bulk upload preview */
+.card.bulkbad{border-color:var(--bad, #b42318);box-shadow:0 0 0 1px var(--bad, #b42318) inset}
+.errtxt{color:var(--bad, #b42318)}

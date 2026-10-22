@@ -160,6 +160,7 @@ function nfPreview(p, id) {
 // ---------- screens ----------
 function nfRequestHtml() {
   return `<h1>New facility scheduling request</h1><p class="sub">For facilities new to GNS that aren't coming from GNS Chicago. Leave a rep blank if you don't know it: ${esc(roleName('rules'))} gets a task to pick it. The schedule lead gets a task to schedule it, and once it's scheduled the account manager, intake rep, ${nfNotify().map(nameOf).join(' and ') || 'the people in Settings'} get an email.</p>
+  <div class="row" style="margin-bottom:10px;align-items:center"><button class="btn sm" data-view="bulknf">Bulk upload (Excel)</button><span class="meta">Many facilities from many corporates at once.</span></div>
   <form id="nff" class="card rqform">${nfFields('nf_')}<div id="nf_err"></div><div><button class="btn pri" type="submit">Submit scheduling request</button></div></form>`;
 }
 function nfTrackerHtml() {
@@ -183,7 +184,7 @@ function nfDrawer(n) {
   return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="New facility"><header><div style="flex:1;min-width:0"><div class="meta">${nfNo(n)} · new facility · ${esc(n.group || '')}</div><h1 style="font-size:17px">${esc(n.name)}</h1><span class="pill ${c}">${s}</span></div>${closeX}</header><div class="body">
   ${nfRepsTask(n) ? `<div class="row"><button class="btn pri sm" data-task="${esc(nfRepsTask(n).key)}">Open the "Pick the reps" task</button><span class="meta">Assigned to ${esc(nameOf(nfRepsTask(n).assignee))}. Still needed: ${esc(nfNeeds(n).map(k => NF_POS.find(x => x[0] === k)[1]).join(', '))}</span></div>` : ''}
   ${t && !done(t) ? `<div class="row"><button class="btn pri sm" data-task="${esc(t.key)}">Open the schedule task</button><span class="meta">Assigned to ${esc(nameOf(t.assignee))}, due ${fmtS(t.due)}</span></div>` : ''}
-  ${kv}${edit}
+  ${kv}${attachCard('nf', n)}${edit}
   ${isAdmin(me()) && !n.scheduled ? '<div class="row"><button class="btn sm" data-nfdel="' + n.id + '" style="margin-left:auto">Delete (test or mistake)</button></div>' : ''}
   <h2 style="margin:4px 0 0">Emails from the app</h2>${ms.some(m => m.status !== 'Cancelled') ? mailSections(ms, isAdmin(me()), 'h3') : '<div class="meta">None yet.</div>'}</div></div>`;
 }
@@ -214,7 +215,7 @@ TT.NF_SCHEDULE = {
     const n = nfById(t.nf); if (!n) return '<div class="err">This facility isn\'t there anymore.</div>';
     if (!n.dates) return '<div class="err">No dates yet: the address needs a state that has a ship point. Fix it under "Edit details" on the facility (New facilities tracker).</div>';
     const d = n.dates, auto = nfAutoPending(n);
-    return `<div class="kv"><div>Corporate</div><div>${esc(n.group)}</div><div>Address</div><div>${esc(n.address)}</div><div>Part B only</div><div>${n.partB ? 'Yes' : 'No'}</div><div>Previous provider</div><div>${n.noPrev ? 'None (as soon as possible)' : 'Last supply ' + fmt(n.last)}</div><div>Account manager</div><div>${esc(nameOf(n.acct))}</div>${auto ? '' : `<div>Intake rep</div><div>${esc(nameOf(n.rep))}</div>`}</div>
+    return `<div class="kv"><div>Corporate</div><div>${esc(n.group)}</div><div>Address</div><div>${esc(n.address)}</div><div>Part B only</div><div>${n.partB ? 'Yes' : 'No'}</div><div>Previous provider</div><div>${n.noPrev ? 'None (as soon as possible)' : 'Last supply ' + fmt(n.last)}</div><div>Account manager</div><div>${esc(nameOf(n.acct))}</div>${auto ? '' : `<div>Intake rep</div><div>${esc(nameOf(n.rep))}</div>`}${(n.files || []).length ? `<div>Attachments</div><div>${n.files.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>`).join(', ')}</div>` : ''}</div>
     ${nfDateEditor(n)}${auto ? autoRepBox(n) : ''}
     <div class="instr"><ol><li>"Facilities" → schedule icon under "Actions" → "Facility Schedule".</li><li>"Start Date" <span class="q">${fmtS(d.del)}</span>, "Day of the Week" <span class="q">${d.day}</span>, "Weeks" <span class="q">4</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>${n.cad && n.cad !== '4' ? `<li>"Select Area of Care" → "Enteral" → "Add Schedule": same Start Date and day, "Weeks" <span class="q">${n.cad}</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>` : ''}<li>"Generate Dates" → check "Override Manually" → "Save".</li><li>"Schedules" → Ordering Calendar → open the entry on ${fmt(d.ord)} and check the 3 dates match the ones above. Wrong? Recheck Start Date, Day of the Week and OS Days and generate again. Missing? The ordering date probably landed on a weekend.</li>${auto ? `<li>"Facilities" → edit pencil: "Insurance Specialist" and "Intake Specialist" = the intake rep picked above. "Save".</li>` : ''}</ol></div>
     <div class="note">"Mark done" emails ${esc([nameOf(n.acct), auto ? 'the intake rep' : nameOf(n.rep), ...nfNotify().map(nameOf)].filter(Boolean).join(', '))} that it's scheduled${n.lead ? ', CC ' + esc(nameOf(n.lead)) : ''}. Changed a date above? Click "Save dates" first.</div>`;

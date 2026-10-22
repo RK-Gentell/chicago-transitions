@@ -12,7 +12,7 @@ A task app that runs the Chicago → Lakewood facility transition process from t
 - `js/store.js`: loading and saving. `SPStore` (Microsoft Graph) and `DemoStore` (in memory).
 - `js/analytics.js`: the Analytics screen, laid out like the "Transition Lead Analytics" preview Raizy approved: takeaway line, 7 tiles, tabs Overview / Bottlenecks / Schedule / Corporates / Facilities. The 8 steps are `MS` (FastCare → GDD answer). Read-only: never changes or saves data. Loaded before ui.js.
 - `js/ui.js`: screens and clicks. Every change goes through `act()`: reload → change → `run()` → save → reload.
-- `index.html`, `style.css`, `vendor/msal-browser.min.js` (MSAL 4.30.0, UMD).
+- `index.html`, `style.css`, `vendor/msal-browser.min.js` (MSAL 4.30.0, UMD), `vendor/exceljs-4.4.0.min.js` + `vendor/jszip-3.10.1.min.js` (bulk upload, loaded only when used; licenses next to them).
 
 ## Data (SharePoint lists, created by the app's first-run setup)
 - **CT Data**: 1 row per record. Columns `Key` (unique), `Kind` (settings/grp/fac/task/req), `Data` (JSON), `Ct` (CT-0001, facilities only), `Am` (AM email, facilities only, used by the mailbox flow), `Archived` (Yes/No).
@@ -120,6 +120,15 @@ A facility is never marked complete while its FastCare task is open (since Oct 1
 - Screens: "New facilities tracker" (`nftracker`, rows open `nfDrawer`: details, Edit details before scheduling, admin Delete) and "+ New facility scheduling request" (`nfnew`). Tracker and Analytics stay Chicago only (analytics skips `t.nf` tasks). Task lists group nf tasks as their own block (`'n' + id`).
 - Chicago request form: Account manager now comes before Intake rep.
 - Reps optional (Oct 22 2026, later): account manager, intake rep, schedule lead can be left blank on the request. `nfNeeds(n)` (rep not needed for David) → 1 `NF_REPS` "Pick the reps" task for the "Picks the reps" role (Malka); `NF_SCHEDULE` isn't made until nothing is missing. Filled on Edit details instead → the task closes (E25 to Malka). Once entered, a position can't be cleared on Edit details. Stage "Needs reps".
+
+## Bulk upload + attachments on facilities (Oct 22 2026)
+- `js/bulk.js` (after newfac.js, before ui.js). Views `bulkct` / `bulknf`, linked from the top of each request page ("Bulk upload (Excel)"). `ui.bulk` holds the file, the read rows, the check, the dry run.
+- Template: `bulkTemplate(kind)` builds an .xlsx with ExcelJS (`vendor/exceljs-4.4.0.min.js`, loaded on demand by `loadXl`): Instructions tab, Facilities tab (dropdowns from a hidden Lists tab, errorStyle warning so typing/pasting over them is allowed), no cell notes (ExcelJS can't read notes back after Excel re-saves). Columns: `CT_COLS` / `NF_COLS` (headers are what's matched on upload, case-insensitive). Contacts, "contacts already in the portal" and attachments aren't in it.
+- Reading: .xlsx (ExcelJS; on failure `xlNoComments` strips comments/notes with JSZip `vendor/jszip-3.10.1.min.js` and retries) or .csv (`parseCsv`). Max 300 rows. Wound rep / regional emails are looked up in the address book (`bulkLookups`, like the form's pickers).
+- Checks (`ctCheck` / `nfCheck`): everything the forms allow and nothing else. People must be on the Team list with the right tick (`bulkPerson`); intake rep must be blank when the account manager is David; "Already done" details only with their step; PRE_IMPLY applied; `preInfoProblem`, `schedPast`, `nfProblem` reused; areas of care must agree within a corporate in the file and with a corporate already in the app (blocked, Raizy's call); "corporate set up in the portal" same for every row of a corporate; duplicates in the file blocked; already in the app = warning (approve needs an extra tick).
+- Preview: `bulkDry` runs `ctBuild`/`nfBuild` + `run()` on a JSON copy of `st` with temporary ids, lists each facility's new tasks and emails (not reminders), corporate tasks separately, then restores `st` and the email `pending` queue. Approve → `act()`: checked again on the latest data (changes → back to the preview, nothing saved), `allocateIds`, same build.
+- Chicago: 1 request (`req`, `bulk: true`) per upload, so the GDD / pumps emails batch and "New transition" (E2, key `m:E2:<req>:<lead>`, same as the form so the RULE task doesn't resend) goes once per transition lead with a table. "Pick a rep" (E3) is now grouped per corporate in `flush` (before, a multi-corporate request only emailed the first corporate's).
+- Attachments: `attachCard(kind, x)` on the Chicago facility page and the new facility page: drop or browse, uploaded to SharePoint "CT Request files/CT-0001" or "NF-0001", saved in `f.files` / `n.files` ({ name, url, path, by, on }). The request form's attachments are unchanged.
 
 ## Cache
 `index.html` loads the css/js with `?v=N`. Bump N on every push that changes css or js, or people keep the old version for up to 10 minutes.
