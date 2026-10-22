@@ -305,9 +305,9 @@ const PRE_ITEMS = [
   ['added', 'Facility added to Brightree', 'Skips Amy\'s "Add … to Brightree" task. Type the name exactly as Brightree shows it.'],
   ['pumps', 'Pumps checked and added to "Pump Tracking"', ''],
   ['gdd', 'GDD question answered', 'Skips the GDD question. Pick the answer, and the warehouse if Yes.'],
-  ['wr', 'FastCare info gathered (we have the wound rep and regional)', 'Skips the FastCare task. Pick the wound rep and regional. The contacts request still goes to them, unless "No contacts request needed" is ticked too.'],
-  ['e3', 'No contacts request needed', 'We already have the contacts and they\'re accurate (or the request already went out). Skips the contacts request and its follow-ups.'],
-  ['ct', 'The contacts on this request are already in the portal', ''],
+  ['wr', 'FastCare info gathered (we have the wound rep and regional)', 'Skips the FastCare task. Pick the wound rep and regional. The contacts request still goes to them, unless "Received contacts" is ticked too.'],
+  ['e3', 'Received contacts', 'We already have the contacts and they\'re accurate (or the request already went out). Skips the contacts request and its follow-ups.'],
+  ['ct', 'Added contacts to portal', 'The contacts are in the portal, so there\'s no "Contacts into portal" task. Ticks "Received contacts" too.'],
   ['emr', 'EMR info for the facility is in the portal', ''],
   ['ps', 'Portal setup done', ''],
   ['sched', 'Scheduled', 'Skips the Brightree report and scheduling. Enter the dates from the Ordering Calendar. The Chicago handoff email goes out with them automatically, unless "Chicago handoff email sent" is ticked too.'],
@@ -315,7 +315,7 @@ const PRE_ITEMS = [
   ['e2', 'GNS Chicago sent the transfer notice to the facility', '']
 ];
 // ticking a step ticks the ones it includes
-const PRE_IMPLY = { e2: ['e1'], sched: ['ps'] };
+const PRE_IMPLY = { e2: ['e1'], sched: ['ps'], ct: ['e3'] };
 const PRE_INFO = ['added', 'gdd', 'wr', 'sched'];
 // the AM's first tasks on new facilities, as links (skips ones ticked "already done")
 const amFirstTasks = list => { const ts = list.flatMap(f => [preDone(f, 'wr') ? null : [esc(facName(f)) + ': FastCare', 't:FASTCARE:f' + f.id], preDone(f, 'sched') ? null : [esc(facName(f)) + ': Brightree report', 't:BRIGHTREE:f' + f.id]].filter(Boolean)); return ts.length ? '<p>Your tasks:</p>' + taskList(ts) : '<p>Nothing for you to do yet. You\'ll get an email when there is.</p>'; };

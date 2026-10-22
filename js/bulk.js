@@ -21,8 +21,10 @@ const BULK_MAX = 300;
 const YES = /^(yes|y|true|x|1|✓|✔)$/i, NO = /^(no|n|false|0)$/i;
 // ---------- the columns ----------
 // [key, header, help, list (dropdown name in the Lists tab), width]
-const PRE_HDR = { corp: 'Corporate set up in the portal', added: 'Added to Brightree', pumps: 'Pumps checked', gdd: 'GDD question answered', wr: 'FastCare info gathered', e3: 'No contacts request needed', emr: 'EMR info in the portal', ps: 'Portal setup done', sched: 'Scheduled', e1: 'Chicago handoff email sent', e2: 'Transfer notice sent by GNS Chicago' };
-const BULK_PRE = PRE_ITEMS.map(x => x[0]).filter(k => PRE_HDR[k]); // "contacts already in the portal" is about contacts, which bulk upload doesn't take
+const PRE_HDR = { corp: 'Corporate set up in the portal', added: 'Added to Brightree', pumps: 'Pumps checked', gdd: 'GDD question answered', wr: 'FastCare info gathered', e3: 'Received contacts', ct: 'Added contacts to portal', emr: 'EMR info in the portal', ps: 'Portal setup done', sched: 'Scheduled', e1: 'Chicago handoff email sent', e2: 'Transfer notice sent by GNS Chicago' };
+const BULK_PRE = PRE_ITEMS.map(x => x[0]).filter(k => PRE_HDR[k]);
+// headers from older templates that still mean the same column
+const HDR_OLD = { 'already done: no contacts request needed': 'pre_e3' };
 const CT_COLS = [
   ['name', 'Facility (Chicago name)', 'Required. The Chicago (Gentell) name, usually with the state in parentheses.', '', 34],
   ['addr', 'Address', 'Optional. Full address ending with the state and zip: 123 Main St, LaGrange, IN 46761.', '', 40],
@@ -176,7 +178,7 @@ async function bulkRead(file, kind) {
   else return { err: 'Upload the template as .xlsx or .csv.' };
   if (!grid.length) return { err: 'The file is empty.' };
   const head = grid[0].map(hdrKey), map = {}, unknown = [];
-  head.forEach((h, i) => { if (!h) return; const c = cols.find(x => hdrKey(x[1]) === h); if (c) { if (map[c[0]] === undefined) map[c[0]] = i; } else unknown.push(grid[0][i]); });
+  head.forEach((h, i) => { if (!h) return; const c = cols.find(x => hdrKey(x[1]) === h || HDR_OLD[h] === x[0]); if (c) { if (map[c[0]] === undefined) map[c[0]] = i; } else unknown.push(grid[0][i]); });
   const missing = cols.filter(c => map[c[0]] === undefined).map(c => c[1]);
   const rows = [];
   for (let i = 1; i < grid.length; i++) {
