@@ -625,7 +625,7 @@ function applyPre(f, pre, l, info) {
   if (p.pumps) f.pumps = 'already done';
   if (p.gdd) { f.gdd = i.gdd || 'Already done'; f.gddWh = i.gdd === 'Yes' ? i.gddWh || '' : ''; } // a "Yes" emails the GDD contact once the request is saved (run)
   if (p.wr) { f.wound = i.wound; f.regional = i.regional; }
-  if (p.e3) { f.noE3 = true; markE3Done(f, by); }
+  if (p.e3) { f.noE3 = true; markE3Done(f, by); if (!p.ct) f.ctNeed = true; }
   if (p.sched) setManualDates(f, i, by);
   if (p.e1) { f.email1 = st.today; f.email1By = by; }
   if (p.e2) { f.email2 = st.today; f.email2By = by; }
@@ -958,8 +958,11 @@ function run() {
     }
     {
       const fc = fTask(f, 'FASTCARE'), openCP = tasksOf(f, 'CONTACTS_PORTAL').some(t => !done(t));
-      if (!openCP && f.inPortal && fcDoneNew(f) && f.contacts.some(c => !c.inPortal)) {
+      // "Received contacts" ticked without "Added contacts to portal": 1 task to add them, even if none are typed into the app
+      const needRec = f.ctNeed && !f.ctNeedTask && !preDone(f, 'ct');
+      if (!openCP && f.inPortal && fcDoneNew(f) && (f.contacts.some(c => !c.inPortal) || needRec)) {
         const t = newTask('CONTACTS_PORTAL', { fac: f.id, assignee: am, amTask: true });
+        if (needRec) f.ctNeedTask = t.key;
         todo(t, 'add contacts for ' + facName(f), 'Add the contacts for <b>' + esc(facName(f)) + '</b> to the portal.');
       }
     }
@@ -1086,7 +1089,7 @@ function stepIsDone(f, k) {
     case 'gdd': return !!f.gdd;
     case 'wr': return !!done(fTask(f, 'FASTCARE'));
     case 'e3': return !!(f.e3Done || f.noE3);
-    case 'ct': return (f.contacts || []).every(c => c.inPortal) && !stepTasks(f, 'ct').length && fcDoneNew(f);
+    case 'ct': return (f.contacts || []).every(c => c.inPortal) && !stepTasks(f, 'ct').length && fcDoneNew(f) && !(f.ctNeed && !done(taskByKey(f.ctNeedTask)));
     case 'emr': return !!done(fTask(f, 'EMR_PORTAL')) || (!!g.emrNew && !!g.emr);
     case 'ps': return !!done(fTask(f, 'PORTAL_SETUP'));
     case 'sched': return !!(f.manualDates || f.schedDone || done(fTask(f, 'SCHEDULE')) || (f.email1 && !handoffOnly(f)));
@@ -1118,7 +1121,7 @@ function markStepsDone(f, picked, by, byName, info) {
   if (keys.includes('pumps') && !f.pumps) f.pumps = 'already done';
   if (keys.includes('gdd')) gddAnswer(f, i.gdd, i.gddWh);
   if (keys.includes('wr')) { f.wound = i.wound; f.regional = i.regional; }
-  if (keys.includes('e3')) { f.noE3 = true; markE3Done(f, byName); }
+  if (keys.includes('e3')) { f.noE3 = true; markE3Done(f, byName); if (!keys.includes('ct') && !preDone(f, 'ct')) f.ctNeed = true; }
   if (keys.includes('sched')) { if (f.email1) f.schedDone = st.today; else setManualDates(f, i, byName); }
   if (keys.includes('ct')) (f.contacts || []).forEach(c => c.inPortal = true);
   if (keys.includes('e1') && !f.email1) { f.email1 = st.today; f.email1By = byName + ' (marked on the facility page)'; }

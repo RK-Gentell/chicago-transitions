@@ -243,7 +243,7 @@ const TT = {
   },
   CONTACTS_PORTAL: {
     title: t => 'Contacts into portal: ' + facName(facById(t.fac)),
-    form: t => { const f = facById(t.fac), g = G(f), list = f.contacts.filter(c => !c.inPortal); return `<div class="instr">"Add Contact" for each. Position not in "Department" → "Other" + position in "Note". Leave "Include On". Only the ones not in the portal yet are listed.</div>${list.length ? contactTable(list) : '<div class="meta">All contacts are already in the portal.</div>'}${(g.contacts || []).length ? '<div class="meta">Corporate contacts too: ' + g.contacts.map(c => esc(c.first + ' ' + c.last + ' (' + c.dept + ')')).join(', ') + '</div>' : ''}${chk('ok', 'Entered in the portal')}`; },
+    form: t => { const f = facById(t.fac), g = G(f), list = f.contacts.filter(c => !c.inPortal); return `<div class="instr">"Add Contact" for each. Position not in "Department" → "Other" + position in "Note". Leave "Include On". Only the ones not in the portal yet are listed.</div>${list.length ? contactTable(list) : f.ctNeedTask === t.key ? '<div class="meta">The contacts were received but aren\'t typed into the app. Add them from where you got them (the email, or the facility\'s attachments).</div>' : '<div class="meta">All contacts are already in the portal.</div>'}${(g.contacts || []).length ? '<div class="meta">Corporate contacts too: ' + g.contacts.map(c => esc(c.first + ' ' + c.last + ' (' + c.dept + ')')).join(', ') + '</div>' : ''}${chk('ok', 'Entered in the portal')}`; },
     example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when done.',
     done: t => { facById(t.fac).contacts.forEach(c => c.inPortal = true); }
   },

@@ -132,6 +132,7 @@ A facility is never marked complete while its FastCare task is open (since Oct 1
 
 ## Contacts in "Already done" (Oct 22 2026)
 - e3 = "Received contacts" (was "No contacts request needed"), ct = "Added contacts to portal" (was "The contacts on this request are already in the portal"). `PRE_IMPLY` ct → e3: ticking "Added contacts to portal" ticks "Received contacts"; unticking "Received contacts" unticks it. Same on the request, facility page "Mark steps done" and bulk upload (both are bulk columns now; old templates' "Already done: No contacts request needed" header still reads as e3 via `HDR_OLD`). Facilities saved before with ct but not e3 keep their flags as they are.
+- "Received contacts" without "Added contacts to portal" (request, bulk, or facility page) sets `f.ctNeed`: 1 "Contacts into portal" task once the facility is in Brightree and FastCare is done, even with no contacts typed in (`f.ctNeedTask` = its key, so it's made once; its form says to add them from the email or attachments). Until that task is done, "Added contacts to portal" doesn't show as done. Facilities from before have no `ctNeed`.
 
 ## Cache
 `index.html` loads the css/js with `?v=N`. Bump N on every push that changes css or js, or people keep the old version for up to 10 minutes.
