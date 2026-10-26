@@ -228,7 +228,7 @@ const TT = {
     title: t => 'Portal setup: ' + facName(facById(t.fac)),
     form: t => { const f = facById(t.fac); return f.dates ? portalForm(f) : '<div class="err">No dates yet: the facility needs a full address with a state that has a ship point. Fix it on the facility page.</div>'; }, example: t => ({ ok: true, emrok: emrReady(facById(t.fac)) }),
     validate: t => { const f = facById(t.fac); if (!f.dates) return 'No dates yet: fix the address on the facility page first.'; if (!V('ok')) return 'Tick when saved.'; if (emrReady(f) && !V('emrok')) return 'Log into the EMR and tick when the access works.'; return ''; },
-    done: (t, ctx) => { const f = facById(t.fac); G(f).noteDone = true; if (V('emrok')) { f.emrChecked = st.today; f.emrCheckedBy = ctx ? ctx.byName : ''; } else if (!f.emrChecked) f.emrCheckDue = true; }
+    done: (t, ctx) => { const f = facById(t.fac); G(f).noteDone = true; f.gtc = { wound: '', regional: '' }; gtMark(f, gtRows(f, true)); if (V('emrok')) { f.emrChecked = st.today; f.emrCheckedBy = ctx ? ctx.byName : ''; } else if (!f.emrChecked) f.emrCheckDue = true; }
   },
   EMR_CHECK: {
     title: t => 'Check EMR access: ' + facName(facById(t.fac)),
@@ -243,9 +243,9 @@ const TT = {
   },
   CONTACTS_PORTAL: {
     title: t => 'Contacts into portal: ' + facName(facById(t.fac)),
-    form: t => { const f = facById(t.fac), g = G(f), list = f.contacts.filter(c => !c.inPortal); return `<div class="instr">"Add Contact" for each. Position not in "Department" → "Other" + position in "Note". Leave "Include On". Only the ones not in the portal yet are listed.</div>${list.length ? contactTable(list) : f.ctNeedTask === t.key ? '<div class="meta">The contacts were received but aren\'t typed into the app. Add them from where you got them (the email, or the facility\'s attachments).</div>' : '<div class="meta">All contacts are already in the portal.</div>'}${(g.contacts || []).length ? '<div class="meta">Corporate contacts too: ' + g.contacts.map(c => esc(c.first + ' ' + c.last + ' (' + c.dept + ')')).join(', ') + '</div>' : ''}${chk('ok', 'Entered in the portal')}`; },
+    form: t => { const f = facById(t.fac), g = G(f), list = f.contacts.filter(c => !c.inPortal), gt = gtMissing(f); return `<div class="instr">"Add Contact" for each. Position not in "Department" → "Other" + position in "Note". Leave "Include On". Only the ones not in the portal yet are listed.</div>${list.length ? contactTable(list) : f.ctNeedTask === t.key ? '<div class="meta">The contacts were received but aren\'t typed into the app. Add them from where you got them (the email, or the facility\'s attachments).</div>' : gt.length ? '' : '<div class="meta">All contacts are already in the portal.</div>'}${gt.length ? '<div class="sect">Gentell wound rep / regional</div><div class="note">Picked after the portal setup was done. Use these Departments: they set "Include On" so they get the overview email and doc request email.</div>' + gtTable(gt) : ''}${(g.contacts || []).length ? '<div class="meta">Corporate contacts too: ' + g.contacts.map(c => esc(c.first + ' ' + c.last + ' (' + c.dept + ')')).join(', ') + '</div>' : ''}${chk('ok', 'Entered in the portal')}`; },
     example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when done.',
-    done: t => { facById(t.fac).contacts.forEach(c => c.inPortal = true); }
+    done: t => { const f = facById(t.fac); f.contacts.forEach(c => c.inPortal = true); gtMark(f, gtMissing(f)); }
   },
   SCHEDULE: {
     title: t => 'Schedule: ' + facName(facById(t.fac)),
@@ -279,7 +279,7 @@ const TT = {
   },
   PORTAL_UPDATE: {
     title: t => 'Update the portal: ' + facName(facById(t.fac)),
-    form: t => { const items = t.items || []; return `<div class="instr">These details changed after the portal setup was done. portal.isgmed.com → "Facilities" → "Facilities" → search 1 word → edit pencil. Change each field to the value under "Now".</div><div class="tablewrap"><table class="vals"><tr><th>Field</th><th>Was</th><th>Now</th></tr>${items.map(i => `<tr><td>${esc(pvLabel(i.k))}</td><td>${esc(i.from) || '<span class="meta">blank</span>'}</td><td><b>${esc(i.to) || 'blank'}</b></td></tr>`).join('')}</table></div>${items.some(i => i.k === 'addr' || i.k === 'corp') ? '<div class="note">Address or corporate: change it in Brightree too.</div>' : ''}<div class="note">If something else changes before you do this, it's added to this list. If a change is undone, it comes off.</div>${chk('ok', 'Updated in the portal')}`; },
+    form: t => { const items = t.items || []; return `<div class="instr">These details changed after the portal setup was done. portal.isgmed.com → "Facilities" → "Facilities" → search 1 word → edit pencil. Change each field to the value under "Now".</div><div class="tablewrap"><table class="vals"><tr><th>Field</th><th>Was</th><th>Now</th></tr>${items.map(i => `<tr><td>${esc(pvLabel(i.k))}</td><td>${esc(i.from) || '<span class="meta">blank</span>'}</td><td><b>${esc(i.to) || 'blank'}</b></td></tr>`).join('')}</table></div>${items.some(i => i.k === 'addr' || i.k === 'corp') ? '<div class="note">Address or corporate: change it in Brightree too.</div>' : ''}${items.some(i => i.k.startsWith('gt:')) ? '<div class="note">Contact changed: in the facility\'s contacts, delete the person under "Was" and "Add Contact" for the person under "Now" with the same Department (it sets "Include On").</div>' : ''}<div class="note">If something else changes before you do this, it's added to this list. If a change is undone, it comes off.</div>${chk('ok', 'Updated in the portal')}`; },
     example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when the portal is updated.', done: () => { }
   },
   CHICAGO_FOLLOW: {
@@ -291,6 +291,11 @@ const TT = {
   }
 };
 
+// wound rep + regional (from FastCare) as portal contacts, so they're on the overview email and doc request email
+function gtSetupBox(f) {
+  const rows = gtRows(f, true), miss = GT_ROLES.filter(r => !f[r.k]);
+  return `<div class="sect">Contacts: Gentell wound rep + regional</div>${rows.length ? `<div class="instr">"Add Contact" for each, with this Department. Leave "Include On": the Department sets it (overview email + doc request email).</div>${gtTable(rows)}` : ''}${miss.length ? `<div class="note">No ${miss.map(r => r.k === 'wound' ? 'wound rep' : 'regional').join(' or ')} yet (FastCare isn't done). You'll get a "Contacts into portal" task once ${miss.length > 1 ? 'they\'re' : 'it\'s'} in.</div>` : ''}`;
+}
 function portalForm(f) {
   const g = FG(f), d = f.dates, rep = nameOf(f.rep);
   const nonCovEnt = g.cov.Enteral === 'Covered and Noncovered';
@@ -305,7 +310,7 @@ function portalForm(f) {
   if (!g.noteDone) rows.push(['Corporate note ("Corporates")', 'Don\'t charge shipping for special orders or pumps (we will charge for rush shipping, but get corp approval for rush orders)']);
   const g0 = G(f), emr = emrReady(f);
   const emrBox = `<div class="sect">EMR access</div>` + (emr ? `<div class="instr">Log into the EMR${g0.emr ? ' (username <span class="q">' + esc(g0.emr) + '</span>, QR code in the "Authenticator" folder)' : ''} and check that the access works and that we can see everything we need for this facility.</div>${chk('emrok', 'Logged in: the access works and we have everything we need', !!f.emrChecked)}` : `<div class="note">EMR access isn't set up for this facility yet${f.emrChecked ? '' : '. You can finish the portal setup now; you\'ll get a "Check EMR access" task as soon as it\'s ready'}.</div>`);
-  return `<div class="instr">portal.isgmed.com → "Facilities" → "Facilities" → search 1 word → check "Corporate" → edit pencil. Leave every other field as it is. Have the Brightree report open for the pump, spike set and supplements lines.</div><div class="note">Nothing here gets typed back into this app.</div><div class="tablewrap"><table class="vals">${rows.map(r => `<tr><td>${esc(r[0])}</td><td><b>${esc(r[1])}</b></td></tr>`).join('')}</table></div><div class="note">Contacts are a separate task, so this doesn't wait on them.</div>${chk('ok', 'Saved ("Facility successfully updated.")')}${emrBox}`;
+  return `<div class="instr">portal.isgmed.com → "Facilities" → "Facilities" → search 1 word → check "Corporate" → edit pencil. Leave every other field as it is. Have the Brightree report open for the pump, spike set and supplements lines.</div><div class="note">Nothing here gets typed back into this app.</div><div class="tablewrap"><table class="vals">${rows.map(r => `<tr><td>${esc(r[0])}</td><td><b>${esc(r[1])}</b></td></tr>`).join('')}</table></div>${gtSetupBox(f)}<div class="note">Other contacts are a separate task, so this doesn't wait on them.</div>${chk('ok', 'Saved ("Facility successfully updated.")' + (gtRows(f, true).length ? ', and the contacts above added' : ''))}${emrBox}`;
 }
 function dateEditor(f) {
   if (f.manualDates) { const m = f.dates || manualDatesObj(f); return `<div class="card" style="padding:10px"><b>Dates (already scheduled)</b><div class="meta" style="margin-top:4px">Ordering ${fmt(m.ord)} · date of service ${fmt(m.dos)} · delivery ${fmt(m.del)} · enteral ships ${esc(CAD_L[f.manualDates.cadence] || 'Monthly')}</div><div class="meta">${esc(m.why[0])}.${f.email1 ? '' : ' The Chicago handoff email goes out with these dates as soon as the facility has an intake rep and its areas of care.'}</div></div>`; }

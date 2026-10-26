@@ -960,7 +960,8 @@ function run() {
       const fc = fTask(f, 'FASTCARE'), openCP = tasksOf(f, 'CONTACTS_PORTAL').some(t => !done(t));
       // "Received contacts" ticked without "Added contacts to portal": 1 task to add them, even if none are typed into the app
       const needRec = f.ctNeed && !f.ctNeedTask && !preDone(f, 'ct');
-      if (!openCP && f.inPortal && fcDoneNew(f) && (f.contacts.some(c => !c.inPortal) || needRec)) {
+      // wound rep / regional picked after the portal setup was done also go on it
+      if (!openCP && f.inPortal && ((fcDoneNew(f) && (f.contacts.some(c => !c.inPortal) || needRec)) || gtMissing(f).length)) {
         const t = newTask('CONTACTS_PORTAL', { fac: f.id, assignee: am, amTask: true });
         if (needRec) f.ctNeedTask = t.key;
         todo(t, 'add contacts for ' + facName(f), 'Add the contacts for <b>' + esc(facName(f)) + '</b> to the portal.');
@@ -1287,14 +1288,29 @@ function saveContacts(f, list, byName) {
 // ---------- "Update the portal" after the portal setup ----------
 // The values the transition lead typed into the portal at setup. A snapshot is taken when the portal setup is done; when any of them
 // changes later (facility page, corporate page, tracker, a rule), an "Update the portal" task lists what changed. Changing it back takes it off.
-const PV_LABELS = { acct: '"Account Manager"', clin: '"Clinical Review"', rep: '"Insurance Specialist", "Intake Specialist"', price: '"Price Table"', vendor: '"Main Vendor"', ship: '"Ship Point"', shipOst: '"Ship Point- United Ostomy, Fordmed"', corp: 'Corporate', addr: 'Address (portal and Brightree)' };
+const PV_LABELS = { acct: '"Account Manager"', clin: '"Clinical Review"', rep: '"Insurance Specialist", "Intake Specialist"', price: '"Price Table"', vendor: '"Main Vendor"', ship: '"Ship Point"', shipOst: '"Ship Point- United Ostomy, Fordmed"', corp: 'Corporate', addr: 'Address (portal and Brightree)', 'gt:wound': 'Contact: "Gentell Wound & Product Specialist"', 'gt:regional': 'Contact: "Gentell Regional Manager"' };
 const pvLabel = k => PV_LABELS[k] || (k.startsWith('cov:') ? '"CoverageType": ' + k.slice(4) : k);
 function portalVals(f) {
   const g = FG(f), o = { acct: nameOf(acctOf(f)), clin: nameOf(f.clin || f.rep), rep: nameOf(f.rep), price: G(f).price || '', vendor: f.gdd === 'Yes' ? (f.gddWh || '') : '',
     ship: String(shipOf(st.settings.shipEnt, f.state) || ''), shipOst: String(shipOf(st.settings.shipOst, f.state) || ''), corp: f.group || '', addr: f.address || '' };
   AREAS.forEach(a => o['cov:' + a] = (g.cov || {})[a] || '');
+  // wound rep + regional as portal contacts: only facilities whose portal setup was done with that step (f.gtc, since Oct 26 2026)
+  if (f.gtc) GT_ROLES.forEach(r => o['gt:' + r.k] = gtLabel(f[r.k]));
   return o;
 }
+
+// ---------- Gentell wound rep + regional as portal contacts (Malka, Oct 26 2026) ----------
+// Their portal Departments set "Include On" (overview email + doc request email), so they get the facility's emails.
+// f.gtc = { wound, regional }: the email of the person added to the portal ('' = not added yet). Set when portal setup is done.
+// No f.gtc = portal setup done before this (or by hand): nothing changes for that facility.
+const GT_ROLES = [{ k: 'wound', dept: 'Gentell Wound & Product Specialist' }, { k: 'regional', dept: 'Gentell Regional Manager' }];
+const gtLabel = p => p ? (p.name ? p.name + ' (' + p.email + ')' : p.email) : '';
+const gtSplit = p => { const w = String((p && p.name) || '').trim().split(/\s+/); return { first: w[0] || '', last: w.slice(1).join(' ') }; };
+// the wound rep / regional to add to the portal: all of them at portal setup, after it the ones picked later that aren't in yet
+const gtRows = (f, all) => GT_ROLES.filter(r => f[r.k] && (all || (f.gtc && !f.gtc[r.k]))).map(r => Object.assign({ role: r.k, dept: r.dept, email: f[r.k].email }, gtSplit(f[r.k])));
+const gtMissing = f => f.gtc && done(fTask(f, 'PORTAL_SETUP')) ? gtRows(f, false) : [];
+const gtMark = (f, rows) => rows.forEach(r => { f.gtc[r.role] = r.email; });
+const gtTable = rows => `<div class="tablewrap"><table><tr><th>First</th><th>Last</th><th>Department</th><th>Email</th></tr>${rows.map(r => `<tr><td>${esc(r.first)}</td><td>${esc(r.last)}</td><td><b>${esc(r.dept)}</b></td><td>${esc(r.email)}</td></tr>`).join('')}</table></div>`;
 function trackPortal(f) {
   if (f.deleted || f.archived) return;
   if (!(done(fTask(f, 'PORTAL_SETUP')) || preDone(f, 'ps'))) return;
@@ -1302,6 +1318,8 @@ function trackPortal(f) {
   // David's facilities waiting for scheduling: the intake rep (and clinical) go into the portal on the schedule task, not here
   if (autoPending(f) && f.portalSnap) { cur.rep = f.portalSnap.rep ?? cur.rep; cur.clin = f.portalSnap.clin ?? cur.clin; }
   if (!f.portalSnap) { f.portalSnap = cur; return; } // first time (or portal setup done again): nothing to update
+  // wound rep / regional not in the portal yet: they go on "Contacts into portal" (gtMissing), so the snapshot just follows them
+  GT_ROLES.forEach(r => { const k = 'gt:' + r.k; if (k in cur && !(f.gtc && f.gtc[r.k])) f.portalSnap[k] = cur[k]; });
   const diffs = Object.keys(cur).filter(k => cur[k] !== (f.portalSnap[k] ?? cur[k]));
   Object.keys(cur).forEach(k => { if (!(k in f.portalSnap)) f.portalSnap[k] = cur[k]; }); // a value added to the list later starts as it is
   if (!diffs.length) return;

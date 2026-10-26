@@ -134,6 +134,12 @@ A facility is never marked complete while its FastCare task is open (since Oct 1
 - e3 = "Received contacts" (was "No contacts request needed"), ct = "Added contacts to portal" (was "The contacts on this request are already in the portal"). `PRE_IMPLY` ct → e3: ticking "Added contacts to portal" ticks "Received contacts"; unticking "Received contacts" unticks it. Same on the request, facility page "Mark steps done" and bulk upload (both are bulk columns now; old templates' "Already done: No contacts request needed" header still reads as e3 via `HDR_OLD`). Facilities saved before with ct but not e3 keep their flags as they are.
 - "Received contacts" without "Added contacts to portal" (request, bulk, or facility page) sets `f.ctNeed`: 1 "Contacts into portal" task once the facility is in Brightree and FastCare is done, even with no contacts typed in (`f.ctNeedTask` = its key, so it's made once; its form says to add them from the email or attachments). Until that task is done, "Added contacts to portal" doesn't show as done. Facilities from before have no `ctNeed`.
 
+## Wound rep + regional as portal contacts (Malka, Oct 26 2026)
+- So they're on each facility's overview email and doc request email. Raizy added 2 portal Departments that set "Include On": "Gentell Wound & Product Specialist" and "Gentell Regional Manager" (`GT_ROLES`).
+- Portal setup lists them (`gtSetupBox`, from FastCare). Mark done sets `f.gtc` = { wound, regional } (email added, '' = not yet). No `f.gtc` = portal setup done before this or by hand ("Already done"/"Mark steps done"): nothing new for that facility (Raizy: new ones only).
+- Picked after portal setup (FastCare done later): `gtMissing(f)` puts them on a "Contacts into portal" task (made even with no other contacts); its done sets `f.gtc`.
+- Changed later (Edit details, FastCare redone): `portalVals` has `gt:wound` / `gt:regional` when `f.gtc` is set, so the swap goes on "Update the portal" (delete the old person, add the new with the same Department). A role not added yet just follows along in the snapshot (no update task).
+
 ## Cache
 `index.html` loads the css/js with `?v=N`. Bump N on every push that changes css or js, or people keep the old version for up to 10 minutes.
 
