@@ -75,21 +75,27 @@ const TT = {
       const cell = (f, p) => { const opts = p === 'am' ? A : R, v = p === 'clin' ? f.clin : p === 'acct' ? f.acct : p === 'am' ? f.am : f.rep, need = ruleNeeds(f).includes(p) || (p === 'am' && !f.am && !(g && g.am)) || (p === 'rep' && !f.rep && !autoPending(f));
         if (p === 'rep' && autoPending(f)) return `<td>${sel(p + '_' + f.id, opts, '', true)}</td>`; // locked by syncRepLocks: picked at scheduling
         return `<td class="${need ? 'need' : ''}">${sel(p + '_' + f.id, opts, v, true)}${!v && !need ? `<div class="meta">${p === 'clin' ? 'same as intake' : p === 'acct' ? (g && g.acct ? 'from the rule' : 'none') : 'from the rule'}</div>` : ''}</td>`; };
-      return `<div class="instr">${fs.length} facilit${fs.length === 1 ? 'y needs' : 'ies need'} reps picked.${has ? ' The corporate rule fills some positions (' + esc(ruleText(g)) + '); pick the rest per facility.' : ''} Same people for all? Fill the top row and click "Apply to all" (blank boxes in the top row are skipped). Different per facility? Change the rows below. Boxes outlined in blue are the ones still needed.</div>
-      <div class="card" style="padding:10px"><b>All facilities</b><div class="row">${fld('Intake rep', selPer('rep', R, has ? g.rep : ''))}${fld('Clinical rep', selPer('clin', [['__same', 'Same as intake rep'], ...R], has ? (g.clinSame ? '__same' : g.clin) : '__same'))}${fld('Account manager', selPer('acct', R, has ? g.acct : ''))}${fld('Transition lead', selPer('am', A, has ? g.am : ''))}</div><button type="button" class="btn sm" data-applyall="1">Apply to all ↓</button></div>
-      <div class="tablewrap"><table class="ruletbl"><tr><th>Facility</th><th>Intake rep</th><th>Clinical rep</th><th>Account manager</th><th>Transition lead</th></tr>${fs.map(f => `<tr><td>${esc(facName(f))}${chiTag(f)}</td>${['rep', 'clin', 'acct', 'am'].map(p => cell(f, p)).join('')}</tr>`).join('')}</table></div>
+      // Chicago transition lead: anyone in the company address book, typed in per facility (or once in the top row)
+      const ctlCell = f => `<td class="${ctlNeeded(f) ? 'need' : ''}">${personPick('ctl_' + f.id, f.ctl)}</td>`;
+      const onlyCtl = fs.length && fs.every(f => ruleNeeds(f).every(p => p === 'ctl'));
+      return `<div class="instr">${fs.length} facilit${fs.length === 1 ? 'y needs' : 'ies need'} ${onlyCtl ? 'a Chicago transition lead' : 'reps'} picked.${has ? ' The corporate rule fills some positions (' + esc(ruleText(g)) + '); pick the rest per facility.' : ''} Same people for all? Fill the top row and click "Apply to all" (blank boxes in the top row are skipped). Different per facility? Change the rows below. Boxes outlined in blue are the ones still needed.</div>
+      <div class="card" style="padding:10px"><b>All facilities</b><div class="row">${fld('Intake rep', selPer('rep', R, has ? g.rep : ''))}${fld('Clinical rep', selPer('clin', [['__same', 'Same as intake rep'], ...R], has ? (g.clinSame ? '__same' : g.clin) : '__same'))}${fld('Account manager', selPer('acct', R, has ? g.acct : ''))}${fld('Transition lead', selPer('am', A, has ? g.am : ''))}${fld('Chicago transition lead' + tip('The person at GNS Chicago who sends the transfer email to the facility. Anyone at Gentell: start typing a name. CC\'d on the Chicago handoff email and the in-service &amp; contacts request. Not saved in the corporate rule.'), personPick('ctl', null))}</div><button type="button" class="btn sm" data-applyall="1">Apply to all ↓</button></div>
+      <div class="tablewrap"><table class="ruletbl"><tr><th>Facility</th><th>Intake rep</th><th>Clinical rep</th><th>Account manager</th><th>Transition lead</th><th>Chicago transition lead</th></tr>${fs.map(f => `<tr><td>${esc(facName(f))}${chiTag(f)}</td>${['rep', 'clin', 'acct', 'am'].map(p => cell(f, p)).join('')}${ctlCell(f)}</tr>`).join('')}</table></div>
       ${fld('Why these reps? (optional)', txt('why', '', 'Goes in the email to the transition lead'))}
-      ${t.group === '__nocorp' ? '' : chk('rule', 'Save the top row as the corporate rule. Future facilities under this corporate get the positions filled in automatically; positions left blank are picked per facility each time.', true)}`;
+      ${t.group === '__nocorp' ? '' : chk('rule', 'Save the top row as the corporate rule. Future facilities under this corporate get the positions filled in automatically; positions left blank are picked per facility each time. (The Chicago transition lead isn\'t part of the rule.)', !onlyCtl)}`;
     },
-    example: t => { const r = repList()[0], a = amList()[0], o = { rep: lc(r.email), am: lc(a.email), clin: '__same', acct: lc(r.email) }; ruleFacs(t).forEach(f => { o['rep_' + f.id] = lc(r.email); o['am_' + f.id] = lc(a.email); }); return o; },
+    example: t => { const r = repList()[0], a = amList()[0], o = { rep: lc(r.email), am: lc(a.email), clin: '__same', acct: lc(r.email), ctl: 'Kyle King <kyle.king@demo.gentell.com>' }; ruleFacs(t).forEach(f => { o['rep_' + f.id] = lc(r.email); o['am_' + f.id] = lc(a.email); }); return o; },
     validate: t => {
       const g = t.group === '__nocorp' ? null : grp(t.group), top = p => { const v = V(p); return p === 'clin' && v === '__same' ? '' : v; };
       if (V('rule') && !['rep', 'clin', 'acct', 'am'].some(p => top(p)) && V('clin') !== '__same') return 'To save a corporate rule, fill at least 1 position in the top row (or untick "Save the top row as the corporate rule").';
+      if (V('ctl') && !readPerson('ctl')) return 'Top row: pick the Chicago transition lead from the list (start typing their name).';
       for (const f of ruleFacs(t)) {
+        if (V('ctl_' + f.id) && !readPerson('ctl_' + f.id)) return facName(f) + ': pick the Chicago transition lead from the list (start typing their name).';
+        if (ctlNeeded(f) && !readPerson('ctl_' + f.id) && !readPerson('ctl')) return facName(f) + ': pick the Chicago transition lead (or fill the top row).';
         // a blank row box takes the top row's value; a position the new rule fills counts as filled
         const willRule = p => V('rule') && g && (p === 'clin' ? !!V('clin') : !!top(p));
         const has = p => !!(V(p + '_' + f.id) || top(p) || willRule(p) || (p === 'clin' && V('clin') === '__same') || (p === 'am' && (f.am || (!V('rule') && g && g.am))) || (p !== 'am' && f[p]));
-        const need = [...new Set(['rep', 'am', ...(V('rule') && g ? ['rep', 'clin', 'acct', 'am'].filter(p => p === 'clin' ? !V('clin') : !top(p)) : ruleNeeds(f))])];
+        const need = [...new Set(['rep', 'am', ...(V('rule') && g ? ['rep', 'clin', 'acct', 'am'].filter(p => p === 'clin' ? !V('clin') : !top(p)) : ruleNeeds(f).filter(p => p !== 'ctl'))])];
         const rowAcct = V('acct_' + f.id) || top('acct') || f.acct || (g && g.acct) || '';
         const miss = need.filter(p => !has(p) && !(p === 'rep' && !f.email1 && !f.manualDates && isAutoAcct(rowAcct)));
         if (miss.length) return facName(f) + ': pick the ' + miss.map(posName).join(', ') + ' (or fill the top row).';
@@ -100,7 +106,11 @@ const TT = {
       const g = grp(t.group), top = p => V(p) === '__same' ? '' : V(p);
       if (g && V('rule')) setRule(g, { rep: V('rep'), clin: V('clin'), acct: V('acct'), am: V('am') });
       const byAm = {};
+      // facilities that only needed a Chicago transition lead: their transition lead already knows about them
+      const onlyCtl = new Set(ruleFacs(t).filter(f => ruleNeeds(f).every(p => p === 'ctl')).map(f => f.id)), amWas = {};
       ruleFacs(t).forEach(f => {
+        amWas[f.id] = amOf(f);
+        const c = readPerson('ctl_' + f.id) || readPerson('ctl'); if (c) f.ctl = c;
         f.acct = V('acct_' + f.id) || top('acct') || f.acct || '';
         // account manager David: no intake rep until scheduling, David is the clinical rep (run() keeps it that way)
         if (autoPending(f)) { f.rep = ''; f.clin = V('clin_' + f.id) || top('clin') || f.clin || acctOf(f); }
@@ -109,7 +119,8 @@ const TT = {
         f.clin = V('clin_' + f.id) || top('clin') || f.clin || (g && g.clin && !g.clinSame ? g.clin : '') || f.rep;
         }
         f.am = V('am_' + f.id) || top('am') || f.am || (g && g.am) || '';
-        const a = amOf(f); (byAm[a] = byAm[a] || []).push(f);
+        const a = amOf(f); if (onlyCtl.has(f.id) && a === amWas[f.id]) return;
+        (byAm[a] = byAm[a] || []).push(f);
       });
       // skip facilities this transition lead already got a "New transition" for when the request came in
       Object.entries(byAm).map(([am, list]) => [am, list.filter(f => !st.mails.some(m => m.key === 'm:E2:' + f.req + ':' + lc(am)))]).filter(([, list]) => list.length).forEach(([am, list]) => mail({ key: 'm:E2:' + t.key + ':' + am, code: 'E2', to: [am], link: 'none', subject: 'New transition: ' + list.map(f => f.name).join(', '), body: `<p>${esc(ctx.byName)} assigned you ${list.length} facilit${list.length > 1 ? 'ies' : 'y'}${t.group === '__nocorp' ? '' : ' from <b>' + esc(t.group) + '</b>'}: ${list.map(f => esc(f.name) + ' (intake rep ' + (autoPending(f) ? 'picked at scheduling' : esc(nameOf(f.rep))) + ')').join(', ')}.</p>${V('why') ? '<p><b>Why these reps:</b> ' + esc(V('why')) + '</p>' : ''}<p><b>Background:</b> ${esc(list[0].why) || '-'}</p><p>All requests already went out.</p>${amFirstTasks(list)}` }));
@@ -181,7 +192,7 @@ const TT = {
       <div class="row"><div class="field"><label>Facility contacts</label>${shotZone('fc', 'fac', shotFor(t, 'fac'))}</div><div class="field"><label>Corporate contacts</label>${shotZone('fc', 'corp', shotFor(t, 'corp'))}</div></div>
       ${f.contactsShot || f.corpShot ? `<div class="note">Already saved: the ${[f.contactsShot && 'facility', f.corpShot && 'corporate'].filter(Boolean).join(' and ')} contacts screenshot. Paste a new one only to replace it.</div>` : ''}
       ${chk('fc_nocts', 'No FastCare contacts available')}
-      ${chk('fc_norev', 'We don\'t need the contacts reviewed' + tip('We already have the contacts and we\'re sure they\'re accurate. No contacts request goes to the wound rep and regional. They still get the in-service ask on the Chicago handoff email.'), !!f.noE3)}
+      ${chk('fc_norev', 'We don\'t need the contacts reviewed' + tip('We already have the contacts and we\'re sure they\'re accurate. No contacts request goes to the wound rep and regional. They still get an email asking them to get the facility to book an in-service.'), !!f.noE3)}
       ${e3List(f).length ? `<div class="note">These also go in the email (added on the request, facility page or corporate): ${e3List(f).map(c => esc((c.first + ' ' + c.last).trim() || c.email)).join(', ')}</div>` : ''}`;
     },
     example: t => { const n = fcNeed(t); const o = { w: 'Peter West <peter.west@demo.gentell.com>', r: 'Brian McCauley <brian.mccauley@demo.gentell.com>' }; if (n.corp) { o.fc_grp = 'New corporate…'; o.fc_new = 'Infinity Healthcare Management'; } if (n.addr) o.fc_addr = '123 Demo St, LaGrange, IN 46761'; o.fc_nocts = true; return o; },
@@ -284,10 +295,10 @@ const TT = {
   },
   CHICAGO_FOLLOW: {
     title: t => 'Chicago hasn\'t sent the facility email: ' + facName(facById(t.fac)),
-    form: t => `<div class="instr">The system nudged Chicago once. Reach out to ${esc(chiGreet(facById(t.fac)))} directly.</div>${chk('ok', 'Chicago confirmed it went out')}`,
+    form: t => `<div class="instr">The system nudged Chicago once. Reach out to ${esc(facEmailWho(facById(t.fac)))} directly.</div>${chk('ok', 'Chicago confirmed it went out')}`,
     example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when confirmed.',
     done: (t, ctx) => markEmail2(facById(t.fac), ctx.byName),
-    opens: t => ({ subject: 'Chicago still hasn\'t sent it: ' + facName(facById(t.fac)), body: '<p>5 business days since the Chicago handoff email and no transfer notice to the facility yet. Reach out to ' + esc(chiGreet(facById(t.fac))) + ' directly.</p>' })
+    opens: t => ({ subject: 'Chicago still hasn\'t sent it: ' + facName(facById(t.fac)), body: '<p>5 business days since the Chicago handoff email and no transfer notice to the facility yet. Reach out to ' + esc(facEmailWho(facById(t.fac))) + ' directly.</p>' })
   }
 };
 

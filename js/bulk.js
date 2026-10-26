@@ -34,6 +34,7 @@ const CT_COLS = [
   ['acct', 'Account manager', 'Optional. Pick from the list.', 'reps', 22],
   ['rep', 'Intake rep', 'Optional. Leave blank when the account manager is ' + '{AUTO}' + ' (picked at scheduling).', 'reps', 22],
   ['am', 'Transition lead', 'Optional.', 'leads', 22],
+  ['ctl', 'Chicago transition lead email', 'Optional. Their Gentell email (anyone in the company address book). Blank → {RULES} picks one.', '', 28],
   ...BULK_PRE.map(k => ['pre_' + k, 'Already done: ' + PRE_HDR[k], ((PRE_ITEMS.find(x => x[0] === k) || [])[2] || '') + ' Yes or blank.', 'yes', 16]),
   ['pn', 'Brightree name', 'Only with "Already done: Added to Brightree". Exactly as Brightree shows it.', '', 28],
   ['gdd', 'GDD orders?', 'Only with "Already done: GDD question answered". Yes or No.', 'yesno', 12],
@@ -214,7 +215,7 @@ function bulkPerson(v, kind) {
 const yesNo = v => !v ? false : YES.test(v) ? true : NO.test(v) ? false : null;
 // wound rep / regional emails → names from the company address book (cached per upload)
 async function bulkLookups(rows) {
-  const want = [...new Set(rows.flatMap(r => [r.wound, r.regional]).filter(e => e && validEmail(e)).map(lc))];
+  const want = [...new Set(rows.flatMap(r => [r.wound, r.regional, r.ctl]).filter(e => e && validEmail(e)).map(lc))];
   const cache = ui.bulk.look = ui.bulk.look || {};
   for (const e of want) {
     if (e in cache) continue;
@@ -242,6 +243,8 @@ function ctCheck(out) {
     v.why = r.why;
     v.cov = {};
     AREAS.forEach(a => { const x = r['cov_' + a]; if (!x || lc(x) === 'not sure') return; const m = covOpts(a).find(o2 => lc(o2) === lc(x)); if (!m) E(a + ': "' + x + '" isn\'t an option (' + covOpts(a).join(', ') + ', Not sure).'); else v.cov[a] = m; });
+    v.ctl = null;
+    if (r.ctl) { const L = 'Chicago transition lead email', hit = look[lc(r.ctl)]; if (!validEmail(r.ctl)) E(L + ': "' + r.ctl + '" isn\'t an email address.'); else if (hit === undefined) E(L + ': not looked up yet.'); else if (hit && hit.err) E(L + ': couldn\'t check the address book (' + hit.err + ').'); else if (!hit) E(L + ': ' + r.ctl + ' isn\'t in the company address book.'); else v.ctl = hit; }
     for (const [k, kind] of [['acct', 'rep'], ['rep', 'rep'], ['am', 'lead']]) { const p = bulkPerson(r[k], kind); if (p.err) E(({ acct: 'Account manager', rep: 'Intake rep', am: 'Transition lead' })[k] + ': ' + p.err); v[k] = p.email || ''; }
     if (v.rep && isAutoAcct(v.acct)) E('Intake rep: leave it blank. The account manager is ' + nameOf(v.acct) + ', so the intake rep is picked at scheduling.');
     // already done
@@ -320,6 +323,7 @@ function ctBuild(checked, ids) {
     const v = o.v;
     if (v.group) { const g = ensureGroup(v.group, v.none); if (v.pre.corp && !g.price) g.existing = true; g.cov = Object.assign({}, v.cov, g.cov || {}); }
     const f = { id: ids[i], req: req.key, name: v.name, address: v.address, state: v.state, group: v.group ? grp(v.group).name : '', pendingCov: Object.assign({}, v.cov), rep: v.rep, clin: v.rep, am: v.am, acct: v.acct, contacts: [], requested: st.today, requester: me(), why: v.why, files: [], bulkRow: o.row };
+    if (v.ctl) f.ctl = Object.assign({}, v.ctl);
     applyPre(f, Object.assign({}, v.pre), { name: v.name }, v.info);
     st.facs.push(f); return f;
   });
@@ -397,7 +401,7 @@ function ctCard(o) {
   const i = v.info || {}, cov = AREAS.map(a => a + ': ' + (v.cov[a] || (g && g.cov && g.cov[a] ? g.cov[a] + ' (corporate\'s)' : 'not sure'))).join(' · ');
   const repTxt = v.rep ? nameOf(v.rep) : isAutoAcct(v.acct) ? 'picked at scheduling' : (g && g.rep ? nameOf(g.rep) + ' (corporate rule)' : 'not picked: ' + roleName('rules') + ' picks');
   return `<div class="card ${o.errs.length ? 'bulkbad' : ''}" style="padding:10px"><div class="row" style="justify-content:space-between;align-items:baseline"><b>${esc(v.name || '(no name)')}</b><span class="meta">Row ${o.row}</span></div>${bulkMsgs(o)}
-  <div class="kv" style="margin-top:6px">${pv('Address', v.address ? esc(v.address) : '<span class="meta">none (found on the FastCare task)</span>')}${pv('Corporate', v.none ? esc(v.group) + ' <span class="tag">no corporate</span>' : v.unknown ? '<span class="meta">not known yet (FastCare task)</span>' : esc(v.group) + (g ? ' <span class="meta">(already in the app)</span>' : ' <span class="tag">new to the app</span>'))}${pv('Reason', esc(v.why) || '-')}${pv('Areas of care', esc(cov))}${pv('Account manager', esc(nameOf(v.acct)) || '-')}${pv('Intake rep', esc(repTxt))}${pv('Transition lead', esc(nameOf(v.am)) || (g && g.am ? esc(nameOf(g.am)) + ' (corporate rule)' : '<span class="meta">' + esc(nameOf(fallbackOwner())) + ' (nobody picked)</span>'))}${pv('Already done', pre.length ? esc(pre.join(', ')) : '-')}${i.pn ? pv('Brightree name', esc(i.pn)) : ''}${i.gdd ? pv('GDD orders', esc(i.gdd) + (i.gddWh ? ' (' + esc(i.gddWh) + ')' : '')) : ''}${i.wound ? pv('Wound rep / regional', esc(i.wound.name) + ' / ' + esc(i.regional ? i.regional.name : '-')) : ''}${i.ord ? pv('Scheduled', 'Ordering ' + fmtS(i.ord) + ' · DOS ' + fmtS(i.dos) + ' · delivery ' + fmtS(i.del) + ' · enteral ' + esc(i.cad || 'Monthly')) : ''}${f && f.dates && !i.ord ? pv('Dates now', 'Ordering ' + fmtS(f.dates.ord) + ' · DOS ' + fmtS(f.dates.dos)) : ''}</div>${o.errs.length ? '' : bulkMade(o)}</div>`;
+  <div class="kv" style="margin-top:6px">${pv('Address', v.address ? esc(v.address) : '<span class="meta">none (found on the FastCare task)</span>')}${pv('Corporate', v.none ? esc(v.group) + ' <span class="tag">no corporate</span>' : v.unknown ? '<span class="meta">not known yet (FastCare task)</span>' : esc(v.group) + (g ? ' <span class="meta">(already in the app)</span>' : ' <span class="tag">new to the app</span>'))}${pv('Reason', esc(v.why) || '-')}${pv('Areas of care', esc(cov))}${pv('Account manager', esc(nameOf(v.acct)) || '-')}${pv('Intake rep', esc(repTxt))}${pv('Transition lead', esc(nameOf(v.am)) || (g && g.am ? esc(nameOf(g.am)) + ' (corporate rule)' : '<span class="meta">' + esc(nameOf(fallbackOwner())) + ' (nobody picked)</span>'))}${pv('Chicago transition lead', v.ctl ? esc(v.ctl.name) : '<span class="meta">' + esc(roleName('rules')) + ' picks one</span>')}${pv('Already done', pre.length ? esc(pre.join(', ')) : '-')}${i.pn ? pv('Brightree name', esc(i.pn)) : ''}${i.gdd ? pv('GDD orders', esc(i.gdd) + (i.gddWh ? ' (' + esc(i.gddWh) + ')' : '')) : ''}${i.wound ? pv('Wound rep / regional', esc(i.wound.name) + ' / ' + esc(i.regional ? i.regional.name : '-')) : ''}${i.ord ? pv('Scheduled', 'Ordering ' + fmtS(i.ord) + ' · DOS ' + fmtS(i.dos) + ' · delivery ' + fmtS(i.del) + ' · enteral ' + esc(i.cad || 'Monthly')) : ''}${f && f.dates && !i.ord ? pv('Dates now', 'Ordering ' + fmtS(f.dates.ord) + ' · DOS ' + fmtS(f.dates.dos)) : ''}</div>${o.errs.length ? '' : bulkMade(o)}</div>`;
 }
 function nfCard(o) {
   const v = o.v, d = ui.bulk.dry && ui.bulk.dry.byId[o.row], n = d ? d.obj : null;

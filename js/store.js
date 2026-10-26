@@ -110,7 +110,7 @@ function demoSettings() {
   s.inserviceUrl = 'https://example.com/inservice';
   return s;
 }
-function demoDirectory() { return [{ name: 'Peter West', email: 'peter.west@demo.gentell.com' }, { name: 'Brian McCauley', email: 'brian.mccauley@demo.gentell.com' }, { name: 'Dana Fox', email: 'dana.fox@demo.gentell.com' }, ...st.settings.people.map(p => ({ name: p.name, email: p.email }))]; }
+function demoDirectory() { return [{ name: 'Peter West', email: 'peter.west@demo.gentell.com' }, { name: 'Brian McCauley', email: 'brian.mccauley@demo.gentell.com' }, { name: 'Dana Fox', email: 'dana.fox@demo.gentell.com' }, { name: 'Kyle King', email: 'kyle.king@demo.gentell.com' }, { name: 'Danielle Butler', email: 'danielle.butler@demo.gentell.com' }, ...st.settings.people.map(p => ({ name: p.name, email: p.email }))]; }
 
 // =====================================================================
 // SharePoint store (Microsoft Graph)
