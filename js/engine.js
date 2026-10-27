@@ -755,7 +755,15 @@ function ruleNeeds(f) {
   return n;
 }
 // fills a facility's empty positions from the corporate's rule (never overwrites what a facility already has)
+// sets the Gentell WC Transition Lead. Changed after their email went out (and the facility email hasn't): the transition lead is told to forward it.
+function setCtl(f, c, byName) {
+  if (!c || !validEmail(c.email)) return;
+  if (ctlOf(f) && lc(c.email) !== ctlEmail(f) && f.e1b && !f.email2) mail({ key: 'm:E13:ctl:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Gentell WC Transition Lead changed: ' + facName(f), body: '<p>' + esc(byName) + ' changed the Gentell WC Transition Lead from ' + esc(f.ctl.name) + ' to ' + esc(c.name) + '. The email asking them to send the facility the transfer email went to ' + esc(f.ctl.name) + ' on ' + fmt(f.e1b) + '. Forward it to ' + esc(c.name) + ' if they need it.</p>' });
+  f.ctl = { name: c.name, email: lc(c.email) };
+}
 function applyRule(f, g) {
+  // Gentell WC Transition Lead from the corporate (g.ctl, Oct 27 2026): fills a facility that has none, never overwrites
+  if (g && g.ctl && !ctlOf(f) && !f.complete) f.ctl = { name: g.ctl.name, email: lc(g.ctl.email) };
   if (autoPending(f)) { if (!f.am && g.am) f.am = g.am; if (!f.clin && g.clin && !g.clinSame) f.clin = g.clin; return; } // intake rep waits for scheduling
   if (!partialRule(g)) { if (!f.rep && g.rep) { f.rep = g.rep; f.clin = g.clin || g.rep; if (!f.am && g.am) f.am = g.am; } return; } // older rules: unchanged
   if (!f.rep && g.rep) f.rep = g.rep;
@@ -768,7 +776,7 @@ function setRule(g, v) {
   g.clinSame = v.clin === '__same'; g.clin = g.clinSame ? g.rep : (v.clin || '');
   g.ruleIndiv = RULE_POS.map(x => x[0]).filter(p => p === 'clin' ? !v.clin : !v[p]);
 }
-const ruleText = g => { if (!g.rep && !g.clin && !g.clinSame && !g.acct && !g.am) return ''; return RULE_POS.map(([p, l]) => { const v = p === 'clin' && g.clinSame ? 'same as intake' : g[p] ? nameOf(g[p]) : (partialRule(g) ? 'per facility' : (p === 'acct' ? 'none' : '-')); return l + ': ' + v; }).join(' · '); };
+const ruleText = g => { if (!g.rep && !g.clin && !g.clinSame && !g.acct && !g.am) return g.ctl ? 'Gentell WC Transition Lead: ' + g.ctl.name : ''; return RULE_POS.map(([p, l]) => { const v = p === 'clin' && g.clinSame ? 'same as intake' : g[p] ? nameOf(g[p]) : (partialRule(g) ? 'per facility' : (p === 'acct' ? 'none' : '-')); return l + ': ' + v; }).join(' · ') + (g.ctl ? ' · Gentell WC Transition Lead: ' + g.ctl.name : ''); };
 function ruleFacs(t) { return st.facs.filter(f => !f.hold && !f.archived && (t.group === '__nocorp' ? !f.group && ruleNeeds(f).length : lc(f.group) === lc(t.group) && ruleNeeds(f).length)); }
 
 // ---------- intake rep picked automatically at scheduling (David's team, Oct 20 2026) ----------
@@ -1288,7 +1296,7 @@ const btNew = (f, v) => v.le !== undefined && !f.bt && datesOpen(f) && !f.manual
 const btChanged = (f, v) => { const b = f.bt || {}, cad = ({ 4: 'Monthly', 2: 'Biweekly', 1: 'Weekly' })[b.cadence] || 'Monthly'; return v.le !== undefined && !!f.bt && datesOpen(f) && ((b.lastEnt || '') !== v.le || (b.lastOuts || '') !== v.lo || cad !== v.cad); };
 function editFacilityCheck(f, v) {
   if (!f) return 'That facility isn\'t there anymore.';
-  const blank = (had, now, label) => had && !now ? label + ' can\'t be left blank. It was entered before; if it was wrong, change it, or put the task that entered it back in the queue.' : '';
+  const blank = (had, now, label) => had && now !== undefined && !now ? label + ' can\'t be left blank. It was entered before; if it was wrong, change it, or put the task that entered it back in the queue.' : '';
   const errs = [
     blank(f.name, v.name, 'Facility name'), blank(f.portalName, v.pn, 'Portal name'), blank(f.address, v.addr, 'Address'),
     autoPending(Object.assign({}, f, { acct: v.acct || f.acct })) ? '' : blank(f.rep, v.rep, 'Intake rep'), // David's facilities: picked at scheduling
@@ -1322,8 +1330,7 @@ function editFacility(f, v, by, byName) {
   if (v.none) { if (!G(f).standalone) makeStandalone(f); } else if (v.grp && lc(v.grp) !== lc(f.group) && grp(v.grp)) f.group = grp(v.grp).name;
   if (v.wound) f.wound = v.wound; if (v.regional) f.regional = v.regional;
   // a new Gentell WC Transition Lead after their email went out (and the facility email hasn't): the new one never got it
-  if (v.ctl && ctlOf(f) && lc(v.ctl.email) !== ctlEmail(f) && f.e1b && !f.email2) mail({ key: 'm:E13:ctl:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Gentell WC Transition Lead changed: ' + facName(f), body: '<p>' + esc(byName) + ' changed the Gentell WC Transition Lead from ' + esc(f.ctl.name) + ' to ' + esc(v.ctl.name) + '. The email asking them to send the facility the transfer email went to ' + esc(f.ctl.name) + ' on ' + fmt(f.e1b) + '. Forward it to ' + esc(v.ctl.name) + ' if they need it.</p>' });
-  if (v.ctl) f.ctl = v.ctl;
+  if (v.ctl) setCtl(f, v.ctl, byName);
   if (v.why) f.why = v.why;
   // first GDD answer here: same as Chris answering (FYI to the GDD contact if Yes), and his task closes
   if (['Yes', 'No'].includes(v.gdd) && !['Yes', 'No'].includes(f.gdd)) { gddAnswer(f, v.gdd, v.gddWh); closed.push(...closeFilled(f, ['GDD'], by, byName)); }
@@ -1346,6 +1353,32 @@ function editFacility(f, v, by, byName) {
     mail({ key: 'm:E20:lead:' + f.id + ':' + uid(), code: 'E20', to: [amOf(f)], cc: [oldAm], fac: f.id, link: 'fac', subject: 'You\'re now the transition lead: ' + facName(f), body: `<p>${esc(byName)} made you the transition lead for <b>${esc(facName(f))}</b> (it was ${esc(nameOf(oldAm))}).</p>${open.length ? '<p>Its open tasks moved to you:</p>' + taskList(open.map(t => [esc(taskTitle(t)), t.key])) : '<p>No open tasks right now.</p>'}` });
   }
   return { ok: true, bt: btRes, closed, fcLeft };
+}
+// tracker "Change selected" (Oct 27 2026): Edit details for many facilities at once, only for the boxes filled in.
+// ch = { rep, clin ('__same' = each facility's intake rep), acct, am, ctl, wound, regional }. Same checks and side effects as Edit details
+// (new transition lead → E20, intake rep after the handoff → E13, wound rep + regional → FastCare closes, WC lead after their email → E13).
+// Returns { done, skipped: [[facility, why]] }.
+function bulkEdit(ids, ch, by, byName) {
+  const out = { done: 0, skipped: [] };
+  ids.forEach(id => {
+    const f = facById(id); if (!f || f.deleted) return;
+    const v = {}, skip = why => out.skipped.push([facName(f), why]);
+    if (ch.acct) v.acct = ch.acct;
+    if (ch.am) v.am = ch.am;
+    const pending = autoPending(Object.assign({}, f, { acct: v.acct || f.acct }));
+    if (ch.rep) { if (pending) skip('intake rep not set: it\'s picked at scheduling (account manager ' + nameOf(autoAcct()) + ')'); else v.rep = ch.rep; }
+    // clinical: picked, or "same as intake rep". Not picked: follows a new intake rep when it was blank or the same as the old one (as before)
+    if (ch.clin === '__same') { if (v.rep || f.rep) v.clin = v.rep || f.rep; else skip('clinical rep not set: no intake rep yet'); }
+    else if (ch.clin) v.clin = ch.clin;
+    else if (v.rep && (!f.clin || lc(f.clin) === lc(f.rep))) v.clin = v.rep;
+    if (ch.ctl) v.ctl = ch.ctl;
+    if (ch.wound) v.wound = ch.wound;
+    if (ch.regional) v.regional = ch.regional;
+    if (!Object.keys(v).length) return;
+    const err = editFacilityCheck(f, v); if (err) { skip(err); return; }
+    editFacility(f, v, by, byName); out.done++;
+  });
+  return out;
 }
 // contacts edited on the facility page. A contact that's new or changed goes on the next "Contacts into portal" task.
 function saveContacts(f, list, byName) {
