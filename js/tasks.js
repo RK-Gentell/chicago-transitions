@@ -75,23 +75,23 @@ const TT = {
       const cell = (f, p) => { const opts = p === 'am' ? A : R, v = p === 'clin' ? f.clin : p === 'acct' ? f.acct : p === 'am' ? f.am : f.rep, need = ruleNeeds(f).includes(p) || (p === 'am' && !f.am && !(g && g.am)) || (p === 'rep' && !f.rep && !autoPending(f));
         if (p === 'rep' && autoPending(f)) return `<td>${sel(p + '_' + f.id, opts, '', true)}</td>`; // locked by syncRepLocks: picked at scheduling
         return `<td class="${need ? 'need' : ''}">${sel(p + '_' + f.id, opts, v, true)}${!v && !need ? `<div class="meta">${p === 'clin' ? 'same as intake' : p === 'acct' ? (g && g.acct ? 'from the rule' : 'none') : 'from the rule'}</div>` : ''}</td>`; };
-      // Chicago transition lead: anyone in the company address book, typed in per facility (or once in the top row)
+      // Gentell WC Transition Lead: anyone in the company address book, typed in per facility (or once in the top row)
       const ctlCell = f => `<td class="${ctlNeeded(f) ? 'need' : ''}">${personPick('ctl_' + f.id, f.ctl)}</td>`;
       const onlyCtl = fs.length && fs.every(f => ruleNeeds(f).every(p => p === 'ctl'));
-      return `<div class="instr">${fs.length} facilit${fs.length === 1 ? 'y needs' : 'ies need'} ${onlyCtl ? 'a Chicago transition lead' : 'reps'} picked.${has ? ' The corporate rule fills some positions (' + esc(ruleText(g)) + '); pick the rest per facility.' : ''} Same people for all? Fill the top row and click "Apply to all" (blank boxes in the top row are skipped). Different per facility? Change the rows below. Boxes outlined in blue are the ones still needed.</div>
-      <div class="card" style="padding:10px"><b>All facilities</b><div class="row">${fld('Intake rep', selPer('rep', R, has ? g.rep : ''))}${fld('Clinical rep', selPer('clin', [['__same', 'Same as intake rep'], ...R], has ? (g.clinSame ? '__same' : g.clin) : '__same'))}${fld('Account manager', selPer('acct', R, has ? g.acct : ''))}${fld('Transition lead', selPer('am', A, has ? g.am : ''))}${fld('Chicago transition lead' + tip('The person at GNS Chicago who sends the transfer email to the facility. Anyone at Gentell: start typing a name. CC\'d on the Chicago handoff email and the in-service &amp; contacts request. Not saved in the corporate rule.'), personPick('ctl', null))}</div><button type="button" class="btn sm" data-applyall="1">Apply to all ↓</button></div>
-      <div class="tablewrap"><table class="ruletbl"><tr><th>Facility</th><th>Intake rep</th><th>Clinical rep</th><th>Account manager</th><th>Transition lead</th><th>Chicago transition lead</th></tr>${fs.map(f => `<tr><td>${esc(facName(f))}${chiTag(f)}</td>${['rep', 'clin', 'acct', 'am'].map(p => cell(f, p)).join('')}${ctlCell(f)}</tr>`).join('')}</table></div>
+      return `<div class="instr">${fs.length} facilit${fs.length === 1 ? 'y needs' : 'ies need'} ${onlyCtl ? 'a Gentell WC Transition Lead' : 'reps'} picked.${has ? ' The corporate rule fills some positions (' + esc(ruleText(g)) + '); pick the rest per facility.' : ''} Same people for all? Fill the top row and click "Apply to all" (blank boxes in the top row are skipped). Different per facility? Change the rows below. Boxes outlined in blue are the ones still needed.</div>
+      <div class="card" style="padding:10px"><b>All facilities</b><div class="row">${fld('Intake rep', selPer('rep', R, has ? g.rep : ''))}${fld('Clinical rep', selPer('clin', [['__same', 'Same as intake rep'], ...R], has ? (g.clinSame ? '__same' : g.clin) : '__same'))}${fld('Account manager', selPer('acct', R, has ? g.acct : ''))}${fld('Transition lead', selPer('am', A, has ? g.am : ''))}${fld('Gentell WC Transition Lead' + tip('The Gentell person who sends the transfer email to the facility. Anyone at Gentell: start typing a name. CC\'d on the Chicago handoff email and the in-service &amp; contacts request. Not saved in the corporate rule.'), personPick('ctl', null))}</div><button type="button" class="btn sm" data-applyall="1">Apply to all ↓</button></div>
+      <div class="tablewrap"><table class="ruletbl"><tr><th>Facility</th><th>Intake rep</th><th>Clinical rep</th><th>Account manager</th><th>Transition lead</th><th>Gentell WC Transition Lead</th></tr>${fs.map(f => `<tr><td>${esc(facName(f))}${chiTag(f)}</td>${['rep', 'clin', 'acct', 'am'].map(p => cell(f, p)).join('')}${ctlCell(f)}</tr>`).join('')}</table></div>
       ${fld('Why these reps? (optional)', txt('why', '', 'Goes in the email to the transition lead'))}
-      ${t.group === '__nocorp' ? '' : chk('rule', 'Save the top row as the corporate rule. Future facilities under this corporate get the positions filled in automatically; positions left blank are picked per facility each time. (The Chicago transition lead isn\'t part of the rule.)', !onlyCtl)}`;
+      ${t.group === '__nocorp' ? '' : chk('rule', 'Save the top row as the corporate rule. Future facilities under this corporate get the positions filled in automatically; positions left blank are picked per facility each time. (The Gentell WC Transition Lead isn\'t part of the rule.)', !onlyCtl)}`;
     },
     example: t => { const r = repList()[0], a = amList()[0], o = { rep: lc(r.email), am: lc(a.email), clin: '__same', acct: lc(r.email), ctl: 'Kyle King <kyle.king@demo.gentell.com>' }; ruleFacs(t).forEach(f => { o['rep_' + f.id] = lc(r.email); o['am_' + f.id] = lc(a.email); }); return o; },
     validate: t => {
       const g = t.group === '__nocorp' ? null : grp(t.group), top = p => { const v = V(p); return p === 'clin' && v === '__same' ? '' : v; };
       if (V('rule') && !['rep', 'clin', 'acct', 'am'].some(p => top(p)) && V('clin') !== '__same') return 'To save a corporate rule, fill at least 1 position in the top row (or untick "Save the top row as the corporate rule").';
-      if (V('ctl') && !readPerson('ctl')) return 'Top row: pick the Chicago transition lead from the list (start typing their name).';
+      if (V('ctl') && !readPerson('ctl')) return 'Top row: pick the Gentell WC Transition Lead from the list (start typing their name).';
       for (const f of ruleFacs(t)) {
-        if (V('ctl_' + f.id) && !readPerson('ctl_' + f.id)) return facName(f) + ': pick the Chicago transition lead from the list (start typing their name).';
-        if (ctlNeeded(f) && !readPerson('ctl_' + f.id) && !readPerson('ctl')) return facName(f) + ': pick the Chicago transition lead (or fill the top row).';
+        if (V('ctl_' + f.id) && !readPerson('ctl_' + f.id)) return facName(f) + ': pick the Gentell WC Transition Lead from the list (start typing their name).';
+        if (ctlNeeded(f) && !readPerson('ctl_' + f.id) && !readPerson('ctl')) return facName(f) + ': pick the Gentell WC Transition Lead (or fill the top row).';
         // a blank row box takes the top row's value; a position the new rule fills counts as filled
         const willRule = p => V('rule') && g && (p === 'clin' ? !!V('clin') : !!top(p));
         const has = p => !!(V(p + '_' + f.id) || top(p) || willRule(p) || (p === 'clin' && V('clin') === '__same') || (p === 'am' && (f.am || (!V('rule') && g && g.am))) || (p !== 'am' && f[p]));
@@ -106,7 +106,7 @@ const TT = {
       const g = grp(t.group), top = p => V(p) === '__same' ? '' : V(p);
       if (g && V('rule')) setRule(g, { rep: V('rep'), clin: V('clin'), acct: V('acct'), am: V('am') });
       const byAm = {};
-      // facilities that only needed a Chicago transition lead: their transition lead already knows about them
+      // facilities that only needed a Gentell WC Transition Lead: their transition lead already knows about them
       const onlyCtl = new Set(ruleFacs(t).filter(f => ruleNeeds(f).every(p => p === 'ctl')).map(f => f.id)), amWas = {};
       ruleFacs(t).forEach(f => {
         amWas[f.id] = amOf(f);

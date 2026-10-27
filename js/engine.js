@@ -54,7 +54,7 @@ function defaultSettings() {
     // from the Email 1s sent on 10/7/2026
     e1To: ['darlene.kusek@gentell.com', 'christian.brandt@gentell.com', 'danielle.butler@gentell.com', 'bbarrows@gentell.com'],
     e1Cc: ['kyle.king@gentell.com', 'dproulx@gentell.com', 'bschorn@gentell.com', 'jvidal@gentell.com', 'linda.anwaya@gentell.com', 'aliyah.price@gentell.com'],
-    // email to the Chicago transition lead (Oct 26 2026): extra To / CC on top of the people added automatically
+    // email to the Gentell WC Transition Lead (Oct 26 2026): extra To / CC on top of the people added automatically
     e1bTo: [], e1bCc: [],
     inserviceUrl: '',
     tier2Price: '2022 Tier 2',
@@ -171,7 +171,7 @@ const chiName = f => f && f.portalName && lc(f.portalName) !== lc(f.name) ? f.na
 const bothNames = f => chiName(f) ? facName(f) + ' / ' + f.name : facName(f);
 // Chicago handoff email greeting: Brittany when we don't take enteral, otherwise Christian (both in Settings)
 const chiGreet = f => (FG(f).cov || {}).Enteral === "Don't Supply" ? (st.settings.chicagoGreetingNoEnt || 'Brittany') : st.settings.chicagoGreeting;
-// Chicago transition lead (Oct 26 2026): the person at GNS Chicago who sends the transfer email to the facility. Anyone in the company
+// Gentell WC Transition Lead (Oct 26 2026): the Gentell person who sends the transfer email to the facility. Anyone in the company
 // address book, saved as { name, email } on the facility (f.ctl). Picked on the request (optional) or on "Pick the reps".
 const ctlOf = f => f && f.ctl && validEmail(f.ctl.email) ? f.ctl : null;
 const ctlEmail = f => ctlOf(f) ? lc(f.ctl.email) : '';
@@ -511,7 +511,7 @@ const whenET = ms => new Date(ms).toLocaleString('en-US', { timeZone: 'America/N
 
 // ---------- email templates ----------
 function repLine(f) { const r = person(f.rep) || {}; return { name: r.name || nameOf(f.rep), email: r.email || f.rep, ext: r.ext || '' }; }
-// the facility notice: what the Chicago transition lead sends to the facility (below the line on their email)
+// the facility notice: what the Gentell WC Transition Lead sends to the facility (below the line on their email)
 function facilityNotice(f) {
   const r = repLine(f), d = f.dates, cad = String((f.bt || f.manualDates || {}).cadence || '4'), s = st.settings;
   const cadLine = cad === '4' ? 'Orders will continue every 4 weeks thereafter, on the same day of the week, for consistency and ease of planning.' : `Enteral orders will continue ${cad === '1' ? 'every week' : 'every other week'} thereafter, on the same day of the week. Ostomy, tracheostomy and urological orders will continue every 4 weeks.`;
@@ -539,8 +539,8 @@ ${inserviceAsk(f)}<p>Thank you!<br>${esc(nameOf(amOf(f)))}</p>
 ${facilityNotice(f)}`;
 }
 // Since Oct 26 2026 the handoff is 2 emails (f.e1Split):
-// 1. Chicago handoff email (E14): Settings "Chicago handoff email" list + the Chicago transition lead. Only the new date and "stop supplying".
-// 2. Email to the Chicago transition lead (E14b): they send the facility notice to the facility. Goes out once there is a Chicago transition lead.
+// 1. Chicago handoff email (E14): Settings "Chicago handoff email" list + the Gentell WC Transition Lead. Only the new date and "stop supplying".
+// 2. Email to the Gentell WC Transition Lead (E14b): they send the facility notice to the facility. Goes out once there is a Gentell WC Transition Lead.
 function email1Body(f) {
   const g = FG(f), [areas, orders] = areasPhrase(g), r = repLine(f), d = f.dates;
   return `<p>Hi ${esc(chiGreet(f))},</p>
@@ -558,7 +558,7 @@ ${withIns ? inserviceAsk(f) : ''}<p>Thank you!<br>${esc(nameOf(amOf(f)))}</p>
 <hr>
 ${facilityNotice(f)}`;
 }
-// the in-service ask on the email to the Chicago transition lead, addressed to the wound rep + regional (only when they haven't been asked yet)
+// the in-service ask on the email to the Gentell WC Transition Lead, addressed to the wound rep + regional (only when they haven't been asked yet)
 const woundRegEmails = f => [f.wound && f.wound.email, f.regional && f.regional.email].filter(Boolean);
 function inserviceAsk(f) {
   if (!woundRegEmails(f).length) return '';
@@ -566,7 +566,7 @@ function inserviceAsk(f) {
   return `<p><b>${esc(e3Names(f).join(' and '))}:</b> please speak to the facility and get them to sign up for an in-service${d ? ' before their first Lakewood order on <b>' + fmtS(d.dos) + '</b>' : ''}, so they know the updated ordering process and how to get supplies in between monthly orders. We typically want the admin, DON and central supply on the call; anyone else involved in ordering is welcome too. The booking link is in the facility email below.</p>`;
 }
 // the wound rep + regional were already asked to get the facility to book an in-service (or the facility predates asking that way)
-// Asked on: the in-service & contacts request (f.e3Ins), the in-service email (f.inserviceMail), the email to the Chicago transition lead
+// Asked on: the in-service & contacts request (f.e3Ins), the in-service email (f.inserviceMail), the email to the Gentell WC Transition Lead
 // (f.inserviceAsked), the old combined contacts email (no e3v2), or the old 1-email handoff (email1 without e1Split).
 const inserviceDone = f => !!(f.inserviceAsked || f.inserviceMail || f.e3Ins || (f.email3 && !f.e3v2) || (f.email1 && !f.e1Split));
 // the in-service ask on its own: for facilities that get no contacts request (contacts didn't need reviewing / already received),
@@ -585,9 +585,9 @@ function sendEmail1(f, correction) {
   mail({ key, code, to: [...s.e1To, f.rep, ctlEmail(f)], cc: [...s.e1Cc, am, acctOf(f)], fac: f.id, noTag: true, link: 'none', subject: (correction ? 'CORRECTION: ' : '') + subj, body: (correction ? '<p><b>Corrected dates below.</b></p>' : '') + email1Body(f) });
   if (correction) { if (f.e1b) sendCtlEmail(f, true); return; }
   f.email1 = st.today; f.e1Split = true;
-  // the email to the Chicago transition lead goes out from run() as soon as there is one (right away when there already is)
+  // the email to the Gentell WC Transition Lead goes out from run() as soon as there is one (right away when there already is)
 }
-// the email to the Chicago transition lead: please send the facility notice. The wound rep + regional are on it too.
+// the email to the Gentell WC Transition Lead: please send the facility notice. The wound rep + regional are on it too.
 function sendCtlEmail(f, correction) {
   const am = amOf(f), s = st.settings, c = ctlOf(f); if (!c) return;
   const withIns = !correction && !inserviceDone(f) && woundRegEmails(f).length > 0;
@@ -599,7 +599,7 @@ function sendCtlEmail(f, correction) {
   mail({ key: 'm:E15:' + f.id, code: 'E15', to: [c.email], cc: [am], fac: f.id, noTag: true, link: 'none', day: addBiz(st.today, 3), cond: { fac: f.id, untilEmail2: true }, subject: 'RE: ' + ctlSubject(f), body: `<p>Hi ${esc(first(c.name))},</p><p>Checking in, has the facility email for <b>${esc(facName(f))}</b> gone out? Please CC ${esc(CFG.mailbox)} on it.</p><p>Thank you!<br>${esc(nameOf(am))}</p>` });
   newTask('CHICAGO_FOLLOW', { fac: f.id, assignee: am, amTask: true, opensOn: addBiz(st.today, 5) });
 }
-// who to reach out to when the facility email hasn't gone out: the Chicago transition lead (since Oct 26 2026), else the handoff greeting
+// who to reach out to when the facility email hasn't gone out: the Gentell WC Transition Lead (since Oct 26 2026), else the handoff greeting
 const facEmailWho = f => f.e1Split && ctlOf(f) ? ctlOf(f).name : chiGreet(f);
 // Email 3 = the contacts request to the wound rep and regional, sent as soon as the FastCare task is done. When anyone replies
 // (to the mailbox), the follow-ups stop and the transition lead gets a "Contacts reply" task to put in what they sent.
@@ -732,9 +732,9 @@ function addContacts(f, list, src) {
 // those get picked per facility on the "Pick the reps" task. Corporates whose rule was saved before then have no ruleIndiv
 // and work exactly as before (blank account manager = none; the rule only applies when it has an intake rep).
 const RULE_POS = [['rep', 'intake rep'], ['clin', 'clinical rep'], ['acct', 'account manager'], ['am', 'transition lead']];
-const posName = p => p === 'ctl' ? 'Chicago transition lead' : (RULE_POS.find(x => x[0] === p) || [, p])[1];
+const posName = p => p === 'ctl' ? 'Gentell WC Transition Lead' : (RULE_POS.find(x => x[0] === p) || [, p])[1];
 const partialRule = g => !!(g && Array.isArray(g.ruleIndiv));
-// The Chicago transition lead is needed while something still waits on them: the handoff, the email to them, the in-service &
+// The Gentell WC Transition Lead is needed while something still waits on them: the handoff, the email to them, the in-service &
 // contacts request (it waits for them so they're CC'd) or the in-service email. Not part of a corporate's rule: always picked per facility.
 const e3Pending = f => !f.email3 && !f.noE3 && !preDone(f, 'e3');
 function ctlNeeded(f) {
@@ -742,7 +742,7 @@ function ctlNeeded(f) {
   return !f.email1 || (f.e1Split && !f.e1b && !f.email2) || e3Pending(f) || !inserviceDone(f);
 }
 // what this facility still needs picked by hand. The intake rep always; the rule's blank positions until the Chicago handoff email;
-// the Chicago transition lead (ctlNeeded).
+// the Gentell WC Transition Lead (ctlNeeded).
 function ruleNeeds(f) {
   const g = f.group ? G(f) : null, n = [];
   if (!f.rep && !autoPending(f)) n.push('rep'); // David's facilities: the intake rep is picked at scheduling
@@ -961,7 +961,7 @@ function run() {
     applyRule(f, g);
     if (ruleNeeds(f).length && !st.tasks.some(t => lc(t.group) === lc(g.name) && t.type === 'RULE' && !done(t))) {
       const t = newTask('RULE', { group: g.name, assignee: roleEmail('rules') });
-      queue('E3', t.assignee, f, t, (fs, ts) => ({ code: 'E3', to: [ts[0].assignee], task: ts[0].key, cond: { task: ts[0].key }, subject: 'Pick a rep: ' + g.name, body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p>${partialRule(g) && (g.rep || g.clin || g.clinSame || g.acct || g.am) ? `<p>These facilities from <b>${esc(g.name)}</b> need reps the corporate rule leaves to each facility:</p><ul>${facsOfGroup(g.name).filter(x => ruleNeeds(x).length).map(x => '<li>' + esc(facName(x)) + ': ' + ruleNeeds(x).map(posName).join(', ') + '</li>').join('')}</ul><p>Pick them in the task. The rule fills the rest.</p>` : facsOfGroup(g.name).filter(x => ruleNeeds(x).length).every(x => ruleNeeds(x).every(p => p === 'ctl')) ? `<p>These facilities from <b>${esc(g.name)}</b> need a Chicago transition lead (the person at GNS Chicago who sends the transfer email to the facility):</p><ul>${facsOfGroup(g.name).filter(x => ruleNeeds(x).length).map(x => '<li>' + esc(facName(x)) + '</li>').join('')}</ul><p>Pick them in the task.</p>` : `<p>These facilities from <b>${esc(g.name)}</b> have no rep and the corporate has no rep rule:</p><ul>${facsOfGroup(g.name).filter(x => ruleNeeds(x).length).map(x => '<li>' + esc(facName(x)) + '</li>').join('')}</ul><p>Pick the intake rep, clinical rep, account manager, transition lead and Chicago transition lead. Tick "Save as the corporate rule" so future facilities under this corporate get the reps automatically (the Chicago transition lead is always picked per facility). Leave a position blank in the top row to keep picking it per facility.</p>`}` }));
+      queue('E3', t.assignee, f, t, (fs, ts) => ({ code: 'E3', to: [ts[0].assignee], task: ts[0].key, cond: { task: ts[0].key }, subject: 'Pick a rep: ' + g.name, body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p>${partialRule(g) && (g.rep || g.clin || g.clinSame || g.acct || g.am) ? `<p>These facilities from <b>${esc(g.name)}</b> need reps the corporate rule leaves to each facility:</p><ul>${facsOfGroup(g.name).filter(x => ruleNeeds(x).length).map(x => '<li>' + esc(facName(x)) + ': ' + ruleNeeds(x).map(posName).join(', ') + '</li>').join('')}</ul><p>Pick them in the task. The rule fills the rest.</p>` : facsOfGroup(g.name).filter(x => ruleNeeds(x).length).every(x => ruleNeeds(x).every(p => p === 'ctl')) ? `<p>These facilities from <b>${esc(g.name)}</b> need a Gentell WC Transition Lead (the Gentell person who sends the transfer email to the facility):</p><ul>${facsOfGroup(g.name).filter(x => ruleNeeds(x).length).map(x => '<li>' + esc(facName(x)) + '</li>').join('')}</ul><p>Pick them in the task.</p>` : `<p>These facilities from <b>${esc(g.name)}</b> have no rep and the corporate has no rep rule:</p><ul>${facsOfGroup(g.name).filter(x => ruleNeeds(x).length).map(x => '<li>' + esc(facName(x)) + '</li>').join('')}</ul><p>Pick the intake rep, clinical rep, account manager, transition lead and Gentell WC Transition Lead. Tick "Save as the corporate rule" so future facilities under this corporate get the reps automatically (the Gentell WC Transition Lead is always picked per facility). Leave a position blank in the top row to keep picking it per facility.</p>`}` }));
     }
     // corporate asks, once per corporate
     if (!groupsSeen[lc(g.name)]) {
@@ -1042,12 +1042,12 @@ function run() {
     if (!f.email1 && f.manualDates && preDone(f, 'sched') && f.dates && f.rep && covKnown(FG(f)) && !settingsProblems().length) { sendEmail1(f); f.email1By = 'Sent automatically (already scheduled)'; }
     // Email 3 to the wound rep + regional: as soon as the FastCare task is done (or its info was filled in), unless no contacts request is needed
     const fcIn = done(fTask(f, 'FASTCARE')) || preDone(f, 'wr');
-    // since Oct 26 2026 it waits for the Chicago transition lead (CC'd on it)
+    // since Oct 26 2026 it waits for the Gentell WC Transition Lead (CC'd on it)
     if (!f.email3 && !f.noE3 && !preDone(f, 'e3') && fcIn && f.wound && f.regional && ctlOf(f)) sendEmail3(f);
     if (f.email1 && f.e1NoWound && !f.inserviceMail && fcIn && woundRegEmails(f).length) sendInservice(f);
     // no contacts request (contacts didn't need reviewing / already received): the in-service ask goes on its own
     else if (!e3Pending(f) && !f.email3 && !inserviceDone(f) && fcIn && f.wound && f.regional && ctlOf(f)) sendInservice(f);
-    // handoff sent: the email to the Chicago transition lead, once there is one
+    // handoff sent: the email to the Gentell WC Transition Lead, once there is one
     if (f.email1 && f.e1Split && !f.e1b && !f.email2 && ctlOf(f)) sendCtlEmail(f);
     // portal setup done while EMR access wasn't ready: check it as soon as it is
     if (f.emrCheckDue && !f.emrChecked && emrReady(f) && !fTask(f, 'EMR_CHECK')) { const t = newTask('EMR_CHECK', { fac: f.id, assignee: am, amTask: true }); todo(t, 'check EMR access for ' + facName(f), 'EMR access for <b>' + esc(facName(f)) + '</b> is set up now. Log in and check it works.'); }
@@ -1295,7 +1295,7 @@ function editFacilityCheck(f, v) {
     blank(f.clin, v.clin, 'Clinical rep'), blank(f.acct, v.acct, 'Account manager'), blank(f.am, v.am, 'Transition lead'),
     v.why !== undefined ? blank(f.why, v.why, 'Reason for transition') : ''
   ];
-  for (const [k, label] of [['wound', 'Wound and Product Specialist'], ['regional', 'Regional Manager'], ['ctl', 'Chicago transition lead']]) {
+  for (const [k, label] of [['wound', 'Wound and Product Specialist'], ['regional', 'Regional Manager'], ['ctl', 'Gentell WC Transition Lead']]) {
     if (v[k] === undefined) continue;
     if (v[k + 'Raw'] && !v[k]) errs.push('Pick the ' + label + ' from the list (start typing their name).');
     else errs.push(blank(f[k], v[k], label));
@@ -1321,8 +1321,8 @@ function editFacility(f, v, by, byName) {
   if (v.rep) f.rep = v.rep; if (v.clin) f.clin = v.clin; if (v.acct) f.acct = v.acct; if (v.am) f.am = v.am;
   if (v.none) { if (!G(f).standalone) makeStandalone(f); } else if (v.grp && lc(v.grp) !== lc(f.group) && grp(v.grp)) f.group = grp(v.grp).name;
   if (v.wound) f.wound = v.wound; if (v.regional) f.regional = v.regional;
-  // a new Chicago transition lead after their email went out (and the facility email hasn't): the new one never got it
-  if (v.ctl && ctlOf(f) && lc(v.ctl.email) !== ctlEmail(f) && f.e1b && !f.email2) mail({ key: 'm:E13:ctl:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Chicago transition lead changed: ' + facName(f), body: '<p>' + esc(byName) + ' changed the Chicago transition lead from ' + esc(f.ctl.name) + ' to ' + esc(v.ctl.name) + '. The email asking them to send the facility the transfer email went to ' + esc(f.ctl.name) + ' on ' + fmt(f.e1b) + '. Forward it to ' + esc(v.ctl.name) + ' if they need it.</p>' });
+  // a new Gentell WC Transition Lead after their email went out (and the facility email hasn't): the new one never got it
+  if (v.ctl && ctlOf(f) && lc(v.ctl.email) !== ctlEmail(f) && f.e1b && !f.email2) mail({ key: 'm:E13:ctl:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Gentell WC Transition Lead changed: ' + facName(f), body: '<p>' + esc(byName) + ' changed the Gentell WC Transition Lead from ' + esc(f.ctl.name) + ' to ' + esc(v.ctl.name) + '. The email asking them to send the facility the transfer email went to ' + esc(f.ctl.name) + ' on ' + fmt(f.e1b) + '. Forward it to ' + esc(v.ctl.name) + ' if they need it.</p>' });
   if (v.ctl) f.ctl = v.ctl;
   if (v.why) f.why = v.why;
   // first GDD answer here: same as Chris answering (FYI to the GDD contact if Yes), and his task closes
