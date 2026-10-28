@@ -171,3 +171,6 @@ Open `index.html?demo` (demo mode, nothing saved) and walk through the change. A
 
 ## Writing for Raizy
 Short, direct, no filler. Quote UI labels exactly. Edge cases matter to her.
+
+## Not-yet-started tasks (Oct 28 2026)
+Waiting tasks (`isWaiting`: `opensOn` after today) are left out of "My tasks", "All open tasks" and both nav counts. They show only on the facility page task table ("Starts …") until their start date. The start-date reminder email (E13) is unchanged.

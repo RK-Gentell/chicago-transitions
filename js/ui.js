@@ -204,18 +204,18 @@ function render() {
   $('#banners').innerHTML = b.join('');
   // nav
   const mine = openTasksFor(forWho()).filter(t => !isWaiting(t)).length;
-  const open = st.tasks.filter(t => !done(t) && !t.archived).length;
+  const open = st.tasks.filter(t => !done(t) && !t.archived && !isWaiting(t)).length;
   const nav = [['mytasks', 'My tasks', mine], ['tracker', 'Tracker', st.facs.filter(f => !f.complete).length], ['nftracker', 'New facilities tracker', nfs().filter(n => !n.scheduled && !n.deleted).length], ['all', 'All open tasks', open], ['groups', 'Corporates', Object.keys(st.groups).length], ['analytics', 'Analytics', ''], ['sep'], ['inbox', 'Mailbox', st.inbox.length], ['outbox', 'Outbox', st.mails.filter(m => m.status === 'Queued').length || ''], ...(admin ? [['settings', 'Settings', '']] : []), ['sep'], ['new', '+ New transition request', ''], ['nfnew', '+ New facility scheduling request', '']];
   $('#nav').innerHTML = nav.map(n => n[0] === 'sep' ? '<div class="sep"></div>' : `<button class="${ui.view === n[0] ? 'on' : ''}" data-view="${n[0]}"><span>${n[1]}</span><span class="count">${n[2]}</span></button>`).join('');
   const m = $('#main');
   if (ui.view === 'mytasks') {
-    const all = openTasksFor(forWho()), F = ui.myF;
+    const all = openTasksFor(forWho()).filter(t => !isWaiting(t)), F = ui.myF; // tasks that haven't started yet only show on the facility page
     const ts = all.filter(t => (!F.fac || t.fac === +F.fac) && (!F.corp || corpKey(t) === F.corp));
     const who = admin && !demo ? `<label class="meta" for="forwho">Show tasks for</label><select id="forwho">${[...new Set([me(), ...sortedPeople().map(p => lc(p.email)).filter(Boolean)])].map(e => `<option value="${esc(e)}" ${e === forWho() ? 'selected' : ''}>${esc(nameOf(e))}${e === me() ? ' (me)' : ''}</option>`).join('')}</select>` : '';
     const flt = `<div class="filters">${who}${facSel('mt_fac', all, F.fac)}${corpSel('mt_corp', all, F.corp)}<span class="meta" style="margin-left:6px">Group by</span><div class="seg" role="group">${[['fac', 'Facility'], ['corp', 'Corporate']].map(([v, l]) => `<button type="button" class="segb ${F.by === v ? 'on' : ''}" data-mtby="${v}" aria-pressed="${F.by === v}">${l}</button>`).join('')}</div>${F.fac || F.corp ? '<button class="btn sm" data-clearf="my">Clear filters</button>' : ''}</div>`;
-    m.innerHTML = `<h1>My tasks</h1><p class="sub">${forWho() === me() ? 'Your' : esc(nameOf(forWho())) + '\'s'} open tasks, grouped by ${F.by === 'corp' ? 'corporate' : 'facility'}, most urgent first. Click one to do it. Each one also came by email.</p>${flt}<div class="list">${groupedTasks(ts, false, false, null, F.by) || `<div class="empty">${all.length ? 'No tasks match these filters.' : 'Nothing to do right now.'}</div>`}</div>`;
+    m.innerHTML = `<h1>My tasks</h1><p class="sub">${forWho() === me() ? 'Your' : esc(nameOf(forWho())) + '\'s'} open tasks, grouped by ${F.by === 'corp' ? 'corporate' : 'facility'}, most urgent first. Click one to do it. Each one also came by email. Tasks that haven't started yet are on the facility page.</p>${flt}<div class="list">${groupedTasks(ts, false, false, null, F.by) || `<div class="empty">${all.length ? 'No tasks match these filters.' : 'Nothing to do right now.'}</div>`}</div>`;
   } else if (ui.view === 'all') {
-    const all = st.tasks.filter(t => !done(t) && !t.archived && !(t.fac && facById(t.fac) && facById(t.fac).hold)), F = ui.allF;
+    const all = st.tasks.filter(t => !done(t) && !t.archived && !isWaiting(t) && !(t.fac && facById(t.fac) && facById(t.fac).hold)), F = ui.allF;
     const ts = all.filter(t => (!F.who || t.assignee === F.who) && (!F.lead || taskLeads(t).includes(F.lead)) && (!F.fac || t.fac === +F.fac) && (!F.corp || corpKey(t) === F.corp));
     // facilities with nothing to do: only when no person filter is set (they have no tasks for anyone)
     const facOk = F.who ? () => false : f => (!F.lead || amOf(f) === F.lead) && (!F.fac || f.id === +F.fac) && (!F.corp || lc(f.group || '__nocorp') === F.corp);
@@ -223,7 +223,7 @@ function render() {
     const whos = [...new Set(all.map(t => t.assignee).filter(Boolean))].sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
     const open = st.facs.filter(f => !f.complete && !f.archived && !f.hold);
     const flt = `<div class="filters"><select id="at_lead" aria-label="Transition lead"><option value="">All transition leads</option>${leads.map(e => `<option value="${esc(e)}" ${e === F.lead ? 'selected' : ''}>${esc(nameOf(e))}</option>`).join('')}</select><select id="at_who" aria-label="Assigned to"><option value="">Anyone's tasks</option>${whos.map(e => `<option value="${esc(e)}" ${e === F.who ? 'selected' : ''}>${esc(nameOf(e))}${e === me() ? ' (me)' : ''}</option>`).join('')}</select>${facSel('at_fac', all, F.fac, open)}${corpSel('at_corp', all, F.corp, open)}${F.lead || F.who || F.fac || F.corp ? '<button class="btn sm" data-clearf="all">Clear filters</button>' : ''}<span class="meta">${ts.length} of ${all.length} tasks</span></div>`;
-    m.innerHTML = `<h1>All open tasks</h1><p class="sub">Anyone can open anyone's task and finish it. The app records who actually did it, and the person it was assigned to gets an FYI email. "Transition lead" shows every task on the facilities they run, whoever it's assigned to.</p>${flt}<div class="list">${groupedTasks(ts, true, true, facOk) || '<div class="empty">No open tasks match.</div>'}</div>${doneTable()}`;
+    m.innerHTML = `<h1>All open tasks</h1><p class="sub">Anyone can open anyone's task and finish it. The app records who actually did it, and the person it was assigned to gets an FYI email. "Transition lead" shows every task on the facilities they run, whoever it's assigned to. Tasks that haven't started yet are on the facility page.</p>${flt}<div class="list">${groupedTasks(ts, true, true, facOk) || '<div class="empty">No open tasks match.</div>'}</div>${doneTable()}`;
   } else if (ui.view === 'analytics') { m.innerHTML = analyticsHtml(); analyticsAfter();
   } else if (ui.view === 'tracker') m.innerHTML = trackerHtml();
   else if (ui.view === 'groups') m.innerHTML = groupsHtml();
