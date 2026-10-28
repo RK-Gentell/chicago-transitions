@@ -48,7 +48,7 @@ function daysOnStep(f) {
   const start = (t && !done(t) && taskStart(t)) || (m.start && m.start(f)) || latest([...MS.map(x => x.done(f) && x.on(f)), f.requested]);
   return start ? bizDays(start, st.today) : null;
 }
-const TYPE_LABEL = { FASTCARE: 'FastCare', BRIGHTREE: 'Brightree report', GDD: 'GDD answer', GDD_PORTAL: 'GDD warehouse in portal', AREAS: 'Areas of care', PRICE: 'Price table', RULE: 'Pick the reps', EMR: 'EMR access', EMR_ADD: 'EMR login: corporate adds facility', EMR_PORTAL: 'EMR info in portal', PORTAL_ADD: 'Add to Brightree', PUMPS: 'Pumps', PORTAL_SETUP: 'Portal setup', CONTACTS_PORTAL: 'Contacts into portal', SCHEDULE: 'Schedule + Chicago handoff email', ADDRESS: 'Address', E3_REPLY: 'Contacts reply', EMAIL3_FOLLOW: 'Contacts follow-up', CHICAGO_FOLLOW: 'Chicago follow-up' };
+const TYPE_LABEL = { FASTCARE: 'FastCare', BRIGHTREE: 'Brightree report', GDD: 'GDD answer', GDD_PORTAL: 'GDD warehouse in portal', AREAS: 'Areas of care', PRICE: 'Price table', RULE: 'Pick the reps', EMR: 'EMR access', EMR_ADD: 'EMR login: corporate adds facility', EMR_PORTAL: 'EMR info in portal', PORTAL_ADD: 'Add to Brightree', PUMPS: 'Pumps', PORTAL_SETUP: 'Portal setup', CONTACTS_PORTAL: 'Contacts into portal', SCHEDULE: 'Schedule + Chicago handoff email', ADDRESS: 'Address', E3_REPLY: 'Contacts reply', ESIGN_PORTAL: 'eSign info into portal', EMAIL3_FOLLOW: 'Contacts follow-up', CHICAGO_FOLLOW: 'Chicago follow-up' };
 const typeLabel = t => TYPE_LABEL[t.type] || t.type;
 // when a task could first be worked on
 const taskStart = t => (t.opensOn && t.opensOn > (t.created || '') ? t.opensOn : t.created) || '';

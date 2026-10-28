@@ -55,7 +55,7 @@ function defaultSettings() {
     e1To: ['darlene.kusek@gentell.com', 'christian.brandt@gentell.com', 'danielle.butler@gentell.com', 'bbarrows@gentell.com'],
     e1Cc: ['kyle.king@gentell.com', 'dproulx@gentell.com', 'bschorn@gentell.com', 'jvidal@gentell.com', 'linda.anwaya@gentell.com', 'aliyah.price@gentell.com'],
     // email to the Gentell WC Transition Lead (Oct 26 2026): extra To / CC on top of the people added automatically
-    e1bTo: [], e1bCc: [],
+    e1bTo: [], e1bCc: [], esignTo: [], esignGreet: 'Anthony',
     inserviceUrl: '',
     tier2Price: '2022 Tier 2',
     biller: 'Sreejith Sreekumar',
@@ -314,6 +314,8 @@ const PRE_ITEMS = [
   ['wr', 'FastCare info gathered (we have the wound rep and regional)', 'Skips the FastCare task. Pick the wound rep and regional. The contacts request still goes to them, unless "Received contacts" is ticked too.'],
   ['e3', 'Received contacts', 'We already have the contacts and they\'re accurate (or the request already went out). Skips the contacts request and its follow-ups.'],
   ['ct', 'Added contacts to portal', 'The contacts are in the portal, so there\'s no "Contacts into portal" task. Ticks "Received contacts" too.'],
+  ['es', 'Received eSign info', 'We have the provider(s) who sign the forms (name, NPI, email, eSign / email / fax). No email to Anthony Price. The transition lead still adds them to the portal, unless "Added eSign info to portal" is ticked too.'],
+  ['esp', 'Added eSign info to portal', 'The providers are in the portal as physician contacts and in the eSign section of the portal setup. Ticks "Received eSign info" too.'],
   ['emr', 'EMR info for the facility is in the portal', ''],
   ['ps', 'Portal setup done', ''],
   ['sched', 'Scheduled', 'Skips the Brightree report and scheduling. Enter the dates from the Ordering Calendar. The Chicago handoff email goes out with them automatically, unless "Chicago handoff email sent" is ticked too.'],
@@ -321,7 +323,7 @@ const PRE_ITEMS = [
   ['e2', 'GNS Chicago sent the transfer notice to the facility', '']
 ];
 // ticking a step ticks the ones it includes
-const PRE_IMPLY = { e2: ['e1'], sched: ['ps'], ct: ['e3'] };
+const PRE_IMPLY = { e2: ['e1'], sched: ['ps'], ct: ['e3'], esp: ['es'] };
 const PRE_INFO = ['added', 'gdd', 'wr', 'sched'];
 // the AM's first tasks on new facilities, as links (skips ones ticked "already done")
 const amFirstTasks = list => { const ts = list.flatMap(f => [preDone(f, 'wr') ? null : [esc(facName(f)) + ': FastCare', 't:FASTCARE:f' + f.id], preDone(f, 'sched') ? null : [esc(facName(f)) + ': Brightree report', 't:BRIGHTREE:f' + f.id]].filter(Boolean)); return ts.length ? '<p>Your tasks:</p>' + taskList(ts) : '<p>Nothing for you to do yet. You\'ll get an email when there is.</p>'; };
@@ -360,7 +362,7 @@ function todo(t, subject, line, importance) {
   return mail({ key: 'm:E13:' + t.key, code: 'E13', to: [t.assignee], fac: t.fac, task: t.key, cond: { task: t.key }, subject: 'To do: ' + subject, body: '<p>' + line + '</p>', importance });
 }
 // follow-ups go out as high importance; everything else normal (the "CT - Send emails" flow reads the Importance column)
-const HIGH_CODES = new Set(['E15', 'E16F', 'E16A', 'E17']);
+const HIGH_CODES = new Set(['E15', 'E16F', 'E16A', 'E17', 'E31F', 'E31A']);
 function mail(m) {
   if (st.mails.some(x => x.key === m.key)) return null;
   const clean = a => [...new Set((a || []).filter(Boolean).map(lc))];
@@ -409,13 +411,14 @@ function mailStillValid(m) {
     if (c.untilEmail2 && f.email2) return false;
     if (c.untilE3Done && (f.e3Done || f.e3Reply)) return false;
     if ('e3Round' in c && (f.e3Done || f.e3Reply || (f.e3Round || 0) !== c.e3Round)) return false;
+    if ('esRound' in c && (f.esignGot || f.esignDone || (f.esignRound || 0) !== c.esRound)) return false;
     if (c.ord && (!f.dates || f.dates.ord !== c.ord)) return false;
   }
   return true;
 }
 
 // ---------- tasks ----------
-const REPEATABLE = new Set(['PRICE', 'RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS', 'PORTAL_UPDATE']);
+const REPEATABLE = new Set(['PRICE', 'RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS', 'PORTAL_UPDATE', 'ESIGN_PORTAL']);
 function newTask(type, o) {
   const base = 't:' + type + ':' + (o.fac ? 'f' + o.fac : o.nf ? 'n' + o.nf : 'g' + lc(o.group));
   let key = base;
@@ -635,7 +638,7 @@ function email3Body(f) {
 <p>I would like to update you that we are working on transitioning <b>${esc(facName(f))}</b>${f.group ? ' from the <b>' + esc(f.group) + '</b> group' : ''} to the Lakewood branch${areas ? ' for <b>' + areas + '</b>' : ''}.${f.e3Ins ? '' : ' Can you assist us with obtaining the following contact information?'}</p>
 ${f.e3Ins ? `<p>Could you please reach out to the facility, let them know we're transitioning them, and have them sign up for an in-service? The in-service walks them through the updated ordering process and how to get supplies in between monthly orders. We typically want the admin, DON and central supply on the call, and anyone else in the facility involved in ordering and documentation is welcome to join too.${st.settings.inserviceUrl ? ' Here is the link for them to book it: <a href="' + esc(st.settings.inserviceUrl) + '">Schedule an In-Service Call with GNS Lakewood</a>.' : ''}</p>
 <p>In addition, can you assist us with obtaining the following contact information?</p>` : ''}
-<ul><li>Name and email of a medical provider that can sign forms via our e-sign platform, PandaDoc, so we can bill patients supplies to insurance (this can be a medical director, NP or PA).</li><li>Name and email of the speech therapist or director of rehab</li><li>Name and email of the dietician</li></ul>
+<ul><li>Name and email of the speech therapist or director of rehab</li><li>Name and email of the dietician</li></ul>
 ${e3Contacts(f)}
 <p>Thank you for your help!<br>${esc(nameOf(am))}</p>`;
 }
@@ -682,6 +685,8 @@ function applyPre(f, pre, l, info) {
   if (p.gdd) { f.gdd = i.gdd || 'Already done'; f.gddWh = i.gdd === 'Yes' ? i.gddWh || '' : ''; } // a "Yes" emails the GDD contact once the request is saved (run)
   if (p.wr) { f.wound = i.wound; f.regional = i.regional; }
   if (p.e3) { f.noE3 = true; markE3Done(f, by); if (!p.ct) f.ctNeed = true; }
+  if (p.es) markEsignGot(f, by);
+  if (p.esp) markEsignDone(f, by);
   if (p.sched) setManualDates(f, i, by);
   if (p.e1) { f.email1 = st.today; f.email1By = by; }
   if (p.e2) { f.email2 = st.today; f.email2By = by; }
@@ -697,6 +702,65 @@ function gotE3Reply(f, m) {
   f.e3Reply = { from: m.from, at: (m.received || '').slice(0, 10) || st.today, inbox: m._id || '' };
   const t = newTask('E3_REPLY', { fac: f.id, assignee: amOf(f), amTask: true, reply: f.e3Reply });
   todo(t, 'reply to the contacts request for ' + facName(f), esc(e3Who(f, m.from)) + ' replied to the contacts request for <b>' + esc(facName(f)) + '</b>. Put in the info they sent.');
+}
+// ---------- provider + eSign info (Oct 28 2026) ----------
+// 1 email per facility to Anthony Price (Settings "Provider and eSign info"), CC the transition lead, the moment the request is saved
+// (and once for every facility that was open on Oct 28 2026). He replies to the mailbox with the same subject: the [CT-0042] tag
+// matches it to the facility. Reply in → the transition lead adds the providers to the portal: on the portal setup task if it isn't
+// done yet, otherwise on its own "eSign info into portal" task. Nothing waits on it except completion.
+const ES_SUBJECT = f => '[CT-' + pad(f.id) + '] ' + f.name + '- Provider and eSign info needed';
+const esTo = () => (st.settings.esignTo || []).map(lc).filter(validEmail);
+const esGreet = () => st.settings.esignGreet || 'Anthony';
+const esPsDone = f => !!done(fTask(f, 'PORTAL_SETUP')) || preDone(f, 'ps');
+const esignOk = f => !!f.esignDone;
+// the facility still needs it (for the facility page and the waiting list)
+const esignOpen = f => !f.esignDone && !f.deleted;
+function esignBody(f) {
+  return `<p>Hi ${esc(esGreet())},</p>
+<p>We're transitioning <b>${esc(f.name)}</b>${f.group ? ' (' + esc(f.group) + ')' : ''} from GNS Chicago to the Lakewood branch.</p>
+<p>Can you please send us the provider(s) who signed the forms for this facility? For each one we need:</p>
+<ul><li>Name</li><li>NPI</li><li>Email address</li><li>Whether they prefer to sign through eSign, email, or fax</li></ul>
+<p>Please reply all and keep the subject as is, so your reply gets to the right place.</p>
+<p>Thank you!<br>${esc(nameOf(amOf(f)))}</p>`;
+}
+function sendEsign(f) {
+  f.esignAsk = st.today;
+  mail({ key: 'm:E31:' + f.id, code: 'E31', to: esTo(), cc: [amOf(f)], fac: f.id, noTag: true, link: 'none', subject: ES_SUBJECT(f), body: esignBody(f) });
+}
+// no reply: follow-ups at +2 and +4 business days, then (2 business days later) the transition lead is told. 1 step queued at a time.
+function chaseEsign(f) {
+  if (!f.esignAsk || f.esignGot || f.esignDone) return;
+  const round = f.esignRound || 0, pre = 'm:E31F:' + f.id + ':' + (round ? 'r' + round + ':' : '');
+  const roundOf = k => +((k.match(/^m:E31F:\d+:r(\d+):/) || [])[1] || 0);
+  const mine = st.mails.filter(m => m.fac === f.id && m.key.startsWith('m:E31F:') && roundOf(m.key) === round);
+  if (mine.some(m => m.status === 'Queued')) return;
+  const used = mine.filter(m => m.status !== 'Cancelled');
+  const step = used.length + 1; if (step > 3) return;
+  const last = used.map(m => m.day).sort().pop() || (round ? f.esignRoundFrom : f.esignAsk);
+  const day = addBiz(last, 2), key = pre + step + ':' + mine.length, am = amOf(f), cond = { fac: f.id, esRound: round };
+  if (step < 3) mail({ key, code: 'E31F', day, cond, to: esTo(), cc: [am], fac: f.id, noTag: true, link: 'none', subject: 'RE: ' + ES_SUBJECT(f),
+      body: `<p>Hi ${esc(esGreet())},</p><p>${step === 1 ? 'Just following up on my email below' : 'Following up again on my email below'} about <b>${esc(f.name)}</b>. Can you please send over the provider info?</p><p>Thank you!<br>${esc(nameOf(am))}</p><hr>${esignBody(f)}` });
+  else mail({ key, code: 'E31A', day, cond, to: [am], fac: f.id, link: 'fac', subject: 'No reply about provider and eSign info: ' + facName(f),
+      body: `<p>${esc(esGreet())} didn't reply about the provider and eSign info for <b>${esc(facName(f))}</b>, even after 2 follow-ups. Please reach out to ${esc(esGreet())}.</p>` + note('Once you have it, tick "Received eSign info" under "Mark steps done" on the facility page, and you\'ll get the task to add it to the portal. The facility can\'t be marked complete until the providers are in the portal.') });
+}
+function markEsignGot(f, by, day) { if (f.esignGot) return; f.esignGot = day || st.today; f.esignBy = by || ''; }
+function markEsignDone(f, by) { if (f.esignDone) return; markEsignGot(f, by); f.esignDone = st.today; f.esignDoneBy = by || ''; }
+function gotEsignReply(f, m) {
+  const r = { from: m.from, at: (m.received || '').slice(0, 10) || st.today, inbox: m._id || '', preview: (m.preview || '').slice(0, 1000) };
+  f.esignReplies = [...(f.esignReplies || []), r];
+  markEsignGot(f, m.from, r.at);
+}
+// the replies to show on the task: everything since the latest round started
+const esReplies = f => (f.esignReplies || []).slice(f.esignRoundIdx || 0);
+// what to put in the portal, used on the portal setup task and the separate task
+function esignPortalBox(f, pfx) {
+  const reps = esReplies(f), m = r => (st.inbox || []).find(x => x._id && x._id === r.inbox);
+  const list = reps.map(r => { const x = m(r), pv = (x && x.preview) || r.preview; return `<div class="note"><b>${esc(esTo().includes(lc(r.from)) ? esGreet() : nameOf(r.from) || r.from)}</b>, ${fmt(r.at)}${x && x.path ? ` · <a href="${esc(STORE.fileUrl(x.path))}" target="_blank" rel="noopener">Open the email</a>` : ''}${pv ? '<div>"' + esc(pv.slice(0, 600)) + '"</div>' : ''}</div>`; }).join('');
+  return `<div class="instr">Add each provider as a physician contact in the portal, and in the eSign section at the bottom of the portal setup (name, NPI, email, and how they prefer to sign: eSign, email or fax).</div>${list || `<div class="meta">The eSign info was received outside the app${f.esignBy ? ' (' + esc(f.esignBy) + ')' : ''}. Add it from wherever it came in (an email, or the facility's attachments).</div>`}${fld('Where things stand', sel(pfx + 'es', [['done', 'The providers are in the portal'], ['more', 'Anthony didn\'t send everything yet: keep following up']], '', true))}`;
+}
+function esignAnswer(f, v, byName) {
+  if (v === 'more') { f.esignRoundIdx = (f.esignReplies || []).length; f.esignGot = ''; f.esignBy = ''; f.esignRound = (f.esignRound || 0) + 1; f.esignRoundFrom = st.today; if (!f.esignAsk) f.esignAsk = st.today; }
+  else markEsignDone(f, byName);
 }
 function addAmy(f) {
   const g = G(f), t = newTask('PORTAL_ADD', { fac: f.id, assignee: roleEmail('portal') });
@@ -857,8 +921,16 @@ function processInbox() {
     m.processed = true;
     const subj = m.subject || '', ls = lc(subj), from = lc(m.from);
     const ct = subj.match(/\[CT-(\d+)\]/);
-    if (ct && facById(+ct[1])) { m.fac = +ct[1]; return; }
     const mb = lc(CFG.mailbox), inTo = (m.to || []).map(lc).includes(mb), inCc = (m.cc || []).map(lc).includes(mb);
+    // a reply about the provider + eSign info: the [CT-…] tag (or, if it was dropped, the Chicago name) + "esign info needed",
+    // from Anthony or anyone outside the team, on or after the ask
+    if (from !== mb && ls.includes('esign info needed')) {
+      const team = (st.settings.people || []).map(p => lc(p.email)), ok = x => x.esignAsk && !x.esignDone && !x.deleted && (m.received || '').slice(0, 10) >= x.esignAsk && (esTo().includes(from) || !team.includes(from));
+      const byTag = ct && facById(+ct[1]), cands = byTag ? [byTag] : st.facs.filter(x => !x.archived && facNames(x).some(n => ls.includes(n)));
+      const f = cands.length === 1 && ok(cands[0]) ? cands[0] : null;
+      if (f) { gotEsignReply(f, m); m.fac = f.id; m.isEsign = true; return; }
+    }
+    if (ct && facById(+ct[1])) { m.fac = +ct[1]; return; }
     const live = st.facs.filter(f => !f.archived);
     // either name counts: the portal name or the Chicago name (also without the "(IN)"-style state in parentheses)
     const match = f => facNames(f).some(n => ls.includes(n));
@@ -910,6 +982,13 @@ function importShip20261016() {
 // One-time add (10/20/2026): David Alan's intake reps, ticked as Rep / account manager (added if missing, ticked if not),
 // and the "Intake reps picked at scheduling" setting (account manager David Alan, these 5 in this order). Runs once.
 const AUTO_REP_2026_10_20 = { acct: 'David Alan,david@gentell.com', reps: 'Shalini Srinivas,shalini@gentell.com|Manjunath Ranganath,manjunath@gentell.com|Kalavathi Venkatesh,kalavathi@gentell.com|Malini Dorairaj,malini@gentell.com|Swapna Rawal,swapna@gentell.com' };
+// One-time (10/28/2026): provider + eSign info goes to Anthony Price. Only fills it when nobody set it yet.
+function importEsign20261028() {
+  const s = st.settings; if (!s || (s.imported || []).includes('esign-2026-10-28')) return;
+  if (!(s.esignTo || []).length) s.esignTo = [st.demo ? 'anthony.price@demo.gentell.com' : 'anthony.price@gentell.com'];
+  if (!s.esignGreet) s.esignGreet = 'Anthony';
+  s.imported = [...(s.imported || []), 'esign-2026-10-28'];
+}
 function importAutoRep20261020() {
   const s = st.settings; if (!s || (s.imported || []).includes('autorep-2026-10-20')) return;
   const add = x => {
@@ -931,6 +1010,7 @@ function run() {
   importTeam20261015();
   importShip20261016();
   importAutoRep20261020();
+  importEsign20261028();
   processInbox();
   // new facility scheduling: dates and the schedule lead's task (js/newfac.js)
   if (typeof nfRun === 'function') nfRun();
@@ -954,6 +1034,15 @@ function run() {
         : { code: 'E10', to: [ts[0].assignee], link: 'none', subject: 'GDD orders for ' + fs.length + ' facilities?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did any of these get orders from GDD? Click "No" or open the task to pick the warehouse.</p>${taskList(fs.map((x, i) => ['<b>' + esc(facName(x)) + '</b>', ts[i].key]), ['No'])}` }); }
       if (preDone(f, 'gdd') && f.gdd === 'Yes' && f.gddWh) gddAnswer(f, 'Yes', f.gddWh); // marked answered on the request: same FYI as Chris answering
       if (!preDone(f, 'sched')) { const tb = newTask('BRIGHTREE', { fac: f.id, assignee: am, amTask: true }); todo(tb, 'Brightree report for ' + facName(f), 'Run the Brightree report for <b>' + esc(facName(f)) + '</b>' + (chiName(f) ? ' (Chicago name: ' + esc(f.name) + ')' : '') + '.'); }
+    }
+
+    // provider + eSign info: to Anthony right away (nothing waits on it but completion)
+    if (!f.esignAsk && !f.esignGot && !f.esignDone && !preDone(f, 'es') && esTo().length) sendEsign(f);
+    chaseEsign(f);
+    // it came in after the portal setup was done: its own task (before that, it's on the portal setup task)
+    if (f.esignGot && !f.esignDone && esPsDone(f) && !tasksOf(f, 'ESIGN_PORTAL').some(t => !done(t))) {
+      const t = newTask('ESIGN_PORTAL', { fac: f.id, assignee: am, amTask: true });
+      todo(t, 'add the eSign providers for ' + facName(f), 'The provider and eSign info for <b>' + esc(facName(f)) + '</b> came in. Add the providers to the portal.');
     }
 
     // corporate not known yet: Malka picks reps per facility; corporate asks wait for the FastCare task
@@ -1074,7 +1163,7 @@ function run() {
     // complete
     // never complete while the FastCare task is still open (Oct 2026). Facilities already marked complete stay as they are.
     const fcOpen = !!fTask(f, 'FASTCARE') && !done(fTask(f, 'FASTCARE'));
-    if (f.email2 && (done(fTask(f, 'GDD')) || preDone(f, 'gdd')) && (!f.email3 || f.e3Done) && !fcOpen) {
+    if (f.email2 && (done(fTask(f, 'GDD')) || preDone(f, 'gdd')) && (!f.email3 || f.e3Done) && !fcOpen && esignOk(f)) {
       f.complete = st.today;
       tasksOf(f).forEach(t => { if (!done(t) && ['CHICAGO_FOLLOW'].includes(t.type)) t.status = 'Not needed'; });
       mail({ key: 'm:E24:' + f.id, code: 'E24', to: [am, f.requester], fac: f.id, link: 'fac', subject: 'Transition complete: ' + facName(f), fyi: true, body: `<p><b>${esc(facName(f))}</b> is done.${f.dates ? ` First DOS ${fmt(f.dates.dos)}, ordering ${fmt(f.dates.ord)}, delivery ${fmt(f.dates.del)}.` : ''} Intake rep: ${esc(nameOf(f.rep)) || '-'}.</p>` });
@@ -1148,6 +1237,8 @@ function stepTasks(f, k) {
     case 'wr': return open(['FASTCARE']);
     case 'e3': return open(['E3_REPLY', 'EMAIL3_FOLLOW']);
     case 'ct': return open(['CONTACTS_PORTAL']);
+    case 'es': return [];
+    case 'esp': return open(['ESIGN_PORTAL']);
     case 'emr': return open(['EMR_ADD', 'EMR_PORTAL']);
     case 'ps': return open(['PORTAL_SETUP']);
     case 'sched': return open(['BRIGHTREE', 'SCHEDULE', 'ADDRESS']);
@@ -1169,6 +1260,8 @@ function stepIsDone(f, k) {
     case 'wr': return !!done(fTask(f, 'FASTCARE'));
     case 'e3': return !!(f.e3Done || f.noE3);
     case 'ct': return (f.contacts || []).every(c => c.inPortal) && !stepTasks(f, 'ct').length && fcDoneNew(f) && !(f.ctNeed && !done(taskByKey(f.ctNeedTask)));
+    case 'es': return !!(f.esignGot || f.esignDone);
+    case 'esp': return !!f.esignDone;
     case 'emr': return !!done(fTask(f, 'EMR_PORTAL')) || (!!g.emrNew && !!g.emr);
     case 'ps': return !!done(fTask(f, 'PORTAL_SETUP'));
     case 'sched': return !!(f.manualDates || f.schedDone || done(fTask(f, 'SCHEDULE')) || (f.email1 && !handoffOnly(f)));
@@ -1203,6 +1296,8 @@ function markStepsDone(f, picked, by, byName, info) {
   if (keys.includes('e3')) { f.noE3 = true; markE3Done(f, byName); if (!keys.includes('ct') && !preDone(f, 'ct')) f.ctNeed = true; }
   if (keys.includes('sched')) { if (f.email1) f.schedDone = st.today; else setManualDates(f, i, byName); }
   if (keys.includes('ct')) (f.contacts || []).forEach(c => c.inPortal = true);
+  if (keys.includes('es')) markEsignGot(f, byName);
+  if (keys.includes('esp')) markEsignDone(f, byName);
   if (keys.includes('e1') && !f.email1) { f.email1 = st.today; f.email1By = byName + ' (marked on the facility page)'; }
   if (keys.includes('e2') && !f.email2) { f.email2 = st.today; f.email2By = byName + ' (marked on the facility page)'; }
   closed.forEach(t => { t.status = 'Done'; t.doneBy = by; t.doneByName = byName; t.doneOn = st.today; t.closedOnFac = true; });

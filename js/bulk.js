@@ -21,7 +21,7 @@ const BULK_MAX = 300;
 const YES = /^(yes|y|true|x|1|✓|✔)$/i, NO = /^(no|n|false|0)$/i;
 // ---------- the columns ----------
 // [key, header, help, list (dropdown name in the Lists tab), width]
-const PRE_HDR = { corp: 'Corporate set up in the portal', added: 'Added to Brightree', pumps: 'Pumps checked', gdd: 'GDD question answered', wr: 'FastCare info gathered', e3: 'Received contacts', ct: 'Added contacts to portal', emr: 'EMR info in the portal', ps: 'Portal setup done', sched: 'Scheduled', e1: 'Chicago handoff email sent', e2: 'Transfer notice sent by GNS Chicago' };
+const PRE_HDR = { corp: 'Corporate set up in the portal', added: 'Added to Brightree', pumps: 'Pumps checked', gdd: 'GDD question answered', wr: 'FastCare info gathered', e3: 'Received contacts', ct: 'Added contacts to portal', es: 'Received eSign info', esp: 'Added eSign info to portal', emr: 'EMR info in the portal', ps: 'Portal setup done', sched: 'Scheduled', e1: 'Chicago handoff email sent', e2: 'Transfer notice sent by GNS Chicago' };
 const BULK_PRE = PRE_ITEMS.map(x => x[0]).filter(k => PRE_HDR[k]);
 // headers from older templates that still mean the same column
 const HDR_OLD = { 'already done: no contacts request needed': 'pre_e3', 'chicago transition lead email': 'ctl' };

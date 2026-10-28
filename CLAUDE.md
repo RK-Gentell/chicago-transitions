@@ -152,6 +152,16 @@ A facility is never marked complete while its FastCare task is open (since Oct 1
 - Picked after portal setup (FastCare done later): `gtMissing(f)` puts them on a "Contacts into portal" task (made even with no other contacts); its done sets `f.gtc`.
 - Changed later (Edit details, FastCare redone): `portalVals` has `gt:wound` / `gt:regional` when `f.gtc` is set, so the swap goes on "Update the portal" (delete the old person, add the new with the same Department). A role not added yet just follows along in the snapshot (no update task).
 
+## Provider + eSign info from Anthony Price (Oct 28 2026)
+- `sendEsign` (run(), right after the request's first tasks, before the no-corporate return): 1 E31 per facility to Settings `esignTo` (seeded once by `importEsign20261028`: anthony.price@gentell.com, greeting `esignGreet` "Anthony"), CC the transition lead, signed with the lead's name. Subject `ES_SUBJECT` "[CT-0042] <Chicago name>- Provider and eSign info needed" (noTag; built by hand). Asks for the provider(s) who signed the forms: name, NPI, email, eSign / email / fax. Every facility open on Oct 28 2026 got it too (no flag: anything not complete, not on hold, without `esignAsk`/`esignGot`/`esignDone`).
+- The contacts request (Email 3) no longer asks for the PandaDoc provider (speech therapist + dietician stay). `email3BodyOld` unchanged.
+- `chaseEsign`: E31F follow-ups at +2 and +4 business days (High), then E31A alert to the lead at +2 more. `cond.esRound`; "keep following up" starts round `f.esignRound` (keys `m:E31F:<id>:r<n>:`).
+- `processInbox`: subject has "esign info needed" + the [CT-…] tag (or, tag dropped, exactly 1 facility name match), not from the mailbox, from `esignTo` or anyone not on the team, received on/after `esignAsk` → `gotEsignReply` (`f.esignReplies[]`, `f.esignGot`). Checked before the CT-tag early return.
+- Into the portal (physician contact + the eSign section at the bottom of the portal setup): portal setup not done → `esSetupBox` on PORTAL_SETUP (required "Where things stand" `ps_es` when `esignGot`); done (task or "Already done" ps) → `ESIGN_PORTAL` task (repeatable) for the lead. "Anthony didn't send everything yet" (`esignAnswer` 'more') clears `esignGot`, new round; `esignRoundIdx` = where this round's replies start. `f.esignDone` = in the portal.
+- Completion waits on `esignOk(f)` (`f.esignDone`). Nothing else waits on it.
+- "Already done": `es` "Received eSign info" (no email; task to add it), `esp` "Added eSign info to portal" (PRE_IMPLY esp → es). Request, bulk columns, facility page "Mark steps done".
+- Facility page "Providers (eSign)" line (`esStatus`), waiting list, Settings card "Provider and eSign info" (`s_esto`, `s_esgreet`), demo button "Demo: Anthony replies with the eSign info".
+
 ## Cache
 `index.html` loads the css/js with `?v=N`. Bump N on every push that changes css or js, or people keep the old version for up to 10 minutes.
 

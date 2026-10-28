@@ -239,8 +239,8 @@ const TT = {
   PORTAL_SETUP: {
     title: t => 'Portal setup: ' + facName(facById(t.fac)),
     form: t => { const f = facById(t.fac); return f.dates ? portalForm(f) : '<div class="err">No dates yet: the facility needs a full address with a state that has a ship point. Fix it on the facility page.</div>'; }, example: t => ({ ok: true, emrok: emrReady(facById(t.fac)) }),
-    validate: t => { const f = facById(t.fac); if (!f.dates) return 'No dates yet: fix the address on the facility page first.'; if (!V('ok')) return 'Tick when saved.'; if (emrReady(f) && !V('emrok')) return 'Log into the EMR and tick when the access works.'; return ''; },
-    done: (t, ctx) => { const f = facById(t.fac); G(f).noteDone = true; f.gtc = { wound: '', regional: '' }; gtMark(f, gtRows(f, true)); if (V('emrok')) { f.emrChecked = st.today; f.emrCheckedBy = ctx ? ctx.byName : ''; } else if (!f.emrChecked) f.emrCheckDue = true; }
+    validate: t => { const f = facById(t.fac); if (!f.dates) return 'No dates yet: fix the address on the facility page first.'; if (!V('ok')) return 'Tick when saved.'; if (emrReady(f) && !V('emrok')) return 'Log into the EMR and tick when the access works.'; if (f.esignGot && !f.esignDone && !V('ps_es')) return 'Providers (eSign): pick where things stand.'; return ''; },
+    done: (t, ctx) => { const f = facById(t.fac); if (f.esignGot && !f.esignDone && V('ps_es')) esignAnswer(f, V('ps_es'), ctx ? ctx.byName : ''); G(f).noteDone = true; f.gtc = { wound: '', regional: '' }; gtMark(f, gtRows(f, true)); if (V('emrok')) { f.emrChecked = st.today; f.emrCheckedBy = ctx ? ctx.byName : ''; } else if (!f.emrChecked) f.emrCheckDue = true; }
   },
   EMR_CHECK: {
     title: t => 'Check EMR access: ' + facName(facById(t.fac)),
@@ -273,6 +273,12 @@ const TT = {
     example: () => ({ ad_addr: '123 Demo St, LaGrange, IN 46761' }),
     validate: () => addressProblem(V('ad_addr')),
     done: t => { const f = facById(t.fac); f.address = normAddr(V('ad_addr')); f.state = stateFrom(f.address); }
+  },
+  ESIGN_PORTAL: {
+    title: t => 'eSign info into portal: ' + facName(facById(t.fac)),
+    form: t => { const f = facById(t.fac); return f.esignDone ? '<div class="meta">The providers are already in the portal' + (f.esignDoneBy ? ' (' + esc(f.esignDoneBy) + ')' : '') + '.</div>' : esignPortalBox(f, 'ep_'); },
+    example: () => ({ ep_es: 'done' }), validate: t => facById(t.fac).esignDone || V('ep_es') ? '' : 'Pick where things stand.',
+    done: (t, ctx) => { const f = facById(t.fac); if (!f.esignDone) esignAnswer(f, V('ep_es'), ctx ? ctx.byName : ''); }
   },
   E3_REPLY: {
     title: t => 'Contacts reply: ' + facName(facById(t.fac)),
@@ -322,7 +328,14 @@ function portalForm(f) {
   if (!g.noteDone) rows.push(['Corporate note ("Corporates")', 'Don\'t charge shipping for special orders or pumps (we will charge for rush shipping, but get corp approval for rush orders)']);
   const g0 = G(f), emr = emrReady(f);
   const emrBox = `<div class="sect">EMR access</div>` + (emr ? `<div class="instr">Log into the EMR${g0.emr ? ' (username <span class="q">' + esc(g0.emr) + '</span>, QR code in the "Authenticator" folder)' : ''} and check that the access works and that we can see everything we need for this facility.</div>${chk('emrok', 'Logged in: the access works and we have everything we need', !!f.emrChecked)}` : `<div class="note">EMR access isn't set up for this facility yet${f.emrChecked ? '' : '. You can finish the portal setup now; you\'ll get a "Check EMR access" task as soon as it\'s ready'}.</div>`);
-  return `<div class="instr">portal.isgmed.com → "Facilities" → "Facilities" → search 1 word → check "Corporate" → edit pencil. Leave every other field as it is. Have the Brightree report open for the pump, spike set and supplements lines.</div><div class="note">Nothing here gets typed back into this app.</div><div class="tablewrap"><table class="vals">${rows.map(r => `<tr><td>${esc(r[0])}</td><td><b>${esc(r[1])}</b></td></tr>`).join('')}</table></div>${gtSetupBox(f)}<div class="note">Other contacts are a separate task, so this doesn't wait on them.</div>${chk('ok', 'Saved ("Facility successfully updated.")' + (gtRows(f, true).length ? ', and the contacts above added' : ''))}${emrBox}`;
+  return `<div class="instr">portal.isgmed.com → "Facilities" → "Facilities" → search 1 word → check "Corporate" → edit pencil. Leave every other field as it is. Have the Brightree report open for the pump, spike set and supplements lines.</div><div class="note">Nothing here gets typed back into this app.</div><div class="tablewrap"><table class="vals">${rows.map(r => `<tr><td>${esc(r[0])}</td><td><b>${esc(r[1])}</b></td></tr>`).join('')}</table></div>${gtSetupBox(f)}<div class="note">Other contacts are a separate task, so this doesn't wait on them.</div>${chk('ok', 'Saved ("Facility successfully updated.")' + (gtRows(f, true).length ? ', and the contacts above added' : ''))}${emrBox}${esSetupBox(f)}`;
+}
+// providers who sign the forms (from Anthony Price): on the portal setup when they're in; otherwise a separate task later
+function esSetupBox(f) {
+  const h = '<div class="sect">Providers (eSign)</div>';
+  if (f.esignDone) return h + '<div class="meta">Already in the portal' + (f.esignDoneBy ? ' (' + esc(f.esignDoneBy) + ')' : '') + '.</div>';
+  if (f.esignGot) return h + esignPortalBox(f, 'ps_');
+  return h + '<div class="note">Not in yet' + (f.esignAsk ? ': we asked ' + esc(esGreet()) + ' on ' + fmt(f.esignAsk) : '') + '. You\'ll get a separate task once it comes in. Nothing here waits on it.</div>';
 }
 function dateEditor(f) {
   if (f.manualDates) { const m = f.dates || manualDatesObj(f); return `<div class="card" style="padding:10px"><b>Dates (already scheduled)</b><div class="meta" style="margin-top:4px">Ordering ${fmt(m.ord)} · date of service ${fmt(m.dos)} · delivery ${fmt(m.del)} · enteral ships ${esc(CAD_L[f.manualDates.cadence] || 'Monthly')}</div><div class="meta">${esc(m.why[0])}.${f.email1 ? '' : ' The Chicago handoff email goes out with these dates as soon as the facility has an intake rep and its areas of care.'}</div></div>`; }
