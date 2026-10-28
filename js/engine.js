@@ -715,13 +715,13 @@ const esPsDone = f => !!done(fTask(f, 'PORTAL_SETUP')) || preDone(f, 'ps');
 const esignOk = f => !!f.esignDone;
 // the facility still needs it (for the facility page and the waiting list)
 const esignOpen = f => !f.esignDone && !f.deleted;
-function esignBody(f) {
+function esignBody(f, signer) {
   return `<p>Hi ${esc(esGreet())},</p>
 <p>We're transitioning <b>${esc(f.name)}</b>${f.group ? ' (' + esc(f.group) + ')' : ''} from GNS Chicago to the Lakewood branch.</p>
 <p>Can you please send us the provider(s) who signed the forms for this facility? For each one we need:</p>
 <ul><li>Name</li><li>NPI</li><li>Email address</li><li>Whether they prefer to sign through eSign, email, or fax</li></ul>
 <p>Please reply all and keep the subject as is, so your reply gets to the right place.</p>
-<p>Thank you!<br>${esc(nameOf(amOf(f)))}</p>`;
+<p>Thank you!<br>${esc(signer || nameOf(amOf(f)))}</p>`;
 }
 function sendEsign(f) {
   f.esignAsk = st.today;

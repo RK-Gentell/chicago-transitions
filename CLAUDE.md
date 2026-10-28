@@ -161,6 +161,7 @@ A facility is never marked complete while its FastCare task is open (since Oct 1
 - Completion waits on `esignOk(f)` (`f.esignDone`). Nothing else waits on it.
 - "Already done": `es` "Received eSign info" (no email; task to add it), `esp` "Added eSign info to portal" (PRE_IMPLY esp → es). Request, bulk columns, facility page "Mark steps done".
 - Facility page "Providers (eSign)" line (`esStatus`), waiting list, Settings card "Provider and eSign info" (`s_esto`, `s_esgreet`), demo button "Demo: Anthony replies with the eSign info".
+- Settings "Send a test" (`estest`): TEST email from the mailbox to `esignTo`, CC the person clicking, made-up facility "Sample Facility" (CT-0000, so a reply never matches a facility).
 
 ## Cache
 `index.html` loads the css/js with `?v=N`. Bump N on every push that changes css or js, or people keep the old version for up to 10 minutes.
