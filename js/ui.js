@@ -341,7 +341,7 @@ function redrawPreInfo(boxId, prefix, keys, facs) {
 }
 const rqKeys = () => stepChain(PRE_ITEMS.map(x => x[0]).filter(k => V('rq_pre_' + k)));
 const rqFacs = () => V('rq_fac').split('\n').map(l => l.split(';')[0].trim()).filter(Boolean).map(name => ({ name }));
-const fsKeys = f => stepChain([...document.querySelectorAll('[data-step]:checked:not(:disabled)')].map(x => x.dataset.step)).filter(k => !stepIsDone(f, k));
+const fsKeys = f => stepChain([...document.querySelectorAll('[data-step]:checked:not(:disabled):not([data-wasdone])')].map(x => x.dataset.step)).filter(k => !stepIsDone(f, k));
 
 // ---------- new request ----------
 function requestHtml() {
@@ -540,9 +540,9 @@ function reopenCard(t, ppl) {
 }
 // facility page: tick steps that are already done (same list as "Already done" on the request)
 function stepsCard(f) {
-  if (f.complete || f.deleted) return '';
-  const items = PRE_ITEMS.map(([k, l, h]) => { const d = stepIsDone(f, k), n = d ? 0 : stepTasks(f, k).length; return `<label class="chk ${d ? 'isdone' : ''}"><input type="checkbox" id="fs_pre_${k}" data-step="${k}" ${d ? 'checked disabled' : ''}><span>${esc(l)}${d ? ' <span class="tag">done</span>' : n ? ' <span class="meta">(closes ' + n + ' open task' + (n > 1 ? 's' : '') + ')</span>' : ''}${h ? tip(esc(h)) : ''}</span></label>`; }).join('');
-  return `<details class="card" style="padding:10px" id="fsteps"><summary><b>Mark steps done</b> <span class="meta">(already taken care of outside the app)</span></summary><div class="meta" style="margin:6px 0">Tick what's already done. Their open tasks close, and anyone those tasks were sent to gets an email that they don't need to do them.</div><div class="predone">${items}</div><div id="fs_preinfo"></div><div id="fs_err"></div><div style="margin-top:8px"><button class="btn sm pri" id="fs_go">Mark ticked steps done</button></div></details>`;
+  if (f.deleted) return '';
+  const items = PRE_ITEMS.map(([k, l, h]) => { const d = stepIsDone(f, k), n = d ? 0 : stepTasks(f, k).length; return `<label class="chk ${d ? 'isdone' : ''}"${d ? ' title="Not actually done? Untick it."' : ''}><input type="checkbox" id="fs_pre_${k}" data-step="${k}" ${d ? 'checked data-wasdone="1"' : ''}><span>${esc(l)}${d ? ' <span class="tag">done</span>' : n ? ' <span class="meta">(closes ' + n + ' open task' + (n > 1 ? 's' : '') + ')</span>' : ''}${h ? tip(esc(h)) : ''}</span></label>`; }).join('');
+  return `<details class="card" style="padding:10px" id="fsteps"><summary><b>Mark steps done</b> <span class="meta">(already taken care of outside the app)</span></summary><div class="meta" style="margin:6px 0">Tick what's already done. Their open tasks close, and anyone those tasks were sent to gets an email that they don't need to do them. Something marked done that isn't? Untick it: its task comes back and its emails go out.</div><div class="predone">${items}</div><div id="fs_preinfo"></div><div id="fs_err"></div><div style="margin-top:8px"><button class="btn sm pri" id="fs_go">Mark ticked steps done</button></div></details>`;
 }
 // the clinical box on the corporate's rule: "same as intake" when the rule says so (older rules: when clinical = intake)
 const ruleClinVal = g => g.clinSame || (!partialRule(g) && g.rep && (!g.clin || g.clin === g.rep)) ? '__same' : (g.clin || '');
@@ -700,7 +700,7 @@ document.addEventListener('click', async e => {
     if (why) { toast(why); return; }
     if (ok) { const t = taskByKey(key); if (t && done(t)) toast('Put back, but it closed itself again: what it asks for is already filled in. Change it on the ' + (t.fac ? 'facility' : 'corporate') + ' page instead.'); else if (!ui.errors.length) toast('Back in the queue for ' + nameOf(t.assignee) + '.'); }
     return; }
-  if (T.id === 'fs_go') { const id = ui.openFac, f0 = facById(id), keys = [...document.querySelectorAll('[data-step]:checked:not(:disabled)')].map(x => x.dataset.step);
+  if (T.id === 'fs_go') { const id = ui.openFac, f0 = facById(id), keys = [...document.querySelectorAll('[data-step]:checked:not(:disabled):not([data-wasdone])')].map(x => x.dataset.step);
     const all = stepChain(keys).filter(k => !stepIsDone(f0, k)), info = readPreInfo('fs_pi_', 0), err = stepProblem(f0, all) || preInfoProblem(all, info) || schedPast(all.concat(f0.email1 ? ['e1'] : []), info);
     if (err) { $('#fs_err').innerHTML = '<div class="err">' + esc(err) + '</div>'; return; }
     const ts = [...new Set(all.flatMap(k => stepTasks(f0, k)))], others = [...new Set(ts.map(t => t.assignee).filter(a => a && a !== me()))];
@@ -847,6 +847,20 @@ document.addEventListener('input', e => {
   if (e.target.id === 'rq_fac') ui.confirmDup = false;
 });
 document.addEventListener('input', e => { if (e.target.id === 'rq_fac') { corpInfo(); if (PRE_INFO.some(k => V('rq_pre_' + k))) redrawPreInfo('rq_preinfo', 'rq_pi_', rqKeys(), rqFacs()); } });
+// facility page: a step marked done is unticked (it wasn't actually done)
+async function unmarkClick(box, k) {
+  const id = ui.openFac, f = facById(id); if (!f) return;
+  const recheck = () => { box.checked = true; };
+  const pv = unmarkPreview(id, k);
+  if (pv.err) { recheck(); $('#fs_err').innerHTML = '<div class="err">' + esc(pv.err) + '</div>'; return; }
+  const lines = [...pv.tasks.map(t => (t.closed ? 'Closes for now: ' : t.back ? 'Back in the queue: ' : 'New task: ') + t.title + (t.closed ? '' : ' (' + t.who + (t.opens ? ', starts ' + fmt(t.opens) : '') + ')')),
+    ...pv.mails.map(m => 'Email' + (m.day ? ' on ' + fmt(m.day) : ' now') + ': "' + m.subj + '" to ' + m.to)];
+  const msg = 'Untick "' + stepLabel(k) + '" for ' + facName(f) + '?\n\n' + (lines.length ? lines.map(l => '• ' + l).join('\n') : 'No new tasks or emails yet. They come once the steps before it are done.') + (pv.tasks.some(t => !t.closed) ? '\n\nEach person gets an email about their task.' : '') + (k === 'corp' ? '\n\nThis applies to every facility in ' + f.group + '.' : '') + (f.complete && ['e2', 'gdd', 'e3', 'wr', 'es', 'esp'].includes(k) ? '\n\nThe facility won\'t show as complete until this is done.' : '');
+  if (!confirm(msg)) { recheck(); return; }
+  let res = null;
+  await act(() => { res = unmarkStep(facById(id), k, me(), meName()); if (res.err) return false; }, 'Unticked "' + stepLabel(k) + '"');
+  if (res && res.err) { toast(res.err); recheck(); }
+}
 document.addEventListener('change', async e => {
   const id = e.target.id;
   if (id === 'rq_files') addFiles(e.target.files);
@@ -854,7 +868,8 @@ document.addEventListener('change', async e => {
   // "Already done": later steps imply the earlier ones
   for (const pre of ['rq_pre_', 'fs_pre_']) {
     if (!id.startsWith(pre)) continue;
-    const k = id.slice(pre.length), set = (x, v) => { const el = document.getElementById(pre + x); if (el && !el.disabled) el.checked = v; };
+    const k = id.slice(pre.length), set = (x, v) => { const el = document.getElementById(pre + x); if (el && !el.disabled && !el.dataset.wasdone) el.checked = v; };
+    if (e.target.dataset.wasdone) { if (!e.target.checked) unmarkClick(e.target, k); continue; }
     if (e.target.checked) (PRE_IMPLY[k] || []).forEach(x => set(x, true));
     else Object.keys(PRE_IMPLY).forEach(x => { if (PRE_IMPLY[x].includes(k)) set(x, false); });
     if (pre === 'rq_pre_') redrawPreInfo('rq_preinfo', 'rq_pi_', rqKeys(), rqFacs());

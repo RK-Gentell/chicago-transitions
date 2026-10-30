@@ -179,7 +179,7 @@ const facById = i => st.facs.find(f => f.id === i);
 const taskByKey = k => st.tasks.find(t => t.key === k);
 const tasksOf = (f, type) => st.tasks.filter(t => t.fac === f.id && (!type || t.type === type));
 const gTask = (gname, type) => st.tasks.find(t => !t.fac && lc(t.group) === lc(gname) && t.type === type);
-const fTask = (f, type) => st.tasks.find(t => t.fac === f.id && t.type === type);
+const fTask = (f, type) => st.tasks.find(t => t.fac === f.id && t.type === type && !t.parked);
 const done = t => !!t && (t.status === 'Done' || t.status === 'Not needed');
 const isWaiting = t => !done(t) && !!t.opensOn && t.opensOn > st.today;
 // "am" in the data = the transition lead (runs this transition). The account manager is "acct": kept in the loop like the intake rep.
@@ -359,7 +359,7 @@ function emailHtml(body, m) {
    cond when to cancel a later email (see mailStillValid). */
 // "to do" email for a task with steps: just what to do; the details are in the task
 function todo(t, subject, line, importance) {
-  return mail({ key: 'm:E13:' + t.key, code: 'E13', to: [t.assignee], fac: t.fac, task: t.key, cond: { task: t.key }, subject: 'To do: ' + subject, body: '<p>' + line + '</p>', importance });
+  return mail({ key: 'm:E13:' + t.key + (t.round ? ':r' + t.round : ''), code: 'E13', to: [t.assignee], fac: t.fac, task: t.key, cond: { task: t.key }, subject: 'To do: ' + subject, body: '<p>' + line + '</p>', importance });
 }
 // follow-ups go out as high importance; everything else normal (the "CT - Send emails" flow reads the Importance column)
 const HIGH_CODES = new Set(['E15', 'E16F', 'E16A', 'E17', 'E31F', 'E31A']);
@@ -423,7 +423,7 @@ function newTask(type, o) {
   const base = 't:' + type + ':' + (o.fac ? 'f' + o.fac : o.nf ? 'n' + o.nf : 'g' + lc(o.group));
   let key = base;
   if (REPEATABLE.has(type)) { const n = st.tasks.filter(t => t.key === base || t.key.startsWith(base + '#')).length; if (n) key = base + '#' + (n + 1); }
-  const existing = taskByKey(key); if (existing) return existing;
+  const existing = taskByKey(key); if (existing) { if (existing.parked) unpark(existing); return existing; }
   const t = Object.assign({ key, type, status: 'Open', created: st.today, doneBy: '', doneOn: '', assignee: '' }, o);
   if (!t.assignee) t.assignee = fallbackOwner();
   if (!t.due) t.due = addBiz(t.opensOn && t.opensOn > st.today ? t.opensOn : st.today, isAm(t.assignee) ? st.settings.amDays : st.settings.helperDays);
@@ -856,7 +856,7 @@ const isAutoAcct = email => !!autoAcct() && lc(email) === autoAcct();
 // scheduled = its dates won't move anymore (handoff email sent and scheduled, or dates typed in as already scheduled)
 const isScheduled = f => !!((f.email1 && !handoffOnly(f)) || f.manualDates);
 // the intake rep waits for scheduling: account manager is David, not scheduled, no handoff email yet
-const autoPending = f => !!f && !f.deleted && !f.complete && !f.email1 && !f.manualDates && isAutoAcct(acctOf(f));
+const autoPending = f => !!f && !f.deleted && !f.complete && !f.email1 && !f.manualDates && !f.schedDone && isAutoAcct(acctOf(f));
 // facilities each rep has ordering on that day (scheduled ones only). except = a facility id to leave out (the one being scheduled)
 function repLoad(ord, except) {
   const n = {};
@@ -1005,6 +1005,16 @@ function importAutoRep20261020() {
   s.imported = [...(s.imported || []), 'autorep-2026-10-20'];
 }
 
+// the facility's first tasks (made when the request is saved; also when a step marked done is unticked)
+function askFastcare(f, need) { const tf = newTask('FASTCARE', { fac: f.id, assignee: amOf(f), amTask: true, need: need || { corp: !f.group, addr: !f.address } }); todo(tf, 'FastCare for ' + facName(f), 'Look up <b>' + esc(f.name) + '</b> in FastCare.'); return tf; }
+function askBrightree(f) { const tb = newTask('BRIGHTREE', { fac: f.id, assignee: amOf(f), amTask: true }); todo(tb, 'Brightree report for ' + facName(f), 'Run the Brightree report for <b>' + esc(facName(f)) + '</b>' + (chiName(f) ? ' (Chicago name: ' + esc(f.name) + ')' : '') + '.'); return tb; }
+function askGdd(f) {
+  const tg = newTask('GDD', { fac: f.id, assignee: roleEmail('gdd') });
+  queue('E10', tg.assignee, f, tg, (fs, ts) => fs.length === 1
+    ? { code: 'E10', to: [ts[0].assignee], fac: fs[0].id, task: ts[0].key, buttons: ['No'], cond: { task: ts[0].key }, subject: 'GDD orders for ' + facName(fs[0]) + '?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did <b>${esc(facName(fs[0]))}</b>${chiName(fs[0]) ? ' (Chicago name: ' + esc(fs[0].name) + ')' : ''} (${esc(fs[0].group || 'corporate not known yet')}) get orders from GDD? If yes, open the task and pick the warehouse.</p>` }
+    : { code: 'E10', to: [ts[0].assignee], link: 'none', subject: 'GDD orders for ' + fs.length + ' facilities?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did any of these get orders from GDD? Click "No" or open the task to pick the warehouse.</p>${taskList(fs.map((x, i) => ['<b>' + esc(facName(x)) + '</b>', ts[i].key]), ['No'])}` });
+  return tg;
+}
 function run() {
   if (!st || !st.settings) return;
   importTeam20261015();
@@ -1027,13 +1037,10 @@ function run() {
     if (!f.asked) {
       f.asked = true;
       const need = { corp: !f.group, addr: !f.address };
-      if (!preDone(f, 'wr')) { const tf = newTask('FASTCARE', { fac: f.id, assignee: am, amTask: true, need }); todo(tf, 'FastCare for ' + facName(f), 'Look up <b>' + esc(f.name) + '</b> in FastCare.'); }
-      if (!preDone(f, 'gdd')) { const tg = newTask('GDD', { fac: f.id, assignee: roleEmail('gdd') });
-      queue('E10', tg.assignee, f, tg, (fs, ts) => fs.length === 1
-        ? { code: 'E10', to: [ts[0].assignee], fac: fs[0].id, task: ts[0].key, buttons: ['No'], cond: { task: ts[0].key }, subject: 'GDD orders for ' + facName(fs[0]) + '?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did <b>${esc(facName(fs[0]))}</b>${chiName(fs[0]) ? ' (Chicago name: ' + esc(fs[0].name) + ')' : ''} (${esc(fs[0].group || 'corporate not known yet')}) get orders from GDD? If yes, open the task and pick the warehouse.</p>` }
-        : { code: 'E10', to: [ts[0].assignee], link: 'none', subject: 'GDD orders for ' + fs.length + ' facilities?', body: `<p>Hi ${esc(first(nameOf(ts[0].assignee)))},</p><p>Did any of these get orders from GDD? Click "No" or open the task to pick the warehouse.</p>${taskList(fs.map((x, i) => ['<b>' + esc(facName(x)) + '</b>', ts[i].key]), ['No'])}` }); }
+      if (!preDone(f, 'wr')) askFastcare(f, need);
+      if (!preDone(f, 'gdd')) askGdd(f);
       if (preDone(f, 'gdd') && f.gdd === 'Yes' && f.gddWh) gddAnswer(f, 'Yes', f.gddWh); // marked answered on the request: same FYI as Chris answering
-      if (!preDone(f, 'sched')) { const tb = newTask('BRIGHTREE', { fac: f.id, assignee: am, amTask: true }); todo(tb, 'Brightree report for ' + facName(f), 'Run the Brightree report for <b>' + esc(facName(f)) + '</b>' + (chiName(f) ? ' (Chicago name: ' + esc(f.name) + ')' : '') + '.'); }
+      if (!preDone(f, 'sched')) askBrightree(f);
     }
 
     // provider + eSign info: to Anthony right away (nothing waits on it but completion)
@@ -1136,7 +1143,7 @@ function run() {
     // already scheduled, handoff email not sent: it goes out by itself once it has what it needs
     // David's facility typed in as already scheduled: its intake rep is picked by the same rules, for the ordering date typed in
     if (!f.email1 && f.manualDates && preDone(f, 'sched') && f.dates && !f.rep && isAutoAcct(acctOf(f))) autoAssign(f, '', 'Automatic (already scheduled)');
-    if (!f.email1 && f.manualDates && preDone(f, 'sched') && f.dates && f.rep && covKnown(FG(f)) && !settingsProblems().length) { sendEmail1(f); f.email1By = 'Sent automatically (already scheduled)'; }
+    if (!f.email1 && f.manualDates && (preDone(f, 'sched') || f.schedDone) && f.dates && f.rep && covKnown(FG(f)) && !settingsProblems().length) { sendEmail1(f); f.email1By = 'Sent automatically (already scheduled)'; }
     // Email 3 to the wound rep + regional: as soon as the FastCare task is done (or its info was filled in), unless no contacts request is needed
     const fcIn = done(fTask(f, 'FASTCARE')) || preDone(f, 'wr');
     // since Oct 26 2026 it waits for the Gentell WC Transition Lead (CC'd on it)
@@ -1209,8 +1216,8 @@ function canReopen(t) {
   const f = t.fac ? facById(t.fac) : null;
   return !(f && (f.deleted || f.archived));
 }
-function reopenTask(t, to, by, byName) {
-  if (!canReopen(t)) return 'This task can\'t be put back.';
+function reopenTask(t, to, by, byName, force) {
+  if (force ? !(t && done(t)) : !canReopen(t)) return 'This task can\'t be put back.';
   (t.history = t.history || []).push({ doneBy: t.doneBy, doneByName: t.doneByName, doneOn: t.doneOn, reopenedBy: by, reopenedByName: byName, reopenedOn: st.today });
   t.status = 'Open'; t.doneBy = ''; t.doneByName = ''; t.doneOn = ''; t.reopened = st.today;
   if (to) { t.assignee = to; t.amTask = false; }
@@ -1310,6 +1317,144 @@ function notifyClosed(f, closed, by, byName, what) {
   Object.entries(byWho).forEach(([who, ts]) => mail({ key: 'm:E25:' + hash(ts.map(t => t.key).sort().join(',')) + ':' + uid(), code: 'E25', to: [who], fac: f.id, link: 'none',
     subject: (ts.length === 1 ? 'Not needed anymore: ' + taskTitle(ts[0]) : 'Not needed anymore: ' + ts.length + ' tasks for ' + facName(f)),
     body: `<p>Hi ${esc(first(nameOf(who)))},</p><p>${esc(byName)} ${what(ts)} for <b>${esc(facName(f))}</b>, so ${ts.length === 1 ? 'it\'s' : 'they\'ve'} been removed from your tasks. You don't need to do ${ts.length === 1 ? 'it' : 'them'}.</p><ul>${ts.map(t => '<li>' + esc(taskTitle(t)) + '</li>').join('')}</ul>` }));
+}
+// ---------- untick a step on the facility page: it wasn't actually done (Oct 30 2026) ----------
+// Marked by hand (request "Already done" / "Mark steps done"): the flag and what it set are undone, and the task it skipped is made.
+// Done through its task: that task goes back in the queue to the same person (E26). Emails go out the way they would have.
+// Blocked while a later step that relies on it is done, and when the app already sent the email the step stands for.
+const STEP_TYPES = { added: ['PORTAL_ADD'], pumps: ['PUMPS'], gdd: ['GDD'], wr: ['FASTCARE'], e3: ['E3_REPLY'], ct: ['CONTACTS_PORTAL'], esp: ['ESIGN_PORTAL'], emr: ['EMR_PORTAL'], ps: ['PORTAL_SETUP'], sched: ['SCHEDULE'], e2: ['CHICAGO_FOLLOW'] };
+// later steps that rely on this one: untick those first
+const STEP_LATER = { added: ['ps', 'emr', 'ct', 'esp'], e3: ['ct'], es: ['esp'], ps: ['sched'], e1: ['e2'] };
+// a later step counts only when it was really done (contacts / EMR / eSign show as done by themselves when there's nothing to add)
+function laterDone(f, x) {
+  if (x === 'ct') return preDone(f, 'ct') || tasksOf(f, 'CONTACTS_PORTAL').some(t => t.status === 'Done');
+  if (x === 'emr') return preDone(f, 'emr') || !!done(fTask(f, 'EMR_PORTAL'));
+  return stepIsDone(f, x);
+}
+const stepLabel = k => { const x = PRE_ITEMS.find(i => i[0] === k); return x ? x[1].split(' (')[0] : k; };
+// the app sent (or queued) the Chicago handoff email itself
+const handoffMail = f => st.mails.find(m => m.key === 'm:E14:' + f.id && m.status !== 'Cancelled');
+function unmarkProblem(f, k) {
+  if (!f || f.deleted) return 'This facility was deleted.';
+  if (!stepIsDone(f, k)) return '"' + stepLabel(k) + '" isn\'t done.';
+  const hm = handoffMail(f);
+  if (k === 'e1' && hm) return 'The app sent the Chicago handoff email on ' + fmt(hm.day) + ', and an email can\'t be unsent. If the dates are wrong, use "Dates changed: send correction".';
+  if (k === 'sched' && hm && !handoffOnly(f)) return 'The Chicago handoff email already went out with these dates on ' + fmt(hm.day) + '. If they\'re wrong, use "Dates changed: send correction".';
+  const later = (STEP_LATER[k] || []).filter(x => laterDone(f, x));
+  const q = later.map(x => '"' + stepLabel(x) + '"');
+  if (later.length) return 'Untick ' + (q.length > 1 ? q.slice(0, -1).join(', ') + ' and ' + q[q.length - 1] : q[0]) + ' first. ' + (later.length > 1 ? 'They rely' : 'It relies') + ' on this step.';
+  if (k === 'corp') { const g = G(f), ps = facsOfGroup(g.name).filter(x => !x.deleted && stepIsDone(x, 'ps'));
+    if (ps.length) return 'Portal setup is already done for ' + ps.map(x => facName(x)).join(', ') + ' (' + g.name + '), so the corporate is set up. Untick "Portal setup done" on ' + (ps.length > 1 ? 'those facilities' : 'that facility') + ' first.'; }
+  return '';
+}
+// the step's tasks that were finished: back in the queue (newest of a repeatable type only)
+function reopenStep(f, types, by, byName) {
+  const out = [];
+  types.forEach(type => { const ts = tasksOf(f, type).filter(t => done(t) && !t.parked && !t.archived); const t = ts[ts.length - 1];
+    if (t && !reopenTask(t, '', by, byName, true)) out.push(t); });
+  return out;
+}
+function park(t) { t.status = 'Not needed'; t.doneOn = st.today; t.parked = true; }
+function unpark(t) {
+  t.parked = false; t.status = 'Open'; t.doneOn = ''; t.doneBy = ''; t.doneByName = ''; t.round = (t.round || 0) + 1;
+  t.due = addBiz(t.opensOn && t.opensOn > st.today ? t.opensOn : st.today, isAm(t.assignee) ? st.settings.amDays : st.settings.helperDays);
+}
+function unmarkStep(f, k, by, byName) {
+  const err = unmarkProblem(f, k); if (err) return { err };
+  const g = f.group ? G(f) : null, pre = f.pre = normPre(f.pre), was = { on: st.today, by, byName, key: k };
+  delete pre[k];
+  const reopened = reopenStep(f, STEP_TYPES[k] || [], by, byName);
+  switch (k) {
+    case 'corp': {
+      facsOfGroup(g.name).forEach(x => { if (x.pre) delete x.pre.corp; });
+      g.existing = false;
+      if (g.price && !g.priceAuto) { g.priceWas = g.price; g.price = ''; }
+      if (g.emr) { g.emrWas = g.emr; g.emr = ''; g.emrNew = false; }
+      ['PRICE', 'EMR'].forEach(type => { const ts = st.tasks.filter(t => !t.fac && lc(t.group) === lc(g.name) && t.type === type && done(t)); const t = ts[ts.length - 1]; if (t && !reopenTask(t, '', by, byName, true)) reopened.push(t); });
+      break; }
+    case 'added':
+      f.inPortal = false; f.addedBefore = false;
+      ['PORTAL_SETUP', 'EMR_PORTAL'].forEach(type => { const t = fTask(f, type); if (t && !done(t)) park(t); });
+      break;
+    case 'pumps': f.pumps = ''; break;
+    case 'gdd':
+      was.gdd = f.gdd; was.gddWh = f.gddWh; f.gdd = ''; f.gddWh = '';
+      tasksOf(f, 'GDD_PORTAL').forEach(t => { if (!done(t)) { t.status = 'Not needed'; t.doneOn = st.today; } });
+      if (!reopened.length && !fTask(f, 'GDD')) askGdd(f);
+      break;
+    case 'wr':
+      delete pre.fc;
+      if (!reopened.length && !fTask(f, 'FASTCARE')) askFastcare(f);
+      break;
+    case 'e3':
+      f.noE3 = false; f.e3NoReview = false; f.e3Done = ''; f.e3DoneBy = '';
+      if (f.ctNeed && f.ctNeedTask) { const t = taskByKey(f.ctNeedTask); if (t && !done(t)) { t.status = 'Not needed'; t.doneOn = st.today; } }
+      f.ctNeed = false; f.ctNeedTask = '';
+      // the contacts request already went out and nobody's reply is waiting on a task: follow-ups start again
+      if (f.email3 && !reopened.length) { f.e3Reply = null; f.e3Round = (f.e3Round || 0) + 1; f.e3RoundFrom = st.today; }
+      break;
+    case 'ct':
+      (f.contacts || []).forEach(c => c.inPortal = false);
+      if (!reopened.length) { if (f.e3Done || f.noE3) f.ctNeed = true; f.ctNeedTask = ''; }
+      break;
+    case 'es':
+      tasksOf(f, 'ESIGN_PORTAL').forEach(t => { if (!done(t)) { t.status = 'Not needed'; t.doneOn = st.today; } });
+      if (f.esignAsk) esignAnswer(f, 'more', byName); // asked already: follow-ups to Anthony start again
+      else { f.esignGot = ''; f.esignBy = ''; }       // never asked: the email to Anthony goes out
+      break;
+    case 'esp': f.esignDone = ''; f.esignDoneBy = ''; break;
+    case 'emr':
+      // the corporate never confirmed this facility was added to the EMR login (closed by "Mark steps done"): ask again
+      if (!reopened.length) { const ea = fTask(f, 'EMR_ADD'); if (ea && ea.closedOnFac && done(ea) && !reopenTask(ea, '', by, byName, true)) reopened.push(ea); }
+      if (g && g.emrNew && g.emr && !reopened.length) { // EMR access came from the corporate's own "EMR access" task
+        g.emrWas = g.emr; g.emr = ''; g.emrNew = false;
+        const ts = st.tasks.filter(t => !t.fac && lc(t.group) === lc(g.name) && t.type === 'EMR' && done(t)), t = ts[ts.length - 1];
+        if (t && !reopenTask(t, '', by, byName, true)) reopened.push(t);
+      }
+      break;
+    case 'ps': {
+      delete f.portalSnap; tasksOf(f, 'PORTAL_UPDATE').forEach(t => { if (!done(t)) { t.status = 'Not needed'; t.doneOn = st.today; } });
+      const sc = fTask(f, 'SCHEDULE'); if (sc && !done(sc)) park(sc);
+      break; }
+    case 'sched':
+      if (f.manualDates) { was.manualDates = f.manualDates; f.manualDates = null; f.dates = null; f.rec = null; }
+      f.schedDone = '';
+      if (!f.bt && !fTask(f, 'BRIGHTREE')) askBrightree(f);
+      break;
+    case 'e1':
+      was.email1By = f.email1By; f.email1 = ''; f.email1By = '';
+      // scheduled already: those dates stay, and the handoff email goes out with them (from run)
+      if (f.schedDone && !f.manualDates && f.dates) setManualDates(f, { ord: f.dates.ord, dos: f.dates.dos, del: f.dates.del, cad: (f.bt && f.bt.cadence) || '4' }, byName);
+      break;
+    case 'e2': {
+      was.email2By = f.email2By; f.email2 = ''; f.email2By = '';
+      // the transfer notice was already asked for (or the old way, Chicago sends it): the lead follows up. Otherwise the email to the WC lead goes out first.
+      if (!reopened.length && !fTask(f, 'CHICAGO_FOLLOW') && f.email1 && (f.e1b || !f.e1Split)) { const t = newTask('CHICAGO_FOLLOW', { fac: f.id, assignee: amOf(f), amTask: true }); todo(t, 'check the transfer notice for ' + facName(f), 'GNS Chicago hasn\'t sent <b>' + esc(facName(f)) + '</b> the transfer notice yet. Reach out to ' + esc(facEmailWho(f)) + '.'); }
+      break; }
+  }
+  // completion is checked again on the next run (the "Transition complete" email isn't sent twice)
+  if (f.complete) { was.complete = f.complete; f.complete = ''; }
+  f.stepsUndone = [...(f.stepsUndone || []), was];
+  return { reopened };
+}
+// what unticking would do, for the confirm box: runs it on a copy and lists the tasks and emails (reminders left out)
+function unmarkPreview(id, k) {
+  const keep = st, keepPending = pending.slice(), out = { tasks: [], mails: [], err: '' };
+  try {
+    st = JSON.parse(JSON.stringify(keep)); st.demo = keep.demo;
+    const before = {}; st.tasks.forEach(t => before[t.key] = t.status); const mBefore = new Set(st.mails.map(m => m.key));
+    const r = unmarkStep(facById(id), k, st.me ? st.me.email : '', 'you');
+    if (r.err) { out.err = r.err; return out; }
+    run();
+    st.tasks.forEach(t => { const b = before[t.key];
+      if (done(t) || t.archived) { if (b && !['Done', 'Not needed'].includes(b)) out.tasks.push({ title: taskTitle(t), who: nameOf(t.assignee), closed: true }); return; }
+      if (!b || ['Done', 'Not needed'].includes(b)) out.tasks.push({ title: taskTitle(t), who: nameOf(t.assignee), back: !!b, opens: t.opensOn && t.opensOn > st.today ? t.opensOn : '' }); });
+    // to-do / back-in-queue emails go with the tasks listed above
+    st.mails.filter(m => !mBefore.has(m.key) && m.status !== 'Cancelled' && !(['E17', 'E26'].includes(m.code) || (m.code === 'E13' && m.task)))
+      .forEach(m => out.mails.push({ subj: String(m.subject || '').replace(/^\[CT-\d+\]\s*/, ''), to: m.to.map(nameOf).join(', '), day: m.day > st.today ? m.day : '' }));
+  } catch (e) { console.error(e); out.err = 'Couldn\'t work out what this would do: ' + (e.message || e); }
+  finally { st = keep; pending.length = 0; keepPending.forEach(p => pending.push(p)); }
+  return out;
 }
 // closes a facility's open tasks of these types as Done (what they ask for was filled in on the facility page)
 function closeFilled(f, types, by, byName) {
