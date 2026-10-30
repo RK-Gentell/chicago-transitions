@@ -1,5 +1,17 @@
 # Chicago Transitions app: notes for Claude
 
+## Rules for working with Raizy
+Follow these in every session.
+- Always ask, never guess about our workflow. If anything is unclear, ask with multiple-choice questions before you build. Edge cases are the work, so think them through and ask about them.
+- Before a change that sends a new or different email, show a sample of the email first and wait for her OK.
+- Never delete or overwrite real data (facilities, tasks, settings, attachments). If a change touches how existing facilities are stored, make sure existing ones still work exactly as before. If you're not sure a change is safe for existing data, stop and ask.
+- Never send real emails or touch live data to test. Test everything in demo mode (`index.html?demo`) with a headless browser: the new behavior, the blocked or error cases, and one normal facility from start through scheduling to confirm nothing else broke.
+- When it's tested, bump the `?v=` numbers in index.html so people's browsers pick up the change, add a dated section to the end of this file (don't edit old sections), then push straight to `main` so it goes live. Don't leave it on a separate branch or open a pull request for her to merge.
+- When you're done, tell her in a few sentences what changed for users and what you tested. If she asks for a user update, write a short, plain email to the AMs and leads: no bullets, no jargon, quote button and checkbox names exactly as they appear in the app.
+- Keep it simple and maintainable. No clever solutions nobody can maintain, and nothing that fails silently. If something can fail, the app should tell the user or alert the transition lead.
+- If something needs her to click in the live app (like Microsoft sign-in or a "Send a test" button), give her click-by-click steps instead of trying it yourself.
+- Talk to her in plain words about what the app does, not how the code works. She doesn't read code.
+
 Raizy Kreiser (PM, Gentell Nutritional Services) owns this. She isn't a developer: she asks for changes in plain words, you make them, test them, and push to `main`. GitHub Pages publishes `main` within about a minute. Keep answers to her short and non-technical.
 
 ## What it is
