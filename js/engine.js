@@ -173,8 +173,18 @@ const bothNames = f => chiName(f) ? facName(f) + ' / ' + f.name : facName(f);
 const chiGreet = f => (FG(f).cov || {}).Enteral === "Don't Supply" ? (st.settings.chicagoGreetingNoEnt || 'Brittany') : st.settings.chicagoGreeting;
 // Gentell WC Transition Lead (Oct 26 2026): the Gentell person who sends the transfer email to the facility. Anyone in the company
 // address book, saved as { name, email } on the facility (f.ctl). Picked on the request (optional) or on "Pick the reps".
-const ctlOf = f => f && f.ctl && validEmail(f.ctl.email) ? f.ctl : null;
-const ctlEmail = f => ctlOf(f) ? lc(f.ctl.email) : '';
+// "Use regional" (Nov 2 2026): f.ctl / g.ctl = { useRegional: true } means the facility's Regional Manager is the WC lead, whoever
+// that is at the time. ctlOf gives the regional then (null until FastCare fills them in: the email to the WC lead waits for them).
+const USE_REG = 'Use regional';
+const ctlReg = x => !!(x && x.ctl && x.ctl.useRegional);
+const ctlOf = f => { if (!f || !f.ctl) return null; if (f.ctl.useRegional) return f.regional && validEmail(f.regional.email) ? { name: f.regional.name, email: lc(f.regional.email) } : null; return validEmail(f.ctl.email) ? f.ctl : null; };
+const ctlEmail = f => ctlOf(f) ? lc(ctlOf(f).email) : '';
+// picked (a person, or "Use regional" even before the regional is known). Works on a facility or a corporate.
+const ctlSet = x => !!(x && x.ctl && (x.ctl.useRegional || validEmail(x.ctl.email)));
+const ctlCopy = c => c.useRegional ? { useRegional: true } : { name: c.name, email: lc(c.email) };
+// what to show: the person, or "Use regional (their name)" / "Use regional (no regional yet)"
+const ctlLabel = c => !c ? '' : c.useRegional ? USE_REG : c.name || '';
+const ctlShow = f => !ctlSet(f) ? '' : !ctlReg(f) ? f.ctl.name : USE_REG + ' (' + (ctlOf(f) ? ctlOf(f).name : 'no regional yet: FastCare picks them') + ')';
 const facById = i => st.facs.find(f => f.id === i);
 const taskByKey = k => st.tasks.find(t => t.key === k);
 const tasksOf = (f, type) => st.tasks.filter(t => t.fac === f.id && (!type || t.type === type));
@@ -597,7 +607,7 @@ function sendCtlEmail(f, correction) {
   mail({ key: 'm:' + (correction ? 'E22b' : 'E14b') + ':' + f.id + (correction ? ':' + uid() : ''), code: correction ? 'E22' : 'E14', to: [c.email, f.regional && f.regional.email, f.wound && f.wound.email, ...(s.e1bTo || [])], cc: [...(s.e1bCc || []), am, f.rep, acctOf(f)], fac: f.id, noTag: true, link: 'none',
     subject: (correction ? 'CORRECTION: ' : '') + ctlSubject(f), body: (correction ? '<p><b>Corrected dates below.</b> If you already sent the facility email, please send them this corrected one.</p>' : '') + ctlEmailBody(f, withIns) });
   if (correction) return;
-  f.e1b = st.today; f.e1bCtl = lc(c.email);
+  f.e1b = st.today; f.e1bCtl = lc(c.email); f.e1bCtlName = c.name;
   if (withIns) f.inserviceAsked = st.today;
   mail({ key: 'm:E15:' + f.id, code: 'E15', to: [c.email], cc: [am], fac: f.id, noTag: true, link: 'none', day: addBiz(st.today, 3), cond: { fac: f.id, untilEmail2: true }, subject: 'RE: ' + ctlSubject(f), body: `<p>Hi ${esc(first(c.name))},</p><p>Checking in, has the facility email for <b>${esc(facName(f))}</b> gone out? Please CC ${esc(CFG.mailbox)} on it.</p><p>Thank you!<br>${esc(nameOf(am))}</p>` });
   newTask('CHICAGO_FOLLOW', { fac: f.id, assignee: am, amTask: true, opensOn: addBiz(st.today, 5) });
@@ -802,7 +812,7 @@ const partialRule = g => !!(g && Array.isArray(g.ruleIndiv));
 // contacts request (it waits for them so they're CC'd) or the in-service email. Not part of a corporate's rule: always picked per facility.
 const e3Pending = f => !f.email3 && !f.noE3 && !preDone(f, 'e3');
 function ctlNeeded(f) {
-  if (!f || ctlOf(f) || f.complete || f.deleted) return false;
+  if (!f || ctlSet(f) || f.complete || f.deleted) return false; // "Use regional" counts as picked: it waits for FastCare, nobody picks
   return !f.email1 || (f.e1Split && !f.e1b && !f.email2) || e3Pending(f) || !inserviceDone(f);
 }
 // what this facility still needs picked by hand. The intake rep always; the rule's blank positions until the Chicago handoff email;
@@ -820,14 +830,33 @@ function ruleNeeds(f) {
 }
 // fills a facility's empty positions from the corporate's rule (never overwrites what a facility already has)
 // sets the Gentell WC Transition Lead. Changed after their email went out (and the facility email hasn't): the transition lead is told to forward it.
+// c can be { useRegional: true }: then the regional is the WC lead (no regional yet → ctlRegCheck sends the note once there is one).
 function setCtl(f, c, byName) {
-  if (!c || !validEmail(c.email)) return;
-  if (ctlOf(f) && lc(c.email) !== ctlEmail(f) && f.e1b && !f.email2) mail({ key: 'm:E13:ctl:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Gentell WC Transition Lead changed: ' + facName(f), body: '<p>' + esc(byName) + ' changed the Gentell WC Transition Lead from ' + esc(f.ctl.name) + ' to ' + esc(c.name) + '. The email asking them to send the facility the transfer email went to ' + esc(f.ctl.name) + ' on ' + fmt(f.e1b) + '. Forward it to ' + esc(c.name) + ' if they need it.</p>' });
-  f.ctl = { name: c.name, email: lc(c.email) };
+  if (!c || !(c.useRegional || validEmail(c.email))) return;
+  const old = ctlOf(f), oldLabel = old ? (ctlReg(f) ? old.name + ' (the regional)' : old.name) : '';
+  f.ctl = ctlCopy(c);
+  const now = ctlOf(f);
+  if (!(f.e1b && !f.email2)) return;
+  if (old && !f.e1bCtl) { f.e1bCtl = lc(old.email); f.e1bCtlName = old.name; } // their email went out before the app kept who got it
+  if (old && now && now.email !== lc(old.email)) {
+    mail({ key: 'm:E13:ctl:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Gentell WC Transition Lead changed: ' + facName(f), body: '<p>' + esc(byName) + ' changed the Gentell WC Transition Lead from ' + esc(oldLabel) + ' to ' + esc(c.useRegional ? now.name + ' (the regional)' : now.name) + '. The email asking them to send the facility the transfer email went to ' + esc(f.e1bCtlName || old.name) + ' on ' + fmt(f.e1b) + '. Forward it to ' + esc(now.name) + ' if they need it.</p>' });
+    f.e1bCtlWho = now.email; // ctlRegCheck: this change was already told
+  }
+}
+// "Use regional" facility whose regional changed after the email to the WC lead went out (Edit details, FastCare redone, tracker):
+// the new regional is the WC lead now, so the transition lead is told to forward it. Once per change (key from the 2 emails).
+function ctlRegCheck(f) {
+  if (!ctlReg(f) || !f.e1b || f.email2 || f.complete) return;
+  const now = ctlOf(f); if (!now) return;
+  const told = f.e1bCtlWho || f.e1bCtl;
+  if (!told) { f.e1bCtlWho = now.email; return; }
+  if (told === now.email) return;
+  mail({ key: 'm:E13:ctlreg:' + f.id + ':' + hash(told + '>' + now.email), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Gentell WC Transition Lead changed: ' + facName(f), body: '<p>The regional for <b>' + esc(facName(f)) + '</b> is now ' + esc(now.name) + '. This facility uses the regional as the Gentell WC Transition Lead, so ' + esc(now.name) + ' is the WC lead now. The email asking them to send the facility the transfer email went to ' + esc(f.e1bCtlName || f.e1bCtl) + ' on ' + fmt(f.e1b) + '. Forward it to ' + esc(now.name) + ' if they need it.</p>' });
+  f.e1bCtlWho = now.email;
 }
 function applyRule(f, g) {
   // Gentell WC Transition Lead from the corporate (g.ctl, Oct 27 2026): fills a facility that has none, never overwrites
-  if (g && g.ctl && !ctlOf(f) && !f.complete) f.ctl = { name: g.ctl.name, email: lc(g.ctl.email) };
+  if (ctlSet(g) && !ctlSet(f) && !f.complete) f.ctl = ctlCopy(g.ctl);
   if (autoPending(f)) { if (!f.am && g.am) f.am = g.am; if (!f.clin && g.clin && !g.clinSame) f.clin = g.clin; return; } // intake rep waits for scheduling
   if (!partialRule(g)) { if (!f.rep && g.rep) { f.rep = g.rep; f.clin = g.clin || g.rep; if (!f.am && g.am) f.am = g.am; } return; } // older rules: unchanged
   if (!f.rep && g.rep) f.rep = g.rep;
@@ -840,7 +869,7 @@ function setRule(g, v) {
   g.clinSame = v.clin === '__same'; g.clin = g.clinSame ? g.rep : (v.clin || '');
   g.ruleIndiv = RULE_POS.map(x => x[0]).filter(p => p === 'clin' ? !v.clin : !v[p]);
 }
-const ruleText = g => { if (!g.rep && !g.clin && !g.clinSame && !g.acct && !g.am) return g.ctl ? 'Gentell WC Transition Lead: ' + g.ctl.name : ''; return RULE_POS.map(([p, l]) => { const v = p === 'clin' && g.clinSame ? 'same as intake' : g[p] ? nameOf(g[p]) : (partialRule(g) ? 'per facility' : (p === 'acct' ? 'none' : '-')); return l + ': ' + v; }).join(' · ') + (g.ctl ? ' · Gentell WC Transition Lead: ' + g.ctl.name : ''); };
+const ruleText = g => { if (!g.rep && !g.clin && !g.clinSame && !g.acct && !g.am) return ctlSet(g) ? 'Gentell WC Transition Lead: ' + ctlLabel(g.ctl) : ''; return RULE_POS.map(([p, l]) => { const v = p === 'clin' && g.clinSame ? 'same as intake' : g[p] ? nameOf(g[p]) : (partialRule(g) ? 'per facility' : (p === 'acct' ? 'none' : '-')); return l + ': ' + v; }).join(' · ') + (ctlSet(g) ? ' · Gentell WC Transition Lead: ' + ctlLabel(g.ctl) : ''); };
 function ruleFacs(t) { return st.facs.filter(f => !f.hold && !f.archived && (t.group === '__nocorp' ? !f.group && ruleNeeds(f).length : lc(f.group) === lc(t.group) && ruleNeeds(f).length)); }
 
 // ---------- intake rep picked automatically at scheduling (David's team, Oct 20 2026) ----------
@@ -1153,6 +1182,7 @@ function run() {
     else if (!e3Pending(f) && !f.email3 && !inserviceDone(f) && fcIn && f.wound && f.regional && ctlOf(f)) sendInservice(f);
     // handoff sent: the email to the Gentell WC Transition Lead, once there is one
     if (f.email1 && f.e1Split && !f.e1b && !f.email2 && ctlOf(f)) sendCtlEmail(f);
+    ctlRegCheck(f);
     // portal setup done while EMR access wasn't ready: check it as soon as it is
     if (f.emrCheckDue && !f.emrChecked && emrReady(f) && !fTask(f, 'EMR_CHECK')) { const t = newTask('EMR_CHECK', { fac: f.id, assignee: am, amTask: true }); todo(t, 'check EMR access for ' + facName(f), 'EMR access for <b>' + esc(facName(f)) + '</b> is set up now. Log in and check it works.'); }
     // older facilities had an "Email 3 follow-up" task: carry over its answer, close it if still open
