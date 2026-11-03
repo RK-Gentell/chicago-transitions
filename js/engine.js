@@ -1537,10 +1537,18 @@ function nextStep(f, from) {
 // new Brightree report dates (rechecked on the schedule task or changed on the facility page). Only before the Chicago handoff email.
 // The dates recalculate. A DOS someone picked by hand was based on the old report, so it goes back to the new recommended one.
 // Returns '' or what's wrong.
+// A last delivery date can be in the future (a delivery Chicago already has set up), up to BT_AHEAD days from today.
+// Further out is almost always a typo (2027 for 2026).
+const BT_AHEAD = 30;
+function btFutureProblem(le, lo) {
+  const max = add(st.today, BT_AHEAD);
+  if ((le && le > max) || (lo && lo > max)) return 'A last delivery date can\'t be more than ' + BT_AHEAD + ' days from today (latest ' + fmtS(max) + '). Check the year.';
+  return '';
+}
 function btProblem(f, v) {
   const b = f.bt || {};
   if (!v.le && !v.lo) return 'Enter at least 1 last delivery date.';
-  if ((v.le && v.le > st.today) || (v.lo && v.lo > st.today)) return 'A last delivery date can\'t be in the future.';
+  const fut = btFutureProblem(v.le, v.lo); if (fut) return fut;
   if ((b.lastEnt && !v.le) || (b.lastOuts && !v.lo)) return 'A last delivery date that was entered can\'t be cleared here. If it was entered by mistake, put the Brightree report task back in the queue and do it again.';
   if (!v.cad) return 'Pick how often enteral ships.';
   return '';

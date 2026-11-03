@@ -236,7 +236,7 @@ const TT = {
       <div class="row">${fld('Last enteral (Delivery Actual date)', dt('le', (f.bt || {}).lastEnt))}${fld('Last uro / ostomy / trach', dt('lo', (f.bt || {}).lastOuts))}</div>
       <div class="row">${fld('Enteral ships', sel('cad', ['Monthly', 'Weekly', 'Biweekly'], ({ 4: 'Monthly', 2: 'Biweekly', 1: 'Weekly' })[(f.bt || {}).cadence] || 'Monthly'))}</div>`; },
     example: () => ({ le: add(st.today, -19), lo: add(st.today, -23), cad: 'Monthly' }),
-    validate: () => { if (!V('le') && !V('lo')) return 'Enter at least 1 last delivery date.'; if ((V('le') && V('le') > st.today) || (V('lo') && V('lo') > st.today)) return 'A last delivery date can\'t be in the future.'; if (!V('cad')) return 'Pick how often enteral ships.'; return ''; },
+    validate: () => { if (!V('le') && !V('lo')) return 'Enter at least 1 last delivery date.'; const fut = btFutureProblem(V('le'), V('lo')); if (fut) return fut; if (!V('cad')) return 'Pick how often enteral ships.'; return ''; },
     done: (t, ctx) => { const f = facById(t.fac); f.bt = { lastEnt: V('le'), lastOuts: V('lo'), cadence: ({ Monthly: '4', Biweekly: '2', Weekly: '1' })[V('cad')] || '4' }; f.btAt = nowIso(); f.btBy = ctx ? ctx.byName : ''; }
   },
   PORTAL_SETUP: {
