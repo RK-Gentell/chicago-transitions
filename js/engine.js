@@ -785,6 +785,39 @@ function makeStandalone(f) {
   const amy = fTask(f, 'PORTAL_ADD');
   if (amy && !done(amy)) mail({ key: 'm:E8sa:' + amy.key, code: 'E8', to: [amy.assignee], fac: f.id, task: amy.key, subject: 'Update: ' + f.name + ' has no corporate', body: `<p><b>${esc(f.name)}</b> has no corporate. Please set it up as its own corporate, named <b>${esc(n)}</b>.</p>` });
 }
+// GDD facilities: Chris (the GDD contact) gets the first Lakewood DOS once the facility is scheduled (Nov 5 2026).
+// Scheduled = the schedule task marked done, or "Already done: Scheduled" with dates (or "Mark steps done").
+// Only facilities scheduled on/after GDD_DOS_FROM (Raizy: no email for ones scheduled before). A changed DOS or warehouse sends an update.
+const GDD_DOS_FROM = '2026-11-05';
+function gddSchedOn(f) {
+  const t = fTask(f, 'SCHEDULE');
+  return [t && t.status === 'Done' && t.doneOn, f.manualDates && f.manualDates.on, f.schedDone].filter(Boolean).sort()[0] || '';
+}
+function gddDosMail(f) {
+  if (f.gdd !== 'Yes' || !f.gddWh || !f.dates || !f.dates.dos) return;
+  const on = gddSchedOn(f);
+  if (!on || (!st.demo && on < GDD_DOS_FROM)) return; // demo's pretend clock is before the cutoff
+  const s = f.gddSent, dos = f.dates.dos, wh = f.gddWh;
+  if (s && s.wh === wh && s.dos === dos) return;
+  if (!s && dos < st.today) return; // first order already went: nothing to tell
+  const n = (f.gddSentN || 0) + 1, am = amOf(f), chris = roleEmail('gdd');
+  const names = `<p>Chicago name: ${esc(f.name || '')}<br>New name: ${esc(facName(f))}<br>`;
+  let subject, body;
+  if (!s) {
+    subject = `${wh}: first Lakewood order for ${facName(f)} on ${fmtS(dos)}`;
+    body = `<p>FYI, this facility is moving from GNS Chicago to Lakewood. It's serviced through <b>${esc(wh)}</b>.</p>${names}First DOS with Lakewood: <b>${fmt(dos)}</b></p><p>Just a heads up so you know when the first order is coming.</p>`;
+  } else if (s.wh === wh) {
+    subject = `${wh}: first Lakewood order for ${facName(f)} moved to ${fmtS(dos)}`;
+    body = `<p>FYI, the first Lakewood order for this facility changed. It's serviced through <b>${esc(wh)}</b>.</p>${names}First DOS with Lakewood: <b>${fmt(dos)}</b> (was ${fmt(s.dos)})</p>`;
+  } else {
+    subject = `${wh}: first Lakewood order for ${facName(f)} on ${fmtS(dos)}`;
+    body = `<p>FYI, this facility moving from GNS Chicago to Lakewood is now serviced through <b>${esc(wh)}</b> (was ${esc(s.wh)}).</p>${names}First DOS with Lakewood: <b>${fmt(dos)}</b>${s.dos !== dos ? ' (was ' + fmt(s.dos) + ')' : ''}</p>`;
+  }
+  mail({ key: 'm:E32:' + f.id + ':' + n, code: 'E32', to: [chris], cc: [am], fac: f.id, noTag: true, link: 'none', fyi: true,
+    subject: '[CT-' + pad(f.id) + '] ' + subject,
+    body: `<p>Hi ${esc(first(nameOf(chris)))},</p>${body}<p>Thank you!<br>${esc(nameOf(am))}</p>` });
+  f.gddSent = { wh, dos, on: st.today }; f.gddSentN = n;
+}
 function gddAnswer(f, a, wh) {
   f.gdd = a; f.gddWh = wh || '';
   if (a !== 'Yes') return;
@@ -1183,6 +1216,7 @@ function run() {
     // handoff sent: the email to the Gentell WC Transition Lead, once there is one
     if (f.email1 && f.e1Split && !f.e1b && !f.email2 && ctlOf(f)) sendCtlEmail(f);
     ctlRegCheck(f);
+    gddDosMail(f);
     // portal setup done while EMR access wasn't ready: check it as soon as it is
     if (f.emrCheckDue && !f.emrChecked && emrReady(f) && !fTask(f, 'EMR_CHECK')) { const t = newTask('EMR_CHECK', { fac: f.id, assignee: am, amTask: true }); todo(t, 'check EMR access for ' + facName(f), 'EMR access for <b>' + esc(facName(f)) + '</b> is set up now. Log in and check it works.'); }
     // older facilities had an "Email 3 follow-up" task: carry over its answer, close it if still open
