@@ -67,6 +67,7 @@ function nfDateWarn(n, dos) {
   if (!n.noPrev && n.last && dos < add(n.last, 30)) { const k = diff(dos, add(n.last, 30)); w.push('This DOS is ' + k + ' day' + (k > 1 ? 's' : '') + ' before 30 days after the last supply date with the previous provider (' + fmtS(n.last) + '). Their last supply may not be used up yet.'); }
   if (isWE(dos)) w.push('This DOS is on a ' + WD[dow(dos)] + '.');
   const d = nfDerive(n, dos);
+  if (n.scheduled && n.rep && dos !== (n.dates || {}).dos) { const k = repLoad(d.ord, n.id)[lc(n.rep)] || 0; if (k >= AUTO_REP_FULL) w.push(nameOf(n.rep) + ' already has ' + k + ' other facilities ordering ' + fmtS(d.ord) + '. The intake rep doesn\'t change with the dates.'); }
   if (d.ord < addBiz(st.today, 1)) w.push('The ordering date (' + fmt(d.ord) + ') has already passed or is today.');
   else if (d.ord < add(st.today, ORD_DAYS) && !n.noPush) w.push('The ordering date (' + fmt(d.ord) + ') is less than ' + ORD_DAYS + ' days from today. First orders usually start processing a week before the ordering date.');
   return w;
@@ -119,6 +120,25 @@ function nfScheduledMail(n, byName) {
   const d = n.dates;
   mail({ key: 'm:E30:' + n.id, code: 'E30', to: [n.acct, n.rep, ...nfNotify()], cc: [n.lead], link: 'none', fyi: true, subject: 'Scheduled: ' + n.name,
     body: `<p><b>${esc(n.name)}</b>${n.group ? ' (' + esc(n.group) + ')' : ''} is scheduled.</p><p>First order: date of service <b>${fmt(d.dos)}</b>, ordering ${fmt(d.ord)}, delivery ${fmt(d.del)}.${n.cad && n.cad !== '4' ? ' Enteral ships ' + esc(CAD_L[n.cad] || '').toLowerCase() + '.' : ''}</p><p>Intake rep: ${esc(nameOf(n.rep)) || '-'}<br>Account manager: ${esc(nameOf(n.acct)) || '-'}<br>Schedule lead: ${esc(nameOf(n.lead)) || '-'}</p><p>Scheduled by ${esc(byName)}.</p>` });
+}
+// dates changed after it was scheduled (Nov 6 2026): email the same people as "Scheduled", and the schedule lead gets
+// a "Fix the Ordering Calendar" task (1 open at a time; it always shows the latest dates)
+function nfRescheduleProblem(n, dos) {
+  const d = nfDerive(n, dos);
+  if (n.dates && n.dates.ord < st.today) return 'The first ordering date (' + fmt(n.dates.ord) + ') already passed, so the first order dates can\'t change here.';
+  if (d.ord < addBiz(st.today, 1)) return 'The new ordering date (' + fmt(d.ord) + ') has to be after today.';
+  return '';
+}
+function nfReschedule(n, dos, byName) {
+  const old = n.dates; if (!old || dos === old.dos) return false;
+  n.dosChosen = dos; n.dosBy = byName;
+  n.dates = Object.assign(nfDerive(n, dos), { why: [...(old.why || []).filter(x => !/^Changed by /.test(x)), 'Changed by ' + byName + ' after scheduling (was ' + fmtS(old.dos) + ')'], changed: true });
+  n.reschedules = [...(n.reschedules || []), { on: st.today, by: byName, from: { dos: old.dos, ord: old.ord, del: old.del }, to: { dos: n.dates.dos, ord: n.dates.ord, del: n.dates.del } }];
+  const d = n.dates, was = x => ' (was ' + fmt(old[x]) + ')';
+  mail({ key: 'm:E30C:' + n.id + ':' + uid(), code: 'E30C', to: [n.acct, n.rep, ...nfNotify()], cc: [n.lead], link: 'none', fyi: true, subject: 'Dates changed: ' + n.name,
+    body: `<p><b>${esc(n.name)}</b>${n.group ? ' (' + esc(n.group) + ')' : ''} was rescheduled.</p><p>First order: date of service <b>${fmt(d.dos)}</b>${was('dos')}, ordering ${fmt(d.ord)}${was('ord')}, delivery ${fmt(d.del)}${was('del')}.</p><p>Intake rep: ${esc(nameOf(n.rep)) || '-'}<br>Account manager: ${esc(nameOf(n.acct)) || '-'}<br>Schedule lead: ${esc(nameOf(n.lead)) || '-'}</p><p>Changed by ${esc(byName)}.</p>` });
+  if (!st.tasks.some(t => t.nf === n.id && t.type === 'NF_RECAL' && !done(t))) newTask('NF_RECAL', { nf: n.id, assignee: n.lead || fallbackOwner(), amTask: true });
+  return true;
 }
 function nfDelete(n, byName) {
   n.deleted = true; n.deletedBy = byName; n.deletedOn = st.today;
@@ -186,16 +206,26 @@ function nfCsv() {
 function nfDrawer(n) {
   const [s, c] = nfStage(n), t = nfTask(n), d = n.dates;
   const kv = `<div class="kv"><div>Corporate</div><div>${esc(n.group) || '-'}</div><div>Address</div><div>${esc(n.address)} ${n.state ? '(' + esc(n.state) + ')' : ''}</div><div>Part B only</div><div>${n.partB ? 'Yes' : 'No'}</div><div>Previous provider</div><div>${n.noPrev ? 'None (as soon as possible)' : 'Last supply ' + fmt(n.last)}</div><div>Enteral ships</div><div>${esc(CAD_L[n.cad] || 'Monthly')}</div><div>Account manager</div><div>${esc(nameOf(n.acct)) || '-'}</div><div>Intake rep</div><div>${nfRepTxt(n)}${n.repAuto ? '<div class="meta">' + (n.repAuto.override ? 'Picked by hand at scheduling (the rules picked ' + esc(nameOf(n.repAuto.pick) || 'nobody: everyone was full') + ')' : 'Picked automatically at scheduling') + ', ordering ' + fmtS(n.repAuto.ord) + '</div>' : ''}</div><div>Schedule lead</div><div>${esc(nameOf(n.lead))}</div>${d ? `<div>First DOS</div><div class="num">${fmt(d.dos)}</div><div>Ordering</div><div class="num">${fmt(d.ord)}</div><div>Delivery</div><div class="num">${fmt(d.del)} · OS Days ${d.os}</div>` : ''}<div>Scheduled</div><div>${n.scheduled ? fmt(n.scheduled) + (n.schedBy ? ' by ' + esc(n.schedBy) : '') : 'Not yet'}</div><div>Requested</div><div>${fmt(n.requested)}${n.requesterName ? ' by ' + esc(n.requesterName) : ''}</div></div>`;
-  const ms = st.mails.filter(m => m.key === 'm:E30:' + n.id || (t && m.task === t.key));
+  const ms = st.mails.filter(m => m.key === 'm:E30:' + n.id || m.key.startsWith('m:E30C:' + n.id + ':') || (t && m.task === t.key));
   const edit = n.scheduled ? '<div class="meta">It\'s scheduled, so the details can\'t change here anymore.</div>' : `<details class="card" style="padding:10px" id="nfedbox"><summary><b>Edit details</b> <span class="meta">(dates recalculate)</span></summary><form id="nfe" style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${nfFields('nfe_', n)}<div id="nfe_err"></div><div><button class="btn sm pri" type="submit">Save details</button></div></form></details>`;
   return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="New facility"><header><div style="flex:1;min-width:0"><div class="meta">${nfNo(n)} · new facility · ${esc(n.group || '')}</div><h1 style="font-size:17px">${esc(n.name)}</h1><span class="pill ${c}">${s}</span></div>${closeX}</header><div class="body">
   ${nfRepsTask(n) ? `<div class="row"><button class="btn pri sm" data-task="${esc(nfRepsTask(n).key)}">Open the "Pick the reps" task</button><span class="meta">Assigned to ${esc(nameOf(nfRepsTask(n).assignee))}. Still needed: ${esc(nfNeeds(n).map(k => NF_POS.find(x => x[0] === k)[1]).join(', '))}</span></div>` : ''}
   ${t && !done(t) ? `<div class="row"><button class="btn pri sm" data-task="${esc(t.key)}">Open the schedule task</button><span class="meta">Assigned to ${esc(nameOf(t.assignee))}, due ${fmtS(t.due)}</span></div>` : ''}
-  ${kv}${d && !n.scheduled && !n.deleted ? nfDateEditor(n) : ''}${attachCard('nf', n)}${edit}
+  ${kv}${d && !n.deleted ? nfDateEditor(n) : ''}${attachCard('nf', n)}${edit}
   ${isAdmin(me()) && !n.scheduled ? '<div class="row"><button class="btn sm" data-nfdel="' + n.id + '" style="margin-left:auto">Delete (test or mistake)</button></div>' : ''}
   <h2 style="margin:4px 0 0">Emails from the app</h2>${ms.some(m => m.status !== 'Cancelled') ? mailSections(ms, isAdmin(me()), 'h3') : '<div class="meta">None yet.</div>'}</div></div>`;
 }
 function nfDateEditor(n) {
+  if (n.scheduled) {
+    const d = n.dates, w = nfDateWarn(n, d.dos), past = d.ord < st.today, rt = st.tasks.find(t => t.nf === n.id && t.type === 'NF_RECAL' && !done(t));
+    return `<div class="card" style="padding:10px"><b>Scheduled dates</b>${tip('Change any 1 date and the other 2 move with it. "Save new dates" emails the account manager, intake rep and ' + esc(nfNotify().map(nameOf).join(' and ') || 'the people in Settings') + ' (CC the schedule lead), and gives the schedule lead a task to fix the Ordering Calendar.')}
+    <div class="row">${fld('Ordering date', dt('nde_ord', d.ord))}${fld('Date of service', dt('nde_dos', d.dos))}${fld('Delivery date', dt('nde_del', d.del))}</div>
+    <div class="meta" id="nde_info">${d.day} delivery · OS Days ${d.os} · ${d.partB ? 'Part B only: ordering 2 business days before DOS' : 'ordering 1 business day before DOS'} · Ship Point ${d.ship}</div>
+    <div id="nde_warn">${w.map(x => '<div class="err" style="margin-top:6px">' + esc(x) + '</div>').join('')}</div>
+    ${(n.reschedules || []).map(x => `<div class="meta">Changed ${fmtS(x.on)} by ${esc(x.by)}: DOS ${fmtS(x.from.dos)} → ${fmtS(x.to.dos)}</div>`).join('')}
+    ${rt ? `<div class="meta">"Fix the Ordering Calendar" is open for ${esc(nameOf(rt.assignee))}.</div>` : ''}
+    ${past ? '<div class="meta">The first ordering date already passed, so these dates can\'t change.</div>' : `<div class="row" style="margin-top:6px"><button type="button" class="btn sm pri" data-nfresched="${n.id}">Save new dates</button></div>`}</div>`;
+  }
   const d = n.dates, r = n.rec, w = nfDateWarn(n, d.dos);
   return `<div class="card" style="padding:10px"><b>${d.changed ? 'Dates (changed)' : 'Recommended dates'}</b>${tip('Change any 1 date and the other 2 move with it.')}
   <div class="row">${fld('Ordering date', dt('nde_ord', d.ord))}${fld('Date of service', dt('nde_dos', d.dos))}${fld('Delivery date', dt('nde_del', d.del))}</div>
@@ -207,8 +237,8 @@ function nfDateEditor(n) {
   <div class="row" style="margin-top:6px"><button type="button" class="btn sm pri" data-nfsavedates="${n.id}">Save dates</button>${d.changed ? `<button type="button" class="btn sm" data-nfrecdates="${n.id}">Back to recommended</button>` : ''}</div></div>`;
 }
 function nfDeLive(changed) {
-  const b = document.querySelector('[data-nfsavedates]'); if (!b) return;
-  const n = nfById(+b.dataset.nfsavedates); if (!n || !n.dates) return;
+  const b = document.querySelector('[data-nfsavedates],[data-nfresched]'); if (!b) return;
+  const n = nfById(+(b.dataset.nfsavedates || b.dataset.nfresched)); if (!n || !n.dates) return;
   const r = nfDerive(n, n.dates.dos), v = V(changed); if (!v) return;
   const dos = changed === 'nde_dos' ? v : changed === 'nde_ord' ? addBiz(v, r.back) : addBiz(v, -r.ship), d = nfDerive(n, dos);
   $('#nde_ord').value = d.ord; $('#nde_dos').value = d.dos; $('#nde_del').value = d.del;
@@ -246,6 +276,22 @@ TT.NF_SCHEDULE = {
 };
 NO_REOPEN.add('NF_SCHEDULE');
 
+// the dates changed after scheduling: fix the Ordering Calendar in the portal (always shows the latest dates)
+TT.NF_RECAL = {
+  title: t => 'Fix the Ordering Calendar: ' + ((nfById(t.nf) || {}).name || nfNo({ id: t.nf })),
+  form: t => {
+    const n = nfById(t.nf); if (!n || !n.dates) return '<div class="err">This facility isn\'t there anymore.</div>';
+    const d = n.dates, x = (n.reschedules || []).slice(-1)[0];
+    return `<div class="instr">${x ? esc(x.by) + ' changed the dates on ' + fmtS(x.on) + ' (DOS was ' + fmtS(x.from.dos) + ').' : 'The dates changed after scheduling.'} Change the facility schedule in the portal to the new dates.</div>
+    <div class="kv"><div>Ordering</div><div class="num">${fmt(d.ord)}</div><div>Date of service</div><div class="num">${fmt(d.dos)}</div><div>Delivery</div><div class="num">${fmt(d.del)} · ${d.day}</div><div>OS Days</div><div>${d.os}</div></div>
+    <div class="instr"><ol><li>"Facilities" → schedule icon under "Actions" → "Facility Schedule".</li><li>"Start Date" <span class="q">${fmtS(d.del)}</span>, "Day of the Week" <span class="q">${d.day}</span>, "Weeks" <span class="q">4</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>${n.cad && n.cad !== '4' ? `<li>"Select Area of Care" → "Enteral": same Start Date and day, "Weeks" <span class="q">${n.cad}</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>` : ''}<li>"Generate Dates" → check "Override Manually" → "Save".</li><li>"Schedules" → Ordering Calendar → open the entry on ${fmt(d.ord)} and check the 3 dates match the ones above. Remove the entry on the old ordering date if it's still there.</li></ol></div>`;
+  },
+  example: () => ({}),
+  validate: t => { const n = nfById(t.nf); return !n || n.deleted ? 'This facility isn\'t there anymore.' : ''; },
+  done: () => {}
+};
+NO_REOPEN.add('NF_RECAL'); REPEATABLE.add('NF_RECAL');
+
 TT.NF_REPS = {
   title: t => 'Pick the reps for new facility: ' + ((nfById(t.nf) || {}).name || nfNo({ id: t.nf })),
   form: t => {
@@ -274,6 +320,15 @@ document.addEventListener('click', async e => {
   const fl = T.closest('[data-nffilter]'); if (fl) { ui.nfFilter = fl.dataset.nffilter; render(); return; }
   if (T.id === 'nfcsv') { nfCsv(); return; }
   const sd = T.closest('[data-nfsavedates]'); if (sd) { const id = +sd.dataset.nfsavedates, dos = V('nde_dos'); if (!dos) return; await act(() => { const n = nfById(id); if (!n || n.scheduled) return false; nfSaveDates(n, dos, meName()); }, 'Dates saved'); return; }
+  const rs = T.closest('[data-nfresched]');
+  if (rs) {
+    const id = +rs.dataset.nfresched, dos = V('nde_dos'), n0 = nfById(id); if (!dos || !n0) return;
+    if (dos === n0.dates.dos) { toast('Same dates as before: nothing to save.'); return; }
+    const err = nfRescheduleProblem(n0, dos); if (err) { $('#nde_warn').innerHTML = '<div class="err" style="margin-top:6px">' + esc(err) + '</div>'; return; }
+    if (!confirm('Save the new dates? This emails the account manager, intake rep and ' + (nfNotify().map(nameOf).join(' and ') || 'the people in Settings') + ', and gives the schedule lead a task to fix the Ordering Calendar.')) return;
+    await act(() => { const n = nfById(id); if (!n || !n.scheduled || n.deleted || nfRescheduleProblem(n, dos)) return false; return nfReschedule(n, dos, meName()) ? undefined : false; }, 'New dates saved');
+    return;
+  }
   const rd = T.closest('[data-nfrecdates]'); if (rd) { const id = +rd.dataset.nfrecdates; await act(() => { const n = nfById(id); if (!n || !n.rec || n.scheduled) return false; nfSaveDates(n, n.rec.dos, meName()); }, 'Back to recommended dates'); return; }
   const dl = T.closest('[data-nfdel]'); if (dl) { const id = +dl.dataset.nfdel; if (!confirm('Delete this facility? Its schedule task closes. Use it for tests or mistakes.')) return; const ok = await act(() => { const n = nfById(id); if (!n || n.scheduled) return false; nfDelete(n, meName()); }, 'Deleted'); if (ok) { ui.openNf = null; renderLayer(); } return; }
 });
