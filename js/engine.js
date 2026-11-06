@@ -210,6 +210,8 @@ function mainCorp(g) { return (g.contacts || []).find(c => validEmail(c.email)) 
 function facsOfGroup(name) { return st.facs.filter(f => lc(f.group) === lc(name) && !f.archived); }
 
 // ---------- dates for a facility ----------
+// first orders start processing about a week before the ordering date: the ordering date is at least ORD_DAYS calendar days from today (was 7 until Nov 6 2026)
+const ORD_DAYS = 8;
 function calcDates(f) {
   const b = f.bt, g = FG(f); if (!b || !covKnown(g) || !stateOK(f)) return null;
   let dos; const why = [];
@@ -222,13 +224,12 @@ function calcDates(f) {
   const pb = partB(g), back = pb ? 2 : 1, earliest = addBiz(st.today, 1); let pushed = false;
   while (addBiz(dos, -back) < earliest) { dos = addBiz(dos, 1); pushed = true; }
   if (pushed) why.push('Ordering date would be in the past → DOS pushed to ' + fmtS(dos));
-  // first orders start processing a week before the ordering date: the ordering date is at least a week from today,
-  // unless someone unticked "Push out a week" for a rush (f.noPush)
-  const plain = dos, weekOut = add(st.today, 7); let wk = dos;
+  // the ordering date is at least ORD_DAYS from today, unless someone unticked the push box for a rush (f.noPush)
+  const plain = dos, weekOut = add(st.today, ORD_DAYS); let wk = dos;
   while (addBiz(wk, -back) < weekOut) wk = addBiz(wk, 1);
   const weekPush = wk !== plain ? { from: plain, fromOrd: addBiz(plain, -back) } : null;
-  if (weekPush && !f.noPush) { dos = wk; why.push('Ordering date ' + fmtS(weekPush.fromOrd) + ' is within a week of today → pushed so ordering is ' + fmtS(addBiz(dos, -back)) + ', a week out (time to process the first order). DOS ' + fmtS(dos)); }
-  else if (weekPush) why.push('Ordering date is within a week of today, but "Push out a week" is unticked (rush), so it stays');
+  if (weekPush && !f.noPush) { dos = wk; why.push('Ordering date ' + fmtS(weekPush.fromOrd) + ' is less than ' + ORD_DAYS + ' days from today → pushed so ordering is ' + fmtS(addBiz(dos, -back)) + ', at least ' + ORD_DAYS + ' days out (time to process the first order). DOS ' + fmtS(dos)); }
+  else if (weekPush) why.push('Ordering date is less than ' + ORD_DAYS + ' days from today, but the push box is unticked (rush), so it stays');
   // David's facilities: the intake rep is picked now, so the date moves on until someone on his team has room that day
   let capFrom = '';
   if (autoPending(f)) {
@@ -262,7 +263,7 @@ function dateWarn(f, dos) {
   if (dos < billDos) { const n = diff(dos, billDos); w.push('This DOS is ' + n + ' day' + (n > 1 ? 's' : '') + ' earlier than the recommended ' + fmt(billDos) + ', which is ' + basisText(f) + '. Chicago\'s last delivery may not be used up yet, so this order could overlap their billing.'); }
   if (isWE(dos)) w.push('This DOS is on a ' + WD[dow(dos)] + '.');
   const d = derive(f, dos); if (d.ord < addBiz(st.today, 1)) w.push('The ordering date (' + fmt(d.ord) + ') has already passed or is today.');
-  else if (d.ord < add(st.today, 7) && !f.noPush) w.push('The ordering date (' + fmt(d.ord) + ') is less than a week from today. First orders usually start processing a week before the ordering date.');
+  else if (d.ord < add(st.today, ORD_DAYS) && !f.noPush) w.push('The ordering date (' + fmt(d.ord) + ') is less than ' + ORD_DAYS + ' days from today. First orders usually start processing a week before the ordering date.');
   return w;
 }
 function saveDates(f, dos, by) {

@@ -7,7 +7,8 @@
                    comes from CT Numbers, so it never clashes with a CT number.
    - dates         date of service = last supply date with the previous provider + 30
                    (no previous provider: as soon as possible). The ordering date is
-                   at least a week from today. Part B only → ordering 2 business days
+                   at least ORD_DAYS (8) days from today, unless the rush box is
+                   unticked (n.noPush). Part B only → ordering 2 business days
                    before the DOS, otherwise 1. Delivery = DOS + Ship Point (state).
    - David's team  account manager = Settings "Intake reps picked at scheduling":
                    no intake rep until the schedule task; same rules and the same
@@ -38,10 +39,16 @@ function nfCalc(n) {
   else if (n.last) { dos = add(n.last, 30); why.push('Last supply date with the previous provider ' + fmtS(n.last) + ' + 30 = ' + fmtS(dos)); }
   else return null;
   if (isWE(dos)) { const m = dow(dos) === 6 ? add(dos, 2) : add(dos, 1); if (!n.noPrev) why.push(fmtS(dos) + ' is a weekend → Monday ' + fmtS(m)); dos = m; }
-  // first orders start processing a week before the ordering date
-  const weekOut = add(st.today, 7), from = dos;
-  while (addBiz(dos, -back) < weekOut) dos = addBiz(dos, 1);
-  if (dos !== from) why.push((n.noPrev ? 'The first ordering date at least a week from today' : 'Ordering date ' + fmtS(addBiz(from, -back)) + ' is within a week of today → pushed') + ': ordering ' + fmtS(addBiz(dos, -back)) + ', DOS ' + fmtS(dos));
+  // the ordering date can't be today or past; then it's at least ORD_DAYS from today (first orders take time to process),
+  // unless someone unticked the push box for a rush (n.noPush)
+  const from = dos, earliest = addBiz(st.today, 1);
+  while (addBiz(dos, -back) < earliest) dos = addBiz(dos, 1);
+  const plain = dos, weekOut = add(st.today, ORD_DAYS); let wk = dos;
+  while (addBiz(wk, -back) < weekOut) wk = addBiz(wk, 1);
+  const weekPush = wk !== plain ? { from: plain, fromOrd: addBiz(plain, -back) } : null;
+  if (weekPush && !n.noPush) dos = wk;
+  if (dos !== from) why.push((n.noPrev ? (weekPush && !n.noPush ? 'The first ordering date at least ' + ORD_DAYS + ' days from today' : 'The first ordering date after today') : 'Ordering date ' + fmtS(addBiz(from, -back)) + (weekPush && !n.noPush ? ' is less than ' + ORD_DAYS + ' days from today → pushed' : ' has passed → pushed')) + ': ordering ' + fmtS(addBiz(dos, -back)) + ', DOS ' + fmtS(dos));
+  if (weekPush && n.noPush) why.push('Ordering date is less than ' + ORD_DAYS + ' days from today, but the push box is unticked (rush), so it stays');
   let capFrom = '';
   if (nfAutoPending(n)) {
     const cd = autoDos(n, dos, back);
@@ -52,7 +59,7 @@ function nfCalc(n) {
   const sp = shipOf(st.settings.shipEnt, n.state) || 1;
   why.push((n.partB ? 'Part B only → ordering 2 business days' : 'Not Part B only → ordering 1 business day') + ' before DOS');
   why.push('Ship Point ' + n.state + ' = ' + sp + ' → delivery DOS + ' + sp + ' business day' + (sp > 1 ? 's' : ''));
-  return Object.assign(nfDerive(n, dos), { why, capFrom, from });
+  return Object.assign(nfDerive(n, dos), { why, capFrom, from, weekPush, pushedWeek: !!weekPush && !n.noPush });
 }
 function nfDateWarn(n, dos) {
   const r = n.rec, w = []; if (!r) return w;
@@ -61,7 +68,7 @@ function nfDateWarn(n, dos) {
   if (isWE(dos)) w.push('This DOS is on a ' + WD[dow(dos)] + '.');
   const d = nfDerive(n, dos);
   if (d.ord < addBiz(st.today, 1)) w.push('The ordering date (' + fmt(d.ord) + ') has already passed or is today.');
-  else if (d.ord < add(st.today, 7)) w.push('The ordering date (' + fmt(d.ord) + ') is less than a week from today. First orders usually start processing a week before the ordering date.');
+  else if (d.ord < add(st.today, ORD_DAYS) && !n.noPush) w.push('The ordering date (' + fmt(d.ord) + ') is less than ' + ORD_DAYS + ' days from today. First orders usually start processing a week before the ordering date.');
   return w;
 }
 function nfSaveDates(n, dos, byName) {
@@ -127,7 +134,7 @@ function nfFields(p, n) {
     <div class="row">${fld('Facility name', txt(p + 'name', n.name, 'As it is in the portal'))}${fld('Corporate', `<input type="text" id="${p}corp" list="${p}corp_dl" value="${esc(n.group || '')}" placeholder="Corporate group" autocomplete="off"><datalist id="${p}corp_dl">${corps.map(c => `<option value="${esc(c)}"></option>`).join('')}</datalist>`, 'No corporate? Type the facility name.')}</div>
     <div class="row">${fld('Address', txt(p + 'addr', n.address, '123 Main St, City, ST 12345'), 'The state (2 letters or the full name) and zip go at the end. The state decides the ship point and the delivery date.')}</div>
     <div class="row">${fld('Part B only?' + tip('Part B only: the ordering date is 2 business days before the date of service. Not Part B only: 1 business day.'), sel(p + 'pb', [['yes', 'Part B only'], ['no', 'Not Part B only']], n.partB === true ? 'yes' : n.partB === false ? 'no' : ''))}${fld('Enteral ships', sel(p + 'cad', ['Monthly', 'Weekly', 'Biweekly'], CAD_L[n.cad] || 'Monthly', true))}</div></section>
-    <section><h2 class="rqh">Previous provider${tip('The first date of service can be 30 days after the last supply date with the previous provider. No previous provider: as soon as possible. Either way, the ordering date is at least a week from today.')}</h2>
+    <section><h2 class="rqh">Previous provider${tip('The first date of service can be 30 days after the last supply date with the previous provider. No previous provider: as soon as possible. Either way, the ordering date is at least ' + ORD_DAYS + ' days from today.')}</h2>
     <div class="row" style="align-items:flex-end">${fld('Last supply date with previous provider', dt(p + 'last', n.noPrev ? '' : n.last))}</div>${chk(p + 'noprev', 'No previous provider (schedule as soon as possible)', !!n.noPrev)}</section>
     <section><h2 class="rqh">GNS Lakewood roles${tip('All optional. Anything left blank goes to ' + esc(roleName('rules')) + ' on a "Pick the reps" task, and scheduling waits for it. The account manager comes first: for ' + esc(nameOf(autoAcct()) || 'some account managers') + ', the intake rep is picked automatically at scheduling. The schedule lead gets the task to schedule it.')}</h2>
     <div class="row">${fld('Account manager', sel(p + 'acct', withCur(R, n.acct), n.acct, true))}${fld('Intake rep', sel(p + 'rep', withCur(R, n.rep), n.rep, true))}${fld('Schedule lead', sel(p + 'lead', withCur(A, n.lead), n.lead, true))}</div></section>
@@ -184,7 +191,7 @@ function nfDrawer(n) {
   return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="New facility"><header><div style="flex:1;min-width:0"><div class="meta">${nfNo(n)} · new facility · ${esc(n.group || '')}</div><h1 style="font-size:17px">${esc(n.name)}</h1><span class="pill ${c}">${s}</span></div>${closeX}</header><div class="body">
   ${nfRepsTask(n) ? `<div class="row"><button class="btn pri sm" data-task="${esc(nfRepsTask(n).key)}">Open the "Pick the reps" task</button><span class="meta">Assigned to ${esc(nameOf(nfRepsTask(n).assignee))}. Still needed: ${esc(nfNeeds(n).map(k => NF_POS.find(x => x[0] === k)[1]).join(', '))}</span></div>` : ''}
   ${t && !done(t) ? `<div class="row"><button class="btn pri sm" data-task="${esc(t.key)}">Open the schedule task</button><span class="meta">Assigned to ${esc(nameOf(t.assignee))}, due ${fmtS(t.due)}</span></div>` : ''}
-  ${kv}${attachCard('nf', n)}${edit}
+  ${kv}${d && !n.scheduled && !n.deleted ? nfDateEditor(n) : ''}${attachCard('nf', n)}${edit}
   ${isAdmin(me()) && !n.scheduled ? '<div class="row"><button class="btn sm" data-nfdel="' + n.id + '" style="margin-left:auto">Delete (test or mistake)</button></div>' : ''}
   <h2 style="margin:4px 0 0">Emails from the app</h2>${ms.some(m => m.status !== 'Cancelled') ? mailSections(ms, isAdmin(me()), 'h3') : '<div class="meta">None yet.</div>'}</div></div>`;
 }
@@ -194,6 +201,7 @@ function nfDateEditor(n) {
   <div class="row">${fld('Ordering date', dt('nde_ord', d.ord))}${fld('Date of service', dt('nde_dos', d.dos))}${fld('Delivery date', dt('nde_del', d.del))}</div>
   <div class="meta" id="nde_info">${d.day} delivery · OS Days ${d.os} · ${d.partB ? 'Part B only: ordering 2 business days before DOS' : 'ordering 1 business day before DOS'} · Ship Point ${d.ship}</div>
   <div id="nde_warn">${w.map(x => '<div class="err" style="margin-top:6px">' + esc(x) + '</div>').join('')}</div>
+  ${r && r.weekPush ? `<div class="card ${r.pushedWeek ? 'pushbox' : 'warnbox'}" style="padding:8px 10px;margin-top:8px">${r.pushedWeek ? `<b>Pushed out</b><div class="meta" style="margin:2px 0 6px">The ordering date would have been ${fmt(r.weekPush.fromOrd)}, less than ${ORD_DAYS} days from today. First orders start processing a week before the ordering date, so it moved to ${fmt(r.ord)}.</div>` : `<b>Not pushed out (rush)</b><div class="meta" style="margin:2px 0 6px">The ordering date is less than ${ORD_DAYS} days from today. Tick the box to push it out again.</div>`}${chk('nde_push_' + n.id, 'Push the ordering date to at least ' + ORD_DAYS + ' days from today', r.pushedWeek)}<div class="meta">Untick for a rush: the dates go back to the original calculation.${d.changed ? ' This changes the recommended dates; the dates picked by hand stay.' : ''}</div></div>` : ''}
   ${r && d.changed ? `<div class="meta">Recommended: ${fmt(r.dos)}.</div>` : ''}
   <details style="margin-top:6px"><summary class="meta">How the recommended dates were calculated</summary><ul class="meta">${(r || d).why.map(x => '<li>' + esc(x) + '</li>').join('')}</ul></details>
   <div class="row" style="margin-top:6px"><button type="button" class="btn sm pri" data-nfsavedates="${n.id}">Save dates</button>${d.changed ? `<button type="button" class="btn sm" data-nfrecdates="${n.id}">Back to recommended</button>` : ''}</div></div>`;
@@ -277,6 +285,8 @@ document.addEventListener('change', e => {
   const id = e.target.id || '';
   if (/^nf_/.test(id)) nfPreview('nf_'); if (/^nfe_/.test(id)) nfPreview('nfe_', ui.openNf);
   if (['nde_ord', 'nde_dos', 'nde_del'].includes(id)) nfDeLive(id);
+  const np = id.match(/^nde_push_(\d+)$/);
+  if (np) { const nid = +np[1], push = e.target.checked; act(() => { const n = nfById(nid); if (!n || n.scheduled || n.deleted || !!n.noPush === !push) return false; n.noPush = !push; n.noPushBy = meName(); }, push ? 'Pushed out' : 'Not pushed out: back to the original dates'); }
 });
 document.addEventListener('submit', async e => {
   const id = e.target.id;

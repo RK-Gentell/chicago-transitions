@@ -884,7 +884,7 @@ document.addEventListener('change', async e => {
   if (e.target.type === 'hidden') segSync(id);
   if (e.target.classList.contains('ce-dept')) { const n = e.target.closest('.ce-row').querySelector('.ce-note'); n.hidden = e.target.value !== 'Other'; }
   if (id === 'g') { const b = $('#whbox'); if (b) b.hidden = e.target.value !== 'Yes'; }
-  const np = id.match(/^de_push_(\d+)$/); if (np) { const fid = +np[1], push = e.target.checked; await act(() => { const f = facById(fid); if (!f || !!f.noPush === !push) return false; f.noPush = !push; f.noPushBy = meName(); }, push ? 'Pushed out a week' : 'Not pushed out: back to the original dates'); return; }
+  const np = id.match(/^de_push_(\d+)$/); if (np) { const fid = +np[1], push = e.target.checked; await act(() => { const f = facById(fid); if (!f || !!f.noPush === !push) return false; f.noPush = !push; f.noPushBy = meName(); }, push ? 'Pushed out' : 'Not pushed out: back to the original dates'); return; }
   if (id === 'fd_gdd') { const b = $('#fd_whbox'); if (b) b.hidden = e.target.value !== 'Yes'; }
   const ln = e.target.dataset && e.target.dataset.leadnote; if (ln) { const val = e.target.value.trim(); setTimeout(async () => { const nx = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.leadnote : null; await saveNote(+ln, val); if (nx) { const el = document.querySelector(`[data-leadnote="${nx}"]`); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } } }); }
   if (id === 'who') { const p = person(e.target.value); st.me = { email: lc(p.email), name: p.name }; ui.openTask = ui.openFac = ui.openGroup = null; render(); }

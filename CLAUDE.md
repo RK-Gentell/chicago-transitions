@@ -203,3 +203,8 @@ Waiting tasks (`isWaiting`: `opensOn` after today) are left out of "My tasks", "
 ## Last delivery date can be in the future (Nov 3 2026)
 - The Brightree report's last enteral / last uro / ostomy / trach dates can now be up to 30 days after today (`BT_AHEAD`, `btFutureProblem` in engine.js). Further out is blocked as a likely typo: "A last delivery date can't be more than 30 days from today (latest …). Check the year." Same rule on the Brightree report task, the schedule task's recheck, and Edit details (all go through `btFutureProblem`).
 - The report steps are unchanged ("Delivery_Scheduled date" still ends today; Raizy: scheduled date and delivery date aren't the same). Dates calculate from the future date as usual (enteral + 30, OUTs + 28).
+
+## Ordering date 8 days out + new facility date box (Nov 6 2026)
+- `ORD_DAYS = 8` (engine.js): the recommended ordering date is at least 8 calendar days from today (was 7), Chicago (`calcDates`, `dateWarn`) and new facilities (`nfCalc`, `nfDateWarn`). Only facilities whose normal date would be too soon move (about 1 business day later). Box title is now "Pushed out", checkbox "Push the ordering date to at least 8 days from today".
+- New facilities: `nfCalc` now has the same rush box as Chicago (`n.noPush`, `nde_push_<id>`, `rec.weekPush` / `rec.pushedWeek`). Unticked: the ordering date only has to be after today.
+- The new facility page (from the New facilities tracker) shows the same date box as the schedule task (`nfDateEditor`) until it's scheduled.
