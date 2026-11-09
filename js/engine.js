@@ -524,7 +524,11 @@ function sendReminder(t, by, byName) {
 const whenET = ms => new Date(ms).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 // ---------- email templates ----------
-function repLine(f) { const r = person(f.rep) || {}; return { name: r.name || nameOf(f.rep), email: r.email || f.rep, ext: r.ext || '' }; }
+// the rep named on the facility emails (Chicago handoff, Email to the Gentell WC Transition Lead, the facility notice): the intake rep.
+// David's facilities (account manager = Settings "Intake reps picked at scheduling" account manager, Nov 9 2026): David himself,
+// with his email and Ext from the Team list. Emails already sent stay as they were.
+const contactEmail = f => isAutoAcct(acctOf(f)) ? autoAcct() : f.rep;
+function repLine(f) { const e = contactEmail(f), r = person(e) || {}; return { name: r.name || nameOf(e), email: r.email || e, ext: r.ext || '' }; }
 // the facility notice: what the Gentell WC Transition Lead sends to the facility (below the line on their email)
 function facilityNotice(f) {
   const r = repLine(f), d = f.dates, cad = String((f.bt || f.manualDates || {}).cadence || '4'), s = st.settings;
@@ -1633,13 +1637,16 @@ function editFacility(f, v, by, byName) {
   if (v.addr) { v.addr = normAddr(v.addr); }
   const state = v.addr ? stateFrom(v.addr) : f.state, oldState = f.state;
   if (f.email1 && v.addr && state !== oldState) mail({ key: 'm:E13:state:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Address changed after the Chicago handoff email: ' + facName(f), body: '<p>' + esc(byName) + ' changed the state from ' + esc(oldState || '(none)') + ' to ' + esc(state) + '. The dates didn\'t change. Check the ship point and delivery date, and send Chicago a correction if they\'re wrong.</p>' });
-  if (f.email1 && v.rep && v.rep !== f.rep) mail({ key: 'm:E13:rep:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Intake rep changed after the Chicago handoff email: ' + facName(f), body: '<p>' + esc(byName) + ' changed the intake rep from ' + esc(nameOf(f.rep)) + ' to ' + esc(nameOf(v.rep)) + '. The Chicago handoff email (and the transfer notice to the facility) named ' + esc(nameOf(f.rep)) + '. Click "Dates changed: send correction" on the facility page to send Chicago the corrected email with the new rep, or let the facility know yourself.</p>' });
+  const oldC = repLine(f), repWas = f.rep;
   const oldAm = amOf(f), closed = [], wrWas = JSON.stringify([f.wound || null, f.regional || null]);
   // a portal name typed in for the first time means it's in Brightree: Amy's "Add to Brightree" task isn't needed
   if (v.pn && !f.inPortal && v.pn !== (f.portalName || '')) { f.inPortal = true; f.addedOnFac = byName; closed.push(...closeFilled(f, ['PORTAL_ADD'], by, byName)); }
   f.name = v.name || f.name; if (v.pn) f.portalName = v.pn;
   if (v.addr) { f.address = v.addr; f.state = state; }
   if (v.rep) f.rep = v.rep; if (v.clin) f.clin = v.clin; if (v.acct) f.acct = v.acct; if (v.am) f.am = v.am;
+  // the rep named on the handoff email / transfer notice changed (a new intake rep, or the account manager changed to or from David)
+  const newC = repLine(f);
+  if (f.email1 && lc(newC.email) !== lc(oldC.email)) mail({ key: 'm:E13:rep:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: (f.rep !== repWas ? 'Intake rep' : 'Rep on the facility email') + ' changed after the Chicago handoff email: ' + facName(f), body: '<p>' + esc(byName) + ' changed ' + (f.rep !== repWas ? 'the intake rep from ' + esc(nameOf(repWas)) + ' to ' + esc(nameOf(f.rep)) : 'the account manager to ' + esc(nameOf(f.acct))) + '. The Chicago handoff email (and the transfer notice to the facility) named ' + esc(oldC.name) + '; it should now be ' + esc(newC.name) + '. Click "Dates changed: send correction" on the facility page to send Chicago the corrected email, or let the facility know yourself.</p>' });
   if (v.none) { if (!G(f).standalone) makeStandalone(f); } else if (v.grp && lc(v.grp) !== lc(f.group) && grp(v.grp)) f.group = grp(v.grp).name;
   if (v.wound) f.wound = v.wound; if (v.regional) f.regional = v.regional;
   // a new Gentell WC Transition Lead after their email went out (and the facility email hasn't): the new one never got it
