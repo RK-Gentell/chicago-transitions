@@ -56,9 +56,10 @@ const NF_COLS = [
   ['cad', 'Enteral ships', 'Monthly, Weekly or Biweekly. Blank = Monthly.', 'cad', 14],
   ['acct', 'Account manager', 'Optional. Blank → ' + '{RULES}' + ' gets a "Pick the reps" task.', 'reps', 22],
   ['rep', 'Intake rep', 'Optional. Leave blank when the account manager is {AUTO} (picked at scheduling).', 'reps', 22],
+  ['clin', 'Clinical rep', 'Optional. Blank = same as the intake rep ({AUTO} when the account manager is {AUTO}).', 'reps', 22],
   ['lead', 'Schedule lead', 'Optional. Blank → {RULES} gets a "Pick the reps" task.', 'leads', 22]
 ];
-const bulkCols = kind => (kind === 'ct' ? CT_COLS : NF_COLS).map(c => [c[0], c[1], c[2].replace('{AUTO}', nameOf(autoAcct()) || 'the account manager in Settings').replace(/\{RULES\}/g, roleName('rules')), c[3], c[4]]);
+const bulkCols = kind => (kind === 'ct' ? CT_COLS : NF_COLS).map(c => [c[0], c[1], c[2].replace(/\{AUTO\}/g, nameOf(autoAcct()) || 'the account manager in Settings').replace(/\{RULES\}/g, roleName('rules')), c[3], c[4]]);
 const BULK_TITLE = { ct: 'Chicago transitions', nf: 'New facility scheduling' };
 
 // ---------- Excel library, loaded only when needed ----------
@@ -303,7 +304,7 @@ function nfCheck(out) {
     v.last = ''; if (r.last) { const d = normDate(r.last); if (!d) E('"Last supply date with previous provider": "' + r.last + '" isn\'t a date.'); else v.last = d; }
     if (v.noPrev && v.last) E('Fill "Last supply date with previous provider" or "No previous provider", not both.');
     v.cad = '4'; if (r.cad) { const c = ['Monthly', 'Weekly', 'Biweekly'].find(x => lc(x) === lc(r.cad)); if (!c) E('"Enteral ships" should be Monthly, Weekly or Biweekly.'); else v.cad = CAD_V[c]; }
-    for (const [k, kind] of [['acct', 'rep'], ['rep', 'rep'], ['lead', 'lead']]) { const p = bulkPerson(r[k], kind); if (p.err) E(({ acct: 'Account manager', rep: 'Intake rep', lead: 'Schedule lead' })[k] + ': ' + p.err); v[k] = p.email || ''; }
+    for (const [k, kind] of [['acct', 'rep'], ['rep', 'rep'], ['clin', 'rep'], ['lead', 'lead']]) { const p = bulkPerson(r[k], kind); if (p.err) E(({ acct: 'Account manager', rep: 'Intake rep', clin: 'Clinical rep', lead: 'Schedule lead' })[k] + ': ' + p.err); v[k] = p.email || ''; }
     if (v.rep && isAutoAcct(v.acct)) E('Intake rep: leave it blank. The account manager is ' + nameOf(v.acct) + ', so the intake rep is picked at scheduling.');
     // the form's messages, worded for the spreadsheet
     const NF_MSG = { 'Type the facility name.': '"Facility name" is empty.', 'Type the corporate. No corporate? Type the facility name.': '"Corporate" is empty. No corporate? Put the facility name.', 'Type the address.': '"Address" is empty.', 'Pick "Part B only" or "Not Part B only".': '"Part B only" is empty: Yes or No.', 'Enter the last supply date with the previous provider, or tick "No previous provider".': 'Fill "Last supply date with previous provider", or put Yes in "No previous provider".' };
@@ -338,7 +339,7 @@ function ctBuild(checked, ids) {
   return created;
 }
 function nfBuild(checked, ids) {
-  return checked.map((o, i) => { const v = o.v, a = normAddr(v.addr); const n = { id: ids[i], name: v.name, address: a, state: stateFrom(a), group: v.corp, partB: v.pb === 'yes', last: v.last, noPrev: v.noPrev, cad: v.cad, acct: v.acct, rep: isAutoAcct(v.acct) ? '' : v.rep, lead: v.lead, requested: st.today, requester: me(), requesterName: meName(), bulkRow: o.row }; st.nfs.push(n); return n; });
+  return checked.map((o, i) => { const v = o.v, a = normAddr(v.addr); const n = { id: ids[i], name: v.name, address: a, state: stateFrom(a), group: v.corp, partB: v.pb === 'yes', last: v.last, noPrev: v.noPrev, cad: v.cad, acct: v.acct, rep: isAutoAcct(v.acct) ? '' : v.rep, clin: v.clin || '', lead: v.lead, requested: st.today, requester: me(), requesterName: meName(), bulkRow: o.row }; st.nfs.push(n); return n; });
 }
 // the dry run: on a copy of everything, build + run(), note what got made, then put the real data back
 function bulkDry(kind, checked) {
@@ -408,7 +409,7 @@ function nfCard(o) {
   const v = o.v, d = ui.bulk.dry && ui.bulk.dry.byId[o.row], n = d ? d.obj : null;
   const need = n ? nfNeeds(n) : [];
   return `<div class="card ${o.errs.length ? 'bulkbad' : ''}" style="padding:10px"><div class="row" style="justify-content:space-between;align-items:baseline"><b>${esc(v.name || '(no name)')}</b><span class="meta">Row ${o.row}</span></div>${bulkMsgs(o)}
-  <div class="kv" style="margin-top:6px">${pv('Corporate', esc(v.corp) || '-')}${pv('Address', esc(v.addr ? normAddr(v.addr) : '') || '-')}${pv('Part B only', v.pb === 'yes' ? 'Yes' : v.pb === 'no' ? 'No' : '-')}${pv('Previous provider', v.noPrev ? 'None (as soon as possible)' : v.last ? 'Last supply ' + fmt(v.last) : '-')}${pv('Enteral ships', esc(CAD_L[v.cad] || 'Monthly'))}${pv('Account manager', esc(nameOf(v.acct)) || '<span class="meta">blank</span>')}${pv('Intake rep', v.rep ? esc(nameOf(v.rep)) : isAutoAcct(v.acct) ? 'picked at scheduling' : '<span class="meta">blank</span>')}${pv('Schedule lead', esc(nameOf(v.lead)) || '<span class="meta">blank</span>')}${n && n.dates ? pv('Recommended', 'Ordering ' + fmt(n.dates.ord) + ' · DOS ' + fmt(n.dates.dos) + ' · delivery ' + fmt(n.dates.del)) : ''}${need.length ? pv('Still needed', esc(need.map(k => NF_POS.find(x => x[0] === k)[1]).join(', ')) + ' (' + esc(roleName('rules')) + ' picks)') : ''}</div>${o.errs.length ? '' : bulkMade(o)}</div>`;
+  <div class="kv" style="margin-top:6px">${pv('Corporate', esc(v.corp) || '-')}${pv('Address', esc(v.addr ? normAddr(v.addr) : '') || '-')}${pv('Part B only', v.pb === 'yes' ? 'Yes' : v.pb === 'no' ? 'No' : '-')}${pv('Previous provider', v.noPrev ? 'None (as soon as possible)' : v.last ? 'Last supply ' + fmt(v.last) : '-')}${pv('Enteral ships', esc(CAD_L[v.cad] || 'Monthly'))}${pv('Account manager', esc(nameOf(v.acct)) || '<span class="meta">blank</span>')}${pv('Intake rep', v.rep ? esc(nameOf(v.rep)) : isAutoAcct(v.acct) ? 'picked at scheduling' : '<span class="meta">blank</span>')}${pv('Clinical rep', v.clin ? esc(nameOf(v.clin)) : isAutoAcct(v.acct) ? esc(nameOf(v.acct)) : 'same as intake rep')}${pv('Schedule lead', esc(nameOf(v.lead)) || '<span class="meta">blank</span>')}${n && n.dates ? pv('Recommended', 'Ordering ' + fmt(n.dates.ord) + ' · DOS ' + fmt(n.dates.dos) + ' · delivery ' + fmt(n.dates.del)) : ''}${need.length ? pv('Still needed', esc(need.map(k => NF_POS.find(x => x[0] === k)[1]).join(', ')) + ' (' + esc(roleName('rules')) + ' picks)') : ''}</div>${o.errs.length ? '' : bulkMade(o)}</div>`;
 }
 async function bulkFile(kind, file) {
   if (!file) return;

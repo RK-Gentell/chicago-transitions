@@ -83,6 +83,11 @@ const nfNeeds = n => NF_POS.map(x => x[0]).filter(k => k === 'rep' ? !n.rep && !
 const nfRepsTask = n => st.tasks.find(t => t.nf === n.id && t.type === 'NF_REPS' && !done(t) && !t.archived);
 const nfStage = n => n.deleted ? ['Deleted', 'p-req'] : n.scheduled ? ['Scheduled', 'p-done'] : nfNeeds(n).length ? ['Needs reps', 'p-setup'] : !n.dates ? ['Needs dates', 'p-hold'] : ['Ready to schedule', 'p-ready'];
 const nfRepTxt = n => n.rep ? esc(nameOf(n.rep)) : nfAutoPending(n) ? '<span class="meta" title="' + esc(AUTO_REP_TIP) + '">Picked at scheduling</span>' : '<span class="meta">none</span>';
+// clinical rep (Nov 9 2026): blank = same as the intake rep; account manager David → David (like Chicago). Older facilities have no n.clin.
+const nfClin = n => n.clin || (isAutoAcct(n.acct) ? lc(n.acct) : n.rep) || '';
+const nfClinTxt = n => n.clin || isAutoAcct(n.acct) ? esc(nameOf(nfClin(n))) : n.rep ? esc(nameOf(n.rep)) + ' <span class="meta">(same as intake rep)</span>' : '<span class="meta">Same as intake rep</span>';
+const nfClinSel = (id, R, v) => sel(id, withCur(R, v), v, true).replace('>Select…</option>', '>Same as intake rep</option>');
+const NF_CLIN_TIP = () => 'Leave it on "Same as intake rep" unless the clinical rep is someone else.' + (autoAcct() ? ' Account manager ' + esc(nameOf(autoAcct())) + ': same as Chicago, ' + esc(first(nameOf(autoAcct()))) + ' is the clinical rep unless you pick someone.' : '');
 
 // One-time (10/22/2026): who else gets the "Scheduled" email. Naomi Cohen and Malka Heiman. Runs once, then Settings has it.
 function importNf20261022() {
@@ -118,8 +123,8 @@ function nfRun() {
 }
 function nfScheduledMail(n, byName) {
   const d = n.dates;
-  mail({ key: 'm:E30:' + n.id, code: 'E30', to: [n.acct, n.rep, ...nfNotify()], cc: [n.lead], link: 'none', fyi: true, subject: 'Scheduled: ' + n.name,
-    body: `<p><b>${esc(n.name)}</b>${n.group ? ' (' + esc(n.group) + ')' : ''} is scheduled.</p><p>First order: date of service <b>${fmt(d.dos)}</b>, ordering ${fmt(d.ord)}, delivery ${fmt(d.del)}.${n.cad && n.cad !== '4' ? ' Enteral ships ' + esc(CAD_L[n.cad] || '').toLowerCase() + '.' : ''}</p><p>Intake rep: ${esc(nameOf(n.rep)) || '-'}<br>Account manager: ${esc(nameOf(n.acct)) || '-'}<br>Schedule lead: ${esc(nameOf(n.lead)) || '-'}</p><p>Scheduled by ${esc(byName)}.</p>` });
+  mail({ key: 'm:E30:' + n.id, code: 'E30', to: [n.acct, n.rep, nfClin(n), ...nfNotify()], cc: [n.lead], link: 'none', fyi: true, subject: 'Scheduled: ' + n.name,
+    body: `<p><b>${esc(n.name)}</b>${n.group ? ' (' + esc(n.group) + ')' : ''} is scheduled.</p><p>First order: date of service <b>${fmt(d.dos)}</b>, ordering ${fmt(d.ord)}, delivery ${fmt(d.del)}.${n.cad && n.cad !== '4' ? ' Enteral ships ' + esc(CAD_L[n.cad] || '').toLowerCase() + '.' : ''}</p><p>Intake rep: ${esc(nameOf(n.rep)) || '-'}<br>Clinical rep: ${esc(nameOf(nfClin(n))) || '-'}<br>Account manager: ${esc(nameOf(n.acct)) || '-'}<br>Schedule lead: ${esc(nameOf(n.lead)) || '-'}</p><p>Scheduled by ${esc(byName)}.</p>` });
 }
 // dates changed after it was scheduled (Nov 6 2026): email the same people as "Scheduled", and the schedule lead gets
 // a "Fix the Ordering Calendar" task (1 open at a time; it always shows the latest dates)
@@ -135,8 +140,8 @@ function nfReschedule(n, dos, byName) {
   n.dates = Object.assign(nfDerive(n, dos), { why: [...(old.why || []).filter(x => !/^Changed by /.test(x)), 'Changed by ' + byName + ' after scheduling (was ' + fmtS(old.dos) + ')'], changed: true });
   n.reschedules = [...(n.reschedules || []), { on: st.today, by: byName, from: { dos: old.dos, ord: old.ord, del: old.del }, to: { dos: n.dates.dos, ord: n.dates.ord, del: n.dates.del } }];
   const d = n.dates, was = x => ' (was ' + fmt(old[x]) + ')';
-  mail({ key: 'm:E30C:' + n.id + ':' + uid(), code: 'E30C', to: [n.acct, n.rep, ...nfNotify()], cc: [n.lead], link: 'none', fyi: true, subject: 'Dates changed: ' + n.name,
-    body: `<p><b>${esc(n.name)}</b>${n.group ? ' (' + esc(n.group) + ')' : ''} was rescheduled.</p><p>First order: date of service <b>${fmt(d.dos)}</b>${was('dos')}, ordering ${fmt(d.ord)}${was('ord')}, delivery ${fmt(d.del)}${was('del')}.</p><p>Intake rep: ${esc(nameOf(n.rep)) || '-'}<br>Account manager: ${esc(nameOf(n.acct)) || '-'}<br>Schedule lead: ${esc(nameOf(n.lead)) || '-'}</p><p>Changed by ${esc(byName)}.</p>` });
+  mail({ key: 'm:E30C:' + n.id + ':' + uid(), code: 'E30C', to: [n.acct, n.rep, nfClin(n), ...nfNotify()], cc: [n.lead], link: 'none', fyi: true, subject: 'Dates changed: ' + n.name,
+    body: `<p><b>${esc(n.name)}</b>${n.group ? ' (' + esc(n.group) + ')' : ''} was rescheduled.</p><p>First order: date of service <b>${fmt(d.dos)}</b>${was('dos')}, ordering ${fmt(d.ord)}${was('ord')}, delivery ${fmt(d.del)}${was('del')}.</p><p>Intake rep: ${esc(nameOf(n.rep)) || '-'}<br>Clinical rep: ${esc(nameOf(nfClin(n))) || '-'}<br>Account manager: ${esc(nameOf(n.acct)) || '-'}<br>Schedule lead: ${esc(nameOf(n.lead)) || '-'}</p><p>Changed by ${esc(byName)}.</p>` });
   if (!st.tasks.some(t => t.nf === n.id && t.type === 'NF_RECAL' && !done(t))) newTask('NF_RECAL', { nf: n.id, assignee: n.lead || fallbackOwner(), amTask: true });
   return true;
 }
@@ -146,7 +151,7 @@ function nfDelete(n, byName) {
 }
 
 // ---------- the form (request and edit) ----------
-// v: { name, addr, corp, pb: 'yes'|'no', last, noPrev, cad, acct, rep, lead }
+// v: { name, addr, corp, pb: 'yes'|'no', last, noPrev, cad, acct, rep, clin ('' = same as intake rep), lead }
 function nfFields(p, n) {
   n = n || {};
   const R = peopleOpts(repList()), A = peopleOpts(amList()), corps = [...new Set([...Object.values(st.groups).map(g => g.name), ...nfs().filter(x => !x.deleted).map(x => x.group)].filter(Boolean))].sort(az);
@@ -157,10 +162,10 @@ function nfFields(p, n) {
     <section><h2 class="rqh">Previous provider${tip('The first date of service can be 30 days after the last supply date with the previous provider. No previous provider: as soon as possible. Either way, the ordering date is at least ' + ORD_DAYS + ' days from today.')}</h2>
     <div class="row" style="align-items:flex-end">${fld('Last supply date with previous provider', dt(p + 'last', n.noPrev ? '' : n.last))}</div>${chk(p + 'noprev', 'No previous provider (schedule as soon as possible)', !!n.noPrev)}</section>
     <section><h2 class="rqh">GNS Lakewood roles${tip('All optional. Anything left blank goes to ' + esc(roleName('rules')) + ' on a "Pick the reps" task, and scheduling waits for it. The account manager comes first: for ' + esc(nameOf(autoAcct()) || 'some account managers') + ', the intake rep is picked automatically at scheduling. The schedule lead gets the task to schedule it.')}</h2>
-    <div class="row">${fld('Account manager', sel(p + 'acct', withCur(R, n.acct), n.acct, true))}${fld('Intake rep', sel(p + 'rep', withCur(R, n.rep), n.rep, true))}${fld('Schedule lead', sel(p + 'lead', withCur(A, n.lead), n.lead, true))}</div></section>
+    <div class="row">${fld('Account manager', sel(p + 'acct', withCur(R, n.acct), n.acct, true))}${fld('Intake rep', sel(p + 'rep', withCur(R, n.rep), n.rep, true))}${fld('Clinical rep' + tip(NF_CLIN_TIP()), nfClinSel(p + 'clin', R, n.clin))}${fld('Schedule lead', sel(p + 'lead', withCur(A, n.lead), n.lead, true))}</div></section>
     <div id="${p}prev"></div>`;
 }
-function nfRead(p) { return { name: V(p + 'name'), addr: V(p + 'addr'), corp: V(p + 'corp'), pb: V(p + 'pb'), last: V(p + 'noprev') ? '' : V(p + 'last'), noPrev: !!V(p + 'noprev'), cad: CAD_V[V(p + 'cad')] || '4', acct: V(p + 'acct'), rep: V(p + 'rep'), lead: V(p + 'lead') }; }
+function nfRead(p) { return { name: V(p + 'name'), addr: V(p + 'addr'), corp: V(p + 'corp'), pb: V(p + 'pb'), last: V(p + 'noprev') ? '' : V(p + 'last'), noPrev: !!V(p + 'noprev'), cad: CAD_V[V(p + 'cad')] || '4', acct: V(p + 'acct'), rep: V(p + 'rep'), clin: V(p + 'clin'), lead: V(p + 'lead') }; }
 function nfProblem(v, old) {
   if (!v.name) return 'Type the facility name.';
   if (!v.corp) return 'Type the corporate. No corporate? Type the facility name.';
@@ -174,7 +179,7 @@ function nfProblem(v, old) {
   return '';
 }
 // what the form would schedule (no saving)
-function nfTemp(v, id) { const a = normAddr(v.addr); return { id: id || -1, name: v.name, address: a, state: stateFrom(a), group: v.corp, partB: v.pb === 'yes', last: v.last, noPrev: v.noPrev, cad: v.cad, acct: v.acct, rep: v.rep, lead: v.lead }; }
+function nfTemp(v, id) { const a = normAddr(v.addr); return { id: id || -1, name: v.name, address: a, state: stateFrom(a), group: v.corp, partB: v.pb === 'yes', last: v.last, noPrev: v.noPrev, cad: v.cad, acct: v.acct, rep: v.rep, clin: v.clin, lead: v.lead }; }
 function nfPreview(p, id) {
   const box = document.getElementById(p + 'prev'); if (!box) return;
   const v = nfRead(p), n = nfTemp(v, id);
@@ -195,17 +200,17 @@ function nfTrackerHtml() {
   const list = nfs().filter(n => !n.deleted && (F === 'all' || (F === 'active' ? !n.scheduled : !!n.scheduled)) && (!q || lc(n.name + ' ' + n.group + ' ' + nfNo(n)).includes(q))).sort((a, b) => b.id - a.id);
   return `<h1>New facilities tracker</h1><p class="sub">New facilities (not from GNS Chicago) being scheduled. Click a row to see or change its details.</p>
   <div class="filters"><input type="text" id="nfq" placeholder="Search facility, corporate, NF number" value="${esc(ui.nfq || '')}">${[['active', 'To schedule'], ['sched', 'Scheduled'], ['all', 'All']].map(([v, l]) => `<button class="btn sm ${F === v ? 'pri' : ''}" data-nffilter="${v}">${l}</button>`).join('')}<button class="btn sm" id="nfcsv">Download as Excel (CSV)</button><button class="btn sm pri" data-view="nfnew" style="margin-left:auto">+ New facility scheduling request</button></div>
-  <div class="tablewrap"><table><tr><th>NF</th><th>Facility</th><th>Corporate</th><th>Stage</th><th>Part B only</th><th>Account manager</th><th>Intake rep</th><th>Schedule lead</th><th>First DOS</th><th>Ordering</th><th>Delivery</th><th>Requested</th></tr>${list.map(n => { const [s, c] = nfStage(n); return `<tr class="click" data-nf="${n.id}"><td class="num">${pad(n.id)}</td><td><b>${esc(n.name)}</b></td><td>${esc(n.group)}</td><td><span class="pill ${c}">${s}</span></td><td>${n.partB ? 'Yes' : 'No'}</td><td>${esc(nameOf(n.acct))}</td><td>${nfRepTxt(n)}</td><td>${esc(nameOf(n.lead))}</td><td class="num">${n.dates ? fmtS(n.dates.dos) : ''}</td><td class="num">${n.dates ? fmtS(n.dates.ord) : ''}</td><td class="num">${n.dates ? fmtS(n.dates.del) : ''}</td><td class="num">${fmtS(n.requested)}</td></tr>`; }).join('') || '<tr><td colspan="12" class="meta">No facilities here.</td></tr>'}</table></div>`;
+  <div class="tablewrap"><table><tr><th>NF</th><th>Facility</th><th>Corporate</th><th>Stage</th><th>Part B only</th><th>Account manager</th><th>Intake rep</th><th>Clinical rep</th><th>Schedule lead</th><th>First DOS</th><th>Ordering</th><th>Delivery</th><th>Requested</th></tr>${list.map(n => { const [s, c] = nfStage(n); return `<tr class="click" data-nf="${n.id}"><td class="num">${pad(n.id)}</td><td><b>${esc(n.name)}</b></td><td>${esc(n.group)}</td><td><span class="pill ${c}">${s}</span></td><td>${n.partB ? 'Yes' : 'No'}</td><td>${esc(nameOf(n.acct))}</td><td>${nfRepTxt(n)}</td><td>${nfClin(n) ? esc(nameOf(nfClin(n))) : '<span class="meta">Same as intake rep</span>'}</td><td>${esc(nameOf(n.lead))}</td><td class="num">${n.dates ? fmtS(n.dates.dos) : ''}</td><td class="num">${n.dates ? fmtS(n.dates.ord) : ''}</td><td class="num">${n.dates ? fmtS(n.dates.del) : ''}</td><td class="num">${fmtS(n.requested)}</td></tr>`; }).join('') || '<tr><td colspan="13" class="meta">No facilities here.</td></tr>'}</table></div>`;
 }
 function nfCsv() {
-  const rows = [['NF', 'Facility', 'Corporate', 'Address', 'Stage', 'Part B only', 'Last supply date', 'Enteral ships', 'Account manager', 'Intake rep', 'Schedule lead', 'First DOS', 'Ordering', 'Delivery', 'Scheduled on', 'Requested', 'Requested by']];
-  nfs().filter(n => !n.deleted).forEach(n => rows.push([nfNo(n), n.name, n.group, n.address, nfStage(n)[0], n.partB ? 'Yes' : 'No', n.noPrev ? 'No previous provider' : fmtS(n.last), CAD_L[n.cad] || 'Monthly', nameOf(n.acct), nameOf(n.rep), nameOf(n.lead), n.dates ? fmtS(n.dates.dos) : '', n.dates ? fmtS(n.dates.ord) : '', n.dates ? fmtS(n.dates.del) : '', fmtS(n.scheduled), fmtS(n.requested), n.requesterName || nameOf(n.requester)]));
+  const rows = [['NF', 'Facility', 'Corporate', 'Address', 'Stage', 'Part B only', 'Last supply date', 'Enteral ships', 'Account manager', 'Intake rep', 'Clinical rep', 'Schedule lead', 'First DOS', 'Ordering', 'Delivery', 'Scheduled on', 'Requested', 'Requested by']];
+  nfs().filter(n => !n.deleted).forEach(n => rows.push([nfNo(n), n.name, n.group, n.address, nfStage(n)[0], n.partB ? 'Yes' : 'No', n.noPrev ? 'No previous provider' : fmtS(n.last), CAD_L[n.cad] || 'Monthly', nameOf(n.acct), nameOf(n.rep), nameOf(nfClin(n)), nameOf(n.lead), n.dates ? fmtS(n.dates.dos) : '', n.dates ? fmtS(n.dates.ord) : '', n.dates ? fmtS(n.dates.del) : '', fmtS(n.scheduled), fmtS(n.requested), n.requesterName || nameOf(n.requester)]));
   const csv = rows.map(r => r.map(x => '"' + String(x ?? '').replace(/"/g, '""') + '"').join(',')).join('\r\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' })); a.download = 'New facilities ' + st.today + '.csv'; a.click();
 }
 function nfDrawer(n) {
   const [s, c] = nfStage(n), t = nfTask(n), d = n.dates;
-  const kv = `<div class="kv"><div>Corporate</div><div>${esc(n.group) || '-'}</div><div>Address</div><div>${esc(n.address)} ${n.state ? '(' + esc(n.state) + ')' : ''}</div><div>Part B only</div><div>${n.partB ? 'Yes' : 'No'}</div><div>Previous provider</div><div>${n.noPrev ? 'None (as soon as possible)' : 'Last supply ' + fmt(n.last)}</div><div>Enteral ships</div><div>${esc(CAD_L[n.cad] || 'Monthly')}</div><div>Account manager</div><div>${esc(nameOf(n.acct)) || '-'}</div><div>Intake rep</div><div>${nfRepTxt(n)}${n.repAuto ? '<div class="meta">' + (n.repAuto.override ? 'Picked by hand at scheduling (the rules picked ' + esc(nameOf(n.repAuto.pick) || 'nobody: everyone was full') + ')' : 'Picked automatically at scheduling') + ', ordering ' + fmtS(n.repAuto.ord) + '</div>' : ''}</div><div>Schedule lead</div><div>${esc(nameOf(n.lead))}</div>${d ? `<div>First DOS</div><div class="num">${fmt(d.dos)}</div><div>Ordering</div><div class="num">${fmt(d.ord)}</div><div>Delivery</div><div class="num">${fmt(d.del)} · OS Days ${d.os}</div>` : ''}<div>Scheduled</div><div>${n.scheduled ? fmt(n.scheduled) + (n.schedBy ? ' by ' + esc(n.schedBy) : '') : 'Not yet'}</div><div>Requested</div><div>${fmt(n.requested)}${n.requesterName ? ' by ' + esc(n.requesterName) : ''}</div></div>`;
+  const kv = `<div class="kv"><div>Corporate</div><div>${esc(n.group) || '-'}</div><div>Address</div><div>${esc(n.address)} ${n.state ? '(' + esc(n.state) + ')' : ''}</div><div>Part B only</div><div>${n.partB ? 'Yes' : 'No'}</div><div>Previous provider</div><div>${n.noPrev ? 'None (as soon as possible)' : 'Last supply ' + fmt(n.last)}</div><div>Enteral ships</div><div>${esc(CAD_L[n.cad] || 'Monthly')}</div><div>Account manager</div><div>${esc(nameOf(n.acct)) || '-'}</div><div>Intake rep</div><div>${nfRepTxt(n)}${n.repAuto ? '<div class="meta">' + (n.repAuto.override ? 'Picked by hand at scheduling (the rules picked ' + esc(nameOf(n.repAuto.pick) || 'nobody: everyone was full') + ')' : 'Picked automatically at scheduling') + ', ordering ' + fmtS(n.repAuto.ord) + '</div>' : ''}</div><div>Clinical rep</div><div>${nfClinTxt(n)}</div><div>Schedule lead</div><div>${esc(nameOf(n.lead))}</div>${d ? `<div>First DOS</div><div class="num">${fmt(d.dos)}</div><div>Ordering</div><div class="num">${fmt(d.ord)}</div><div>Delivery</div><div class="num">${fmt(d.del)} · OS Days ${d.os}</div>` : ''}<div>Scheduled</div><div>${n.scheduled ? fmt(n.scheduled) + (n.schedBy ? ' by ' + esc(n.schedBy) : '') : 'Not yet'}</div><div>Requested</div><div>${fmt(n.requested)}${n.requesterName ? ' by ' + esc(n.requesterName) : ''}</div></div>`;
   const ms = st.mails.filter(m => m.key === 'm:E30:' + n.id || m.key.startsWith('m:E30C:' + n.id + ':') || (t && m.task === t.key));
   const edit = n.scheduled ? '<div class="meta">It\'s scheduled, so the details can\'t change here anymore.</div>' : `<details class="card" style="padding:10px" id="nfedbox"><summary><b>Edit details</b> <span class="meta">(dates recalculate)</span></summary><form id="nfe" style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${nfFields('nfe_', n)}<div id="nfe_err"></div><div><button class="btn sm pri" type="submit">Save details</button></div></form></details>`;
   return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="New facility"><header><div style="flex:1;min-width:0"><div class="meta">${nfNo(n)} · new facility · ${esc(n.group || '')}</div><h1 style="font-size:17px">${esc(n.name)}</h1><span class="pill ${c}">${s}</span></div>${closeX}</header><div class="body">
@@ -253,10 +258,10 @@ TT.NF_SCHEDULE = {
     const n = nfById(t.nf); if (!n) return '<div class="err">This facility isn\'t there anymore.</div>';
     if (!n.dates) return '<div class="err">No dates yet: the address needs a state that has a ship point. Fix it under "Edit details" on the facility (New facilities tracker).</div>';
     const d = n.dates, auto = nfAutoPending(n);
-    return `<div class="kv"><div>Corporate</div><div>${esc(n.group)}</div><div>Address</div><div>${esc(n.address)}</div><div>Part B only</div><div>${n.partB ? 'Yes' : 'No'}</div><div>Previous provider</div><div>${n.noPrev ? 'None (as soon as possible)' : 'Last supply ' + fmt(n.last)}</div><div>Account manager</div><div>${esc(nameOf(n.acct))}</div>${auto ? '' : `<div>Intake rep</div><div>${esc(nameOf(n.rep))}</div>`}${(n.files || []).length ? `<div>Attachments</div><div>${n.files.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>`).join(', ')}</div>` : ''}</div>
+    return `<div class="kv"><div>Corporate</div><div>${esc(n.group)}</div><div>Address</div><div>${esc(n.address)}</div><div>Part B only</div><div>${n.partB ? 'Yes' : 'No'}</div><div>Previous provider</div><div>${n.noPrev ? 'None (as soon as possible)' : 'Last supply ' + fmt(n.last)}</div><div>Account manager</div><div>${esc(nameOf(n.acct))}</div>${auto ? '' : `<div>Intake rep</div><div>${esc(nameOf(n.rep))}</div>`}<div>Clinical rep</div><div>${nfClinTxt(n)}</div>${(n.files || []).length ? `<div>Attachments</div><div>${n.files.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>`).join(', ')}</div>` : ''}</div>
     ${nfDateEditor(n)}${auto ? autoRepBox(n) : ''}
-    <div class="instr"><ol><li>"Facilities" → schedule icon under "Actions" → "Facility Schedule".</li><li>"Start Date" <span class="q">${fmtS(d.del)}</span>, "Day of the Week" <span class="q">${d.day}</span>, "Weeks" <span class="q">4</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>${n.cad && n.cad !== '4' ? `<li>"Select Area of Care" → "Enteral" → "Add Schedule": same Start Date and day, "Weeks" <span class="q">${n.cad}</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>` : ''}<li>"Generate Dates" → check "Override Manually" → "Save".</li><li>"Schedules" → Ordering Calendar → open the entry on ${fmt(d.ord)} and check the 3 dates match the ones above. Wrong? Recheck Start Date, Day of the Week and OS Days and generate again. Missing? The ordering date probably landed on a weekend.</li>${auto ? `<li>"Facilities" → edit pencil: "Insurance Specialist" and "Intake Specialist" = the intake rep picked above. "Save".</li>` : ''}</ol></div>
-    <div class="note">"Mark done" emails ${esc([nameOf(n.acct), auto ? 'the intake rep' : nameOf(n.rep), ...nfNotify().map(nameOf)].filter(Boolean).join(', '))} that it's scheduled${n.lead ? ', CC ' + esc(nameOf(n.lead)) : ''}. Changed a date above? Click "Save dates" first.</div>`;
+    <div class="instr"><ol><li>"Facilities" → schedule icon under "Actions" → "Facility Schedule".</li><li>"Start Date" <span class="q">${fmtS(d.del)}</span>, "Day of the Week" <span class="q">${d.day}</span>, "Weeks" <span class="q">4</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>${n.cad && n.cad !== '4' ? `<li>"Select Area of Care" → "Enteral" → "Add Schedule": same Start Date and day, "Weeks" <span class="q">${n.cad}</span>, "OS Days" <span class="q">${d.os}</span>. "Save".</li>` : ''}<li>"Generate Dates" → check "Override Manually" → "Save".</li><li>"Schedules" → Ordering Calendar → open the entry on ${fmt(d.ord)} and check the 3 dates match the ones above. Wrong? Recheck Start Date, Day of the Week and OS Days and generate again. Missing? The ordering date probably landed on a weekend.</li><li>"Facilities" → edit pencil: "Insurance Specialist" and "Intake Specialist" ${auto ? '= the intake rep picked above' : '<span class="q">' + esc(nameOf(n.rep)) + '</span>'}. "Clinical Review" <span class="q">${esc(nameOf(nfClin(n)))}</span>. "Save".</li></ol></div>
+    <div class="note">"Mark done" emails ${esc([...new Set([nameOf(n.acct), auto ? 'the intake rep' : nameOf(n.rep), nameOf(nfClin(n)), ...nfNotify().map(nameOf)].filter(Boolean))].join(', '))} that it's scheduled${n.lead ? ', CC ' + esc(nameOf(n.lead)) : ''}. Changed a date above? Click "Save dates" first.</div>`;
   },
   example: () => ({}),
   validate: t => {
@@ -299,7 +304,7 @@ TT.NF_REPS = {
     const R = peopleOpts(repList()), A = peopleOpts(amList()), need = nfNeeds(n), box = (k, html) => need.includes(k) ? html.replace('<div class="field">', '<div class="field need">') : html;
     return `<div class="instr">The request for <b>${esc(n.name)}</b>${n.group ? ' (' + esc(n.group) + ')' : ''} left ${esc(need.map(k => NF_POS.find(x => x[0] === k)[1]).join(', ')) || 'nothing'} blank. Pick ${need.length > 1 ? 'them' : 'it'} and it goes to the schedule lead to schedule.</div>
     <div class="kv"><div>Address</div><div>${esc(n.address)}</div><div>Part B only</div><div>${n.partB ? 'Yes' : 'No'}</div>${n.dates ? `<div>Recommended DOS</div><div>${fmt(n.dates.dos)}</div>` : ''}<div>Requested by</div><div>${esc(n.requesterName || nameOf(n.requester))}</div></div>
-    <div class="row">${box('acct', fld('Account manager', sel('nr_acct', withCur(R, n.acct), n.acct, true)))}${box('rep', fld('Intake rep', sel('nr_rep', withCur(R, n.rep), n.rep, true)))}${box('lead', fld('Schedule lead', sel('nr_lead', withCur(A, n.lead), n.lead, true)))}</div><div class="meta">Boxes outlined in blue are the ones still needed.</div>`;
+    <div class="row">${box('acct', fld('Account manager', sel('nr_acct', withCur(R, n.acct), n.acct, true)))}${box('rep', fld('Intake rep', sel('nr_rep', withCur(R, n.rep), n.rep, true)))}${fld('Clinical rep' + tip(NF_CLIN_TIP()), nfClinSel('nr_clin', R, n.clin))}${box('lead', fld('Schedule lead', sel('nr_lead', withCur(A, n.lead), n.lead, true)))}</div><div class="meta">Boxes outlined in blue are the ones still needed.</div>`;
   },
   example: () => ({ nr_acct: lc(repList()[0].email), nr_rep: lc(repList()[0].email), nr_lead: lc(amList()[0].email) }),
   validate: t => {
@@ -309,7 +314,7 @@ TT.NF_REPS = {
     if (!V('nr_lead')) return 'Pick the schedule lead.';
     return '';
   },
-  done: t => { const n = nfById(t.nf); n.acct = V('nr_acct'); n.rep = isAutoAcct(n.acct) ? '' : V('nr_rep'); n.lead = V('nr_lead'); }
+  done: t => { const n = nfById(t.nf); n.acct = V('nr_acct'); n.rep = isAutoAcct(n.acct) ? '' : V('nr_rep'); n.clin = V('nr_clin'); n.lead = V('nr_lead'); }
 };
 NO_REOPEN.add('NF_REPS');
 
@@ -355,7 +360,7 @@ document.addEventListener('submit', async e => {
     const ok = await act(async () => {
       const [nid] = await STORE.allocateIds(1);
       const a = normAddr(v.addr);
-      st.nfs.push({ id: nid, name: v.name, address: a, state: stateFrom(a), group: v.corp, partB: v.pb === 'yes', last: v.last, noPrev: v.noPrev, cad: v.cad, acct: v.acct, rep: isAutoAcct(v.acct) ? '' : v.rep, lead: v.lead, requested: st.today, requester: me(), requesterName: meName() });
+      st.nfs.push({ id: nid, name: v.name, address: a, state: stateFrom(a), group: v.corp, partB: v.pb === 'yes', last: v.last, noPrev: v.noPrev, cad: v.cad, acct: v.acct, rep: isAutoAcct(v.acct) ? '' : v.rep, clin: v.clin, lead: v.lead, requested: st.today, requester: me(), requesterName: meName() });
     }, 'Scheduling request submitted');
     if (ok) { ui.nfConfirmDup = false; ui.view = 'nftracker'; render(); }
     else { const b = $('#nff button[type=submit]'); if (b) b.disabled = false; }
@@ -369,7 +374,7 @@ document.addEventListener('submit', async e => {
       const a = normAddr(v.addr), pb = v.pb === 'yes';
       // a date of service picked by hand was based on the old details: it goes back to the new recommended one
       if (a !== n.address || pb !== !!n.partB || v.last !== (n.last || '') || v.noPrev !== !!n.noPrev) { n.dosChosen = ''; n.dosBy = ''; }
-      Object.assign(n, { name: v.name, address: a, state: stateFrom(a), group: v.corp, partB: pb, last: v.last, noPrev: v.noPrev, cad: v.cad, acct: v.acct, lead: v.lead, editedBy: meName(), editedOn: st.today });
+      Object.assign(n, { name: v.name, address: a, state: stateFrom(a), group: v.corp, partB: pb, last: v.last, noPrev: v.noPrev, cad: v.cad, acct: v.acct, clin: v.clin, lead: v.lead, editedBy: meName(), editedOn: st.today });
       if (!isAutoAcct(v.acct)) n.rep = v.rep;
       const rt = nfRepsTask(n);
       if (rt && !nfNeeds(n).length) {

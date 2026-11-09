@@ -214,3 +214,8 @@ Waiting tasks (`isWaiting`: `opensOn` after today) are left out of "My tasks", "
 - Email E30C "Dates changed: <name>" (Raizy approved the sample): same To/CC as E30 (account manager, intake rep, Settings `nfNotify`; CC schedule lead), FYI, new dates with "(was …)".
 - Task `NF_RECAL` "Fix the Ordering Calendar" for the schedule lead (repeatable, 1 open at a time, always shows the latest dates; no to-do email, the lead is CC'd on E30C). Can't be put back in the queue.
 - Blocked (`nfRescheduleProblem`): the first ordering date already passed, or the new ordering date isn't after today. The intake rep doesn't change; `nfDateWarn` warns when the rep already has 3+ facilities ordering on the new date.
+
+## New facilities: clinical rep (Nov 9 2026)
+- `n.clin` = the new facility's clinical rep; '' = same as the intake rep (older facilities have none, so nothing changes for them). `nfClin(n)` resolves it: `n.clin`, else account manager David (`isAutoAcct`) → David (like Chicago), else `n.rep`. `autoAssign` already set `n.clin` = David at scheduling.
+- "Clinical rep" box (`nfClinSel`, blank option "Same as intake rep") on the request, Edit details (until scheduled, can go back to "Same as intake rep"), and `NF_REPS` (not required, not in `nfNeeds`). Bulk column "Clinical rep" (blank = same). Tracker, CSV, facility page, schedule task show it.
+- E30 / E30C: clinical rep added to To (mail() dedupes) and a "Clinical rep:" line under "Intake rep:". Schedule task always has the portal step: "Insurance Specialist"/"Intake Specialist" = intake rep, "Clinical Review" = `nfClin`.
