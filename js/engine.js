@@ -199,6 +199,17 @@ function FG(f) { const g = G(f); return Object.assign({}, g, { cov: Object.assig
 // every area except wound care is "Covered Only" or "Don't Supply" → the default Tier 2 price table, nobody has to pick one
 function isTier2(g) { return AREAS.filter(a => a !== 'Wound Care').every(a => ['Covered Only', "Don't Supply"].includes((g.cov || {})[a])); }
 function areasTableHtml(g) { return `<table border="1" cellpadding="4" style="border-collapse:collapse"><tr><th>Area of care</th><th>We supply</th></tr>${AREAS.map(a => `<tr><td>${a}</td><td>${esc((g.cov || {})[a] || 'Not decided yet')}</td></tr>`).join('')}</table>`; }
+// Areas of care per facility from the request form / bulk upload (Nov 10 2026). The corporate's answer per area = what it already
+// has, else the most common answer among its facilities (a tie goes to the first). A facility's answer that differs is that facility's own (f.cov).
+function corpCovPick(wants) { const o = {}; AREAS.forEach(a => { const vals = wants.map(w => (w || {})[a]).filter(Boolean); if (!vals.length) return; const n = {}; vals.forEach(v => n[v] = (n[v] || 0) + 1); o[a] = vals.reduce((b, v) => n[v] > n[b] ? v : b, vals[0]); }); return o; }
+function setFacCov(f, want) { const g = G(f), own = {}; AREAS.forEach(a => { if (want && want[a] && (g.cov || {})[a] && g.cov[a] !== want[a]) own[a] = want[a]; }); if (Object.keys(own).length) f.cov = Object.assign({}, f.cov || {}, own); }
+// no corporate yet on the request: f.pendingFacCov = what the facility asked for. Once the corporate is known, blanks fill the corporate, differences are the facility's own.
+function settleFacCov(f) {
+  const w = f.pendingFacCov; if (!w || !f.group) return;
+  const g = G(f); if (!g || !g.name) return;
+  g.cov = g.cov || {}; AREAS.forEach(a => { if (w[a] && !g.cov[a]) g.cov[a] = w[a]; });
+  setFacCov(f, w); delete f.pendingFacCov;
+}
 function covKnown(g) { return !!g.cov && AREAS.every(a => g.cov[a]); }
 function partB(g) { return AREAS.every(a => ['Covered Only', "Don't Supply", 'Purchase Order', 'Facility Bulk Order'].includes(g.cov[a])); }
 function areasPhrase(g) {
@@ -786,7 +797,7 @@ const first = n => String(n || '').split(' ')[0];
 function makeStandalone(f) {
   const old = G(f), n = f.name, g = ensureGroup(n, true);
   if (!covKnown(g)) g.cov = Object.assign({}, old.cov || {}, g.cov || {});
-  g.standalone = true; f.group = g.name;
+  g.standalone = true; f.group = g.name; settleFacCov(f);
   const amy = fTask(f, 'PORTAL_ADD');
   if (amy && !done(amy)) mail({ key: 'm:E8sa:' + amy.key, code: 'E8', to: [amy.assignee], fac: f.id, task: amy.key, subject: 'Update: ' + f.name + ' has no corporate', body: `<p><b>${esc(f.name)}</b> has no corporate. Please set it up as its own corporate, named <b>${esc(n)}</b>.</p>` });
 }
@@ -1647,7 +1658,7 @@ function editFacility(f, v, by, byName) {
   // the rep named on the handoff email / transfer notice changed (a new intake rep, or the account manager changed to or from David)
   const newC = repLine(f);
   if (f.email1 && lc(newC.email) !== lc(oldC.email)) mail({ key: 'm:E13:rep:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: (f.rep !== repWas ? 'Intake rep' : 'Rep on the facility email') + ' changed after the Chicago handoff email: ' + facName(f), body: '<p>' + esc(byName) + ' changed ' + (f.rep !== repWas ? 'the intake rep from ' + esc(nameOf(repWas)) + ' to ' + esc(nameOf(f.rep)) : 'the account manager to ' + esc(nameOf(f.acct))) + '. The Chicago handoff email (and the transfer notice to the facility) named ' + esc(oldC.name) + '; it should now be ' + esc(newC.name) + '. Click "Dates changed: send correction" on the facility page to send Chicago the corrected email, or let the facility know yourself.</p>' });
-  if (v.none) { if (!G(f).standalone) makeStandalone(f); } else if (v.grp && lc(v.grp) !== lc(f.group) && grp(v.grp)) f.group = grp(v.grp).name;
+  if (v.none) { if (!G(f).standalone) makeStandalone(f); } else if (v.grp && lc(v.grp) !== lc(f.group) && grp(v.grp)) { f.group = grp(v.grp).name; settleFacCov(f); }
   if (v.wound) f.wound = v.wound; if (v.regional) f.regional = v.regional;
   // a new Gentell WC Transition Lead after their email went out (and the facility email hasn't): the new one never got it
   if (v.ctl) setCtl(f, v.ctl, byName);

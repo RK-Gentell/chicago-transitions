@@ -218,7 +218,7 @@ const TT = {
       if (n.corp) {
         const v = V('fc_grp');
         if (v === 'No corporate (Independent HQ)') makeStandalone(f);
-        else { const g = ensureGroup(v === 'New corporate…' ? V('fc_new') : v); f.group = g.name; if (f.pendingCov) g.cov = Object.assign({}, f.pendingCov, g.cov || {}); }
+        else { const g = ensureGroup(v === 'New corporate…' ? V('fc_new') : v); f.group = g.name; if (f.pendingCov) g.cov = Object.assign({}, f.pendingCov, g.cov || {}); settleFacCov(f); }
       }
       const sv = (typeof ui !== 'undefined' && ui.shotSaved) || {};
       // done again after being put back: screenshots already saved stay unless a new one is pasted or "No FastCare contacts" is ticked

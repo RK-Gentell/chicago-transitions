@@ -427,10 +427,15 @@ async function submitRequest() {
     for (const f of files) saved.push(await STORE.uploadFile(folder, f));
     const req = { key: 'req:' + pad(ids[0]), by: me(), byName: meName(), at: st.today, why, files: saved, facIds: ids };
     st.reqs.push(req);
+    // each line's areas = the request's, with "Some facilities have different areas of care" on top; the corporate's = the request's row, else the most common
+    const wants = p.lines.map((l, i) => Object.assign({}, covIn, readCovFac(i)));
+    const corpPick = {}; p.lines.forEach((l, i) => { if (l.group) (corpPick[lc(l.group)] = corpPick[lc(l.group)] || []).push(readCovFac(i)); });
+    Object.keys(corpPick).forEach(k => corpPick[k] = Object.assign(corpCovPick(corpPick[k]), covIn));
     const created = p.lines.map((l, i) => {
-      if (l.group) { const g = ensureGroup(l.group, l.none); if (pre.corp && !g.price) g.existing = true; g.cov = Object.assign({}, covIn, g.cov || {}); if (corp.length && !(g.contacts || []).length) g.contacts = corp.map(c => ({ first: c.first, last: c.last, dept: c.dept, note: c.note, email: c.email })); }
+      if (l.group) { const g = ensureGroup(l.group, l.none); if (pre.corp && !g.price) g.existing = true; g.cov = Object.assign({}, corpPick[lc(l.group)], g.cov || {}); if (corp.length && !(g.contacts || []).length) g.contacts = corp.map(c => ({ first: c.first, last: c.last, dept: c.dept, note: c.note, email: c.email })); }
       const f = { id: ids[i], req: req.key, name: l.name, address: l.address, state: l.state, group: l.group ? grp(l.group).name : '', pendingCov: Object.assign({}, covIn), rep, clin: rep, am, acct, contacts: [], requested: st.today, requester: me(), why, files: saved };
       if (ctl) f.ctl = ctl;
+      if (f.group) setFacCov(f, wants[i]); else if (Object.keys(wants[i]).length) f.pendingFacCov = wants[i];
       applyPre(f, pre, l, l.info);
       fcts.forEach(c => { if (c.fac && !lc(l.name).startsWith(lc(c.fac))) return; addContacts(f, [c], 'requester'); });
       if (pre.ct) f.contacts.forEach(c => c.inPortal = true);
