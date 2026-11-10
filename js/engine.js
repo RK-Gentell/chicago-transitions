@@ -441,6 +441,7 @@ function flush() {
 function mailStillValid(m) {
   // queued before "Don't email transition leads about their own tasks" was ticked, and only to the lead
   const quiet = quietLead(m); if (quiet && (m.to || []).every(e => e === quiet)) return false;
+  if (m.code === 'E33' && !st.settings.leadQuiet) return false; // the 3 PM list stops when the box is unticked
   const c = m.cond; if (!c) return true;
   if (c.task) {
     const t = taskByKey(c.task); if (!t || done(t)) return false;
@@ -1295,6 +1296,59 @@ function run() {
   ensureTaskMails();
   st.tasks.forEach(t => { if (!done(t) && !t.archived) spaceReminders(t); });
   st.mails.forEach(m => { if (m.status === 'Queued' && !mailStillValid(m)) m.status = 'Cancelled'; });
+  leadDigest();
+}
+
+// ---------- 3 PM "Still waiting" list to each transition lead (only with Settings leadQuiet) ----------
+// Replaces the separate "No reply" and "At risk" emails. A facility shows up the day that email would have gone,
+// and stays until it's taken care of. Days = business days since the first ask (or the latest "keep following up").
+const bizCount = (a, b) => { let n = 0, d = a; while (d < b) { d = add(d, 1); if (!isWE(d)) n++; } return n; };
+// the day the "No reply" alert is due: 2 follow-ups out in this round, then gap business days after the 2nd
+function chaseAlertDay(f, code, round, gap) {
+  const roundOf = k => +((k.match(/^m:\w+:\d+:r(\d+):/) || [])[1] || 0);
+  const fu = st.mails.filter(m => m.fac === f.id && m.code === code && m.status !== 'Cancelled' && roundOf(m.key) === round);
+  return fu.length < 2 ? '' : addBiz(fu.map(m => m.day).sort().pop(), gap);
+}
+function waitingFor(f) {
+  if (f.hold || f.complete || f.deleted || f.archived) return [];
+  const out = [], d3 = f.email3 && !f.e3Done && !f.e3Reply && chaseAlertDay(f, 'E16F', f.e3Round || 0, 3);
+  if (d3 && st.today >= d3) out.push({ sec: 'e3', f, days: bizCount((f.e3Round ? f.e3RoundFrom : f.email3) || f.email3, st.today) });
+  const de = f.esignAsk && !f.esignGot && !f.esignDone && chaseAlertDay(f, 'E31F', f.esignRound || 0, 2);
+  if (de && st.today >= de) out.push({ sec: 'es', f, days: bizCount((f.esignRound ? f.esignRoundFrom : f.esignAsk) || f.esignAsk, st.today) });
+  if (f.dates && !f.email1 && st.today >= addBiz(f.dates.ord, -3)) out.push({ sec: 'risk', f });
+  return out;
+}
+// 3 PM Eastern on a day, as a UTC time (19:00 or 20:00 depending on daylight saving)
+const at3pm = day => [19, 20].map(h => day + 'T' + h + ':00:00Z').find(iso => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' }).format(new Date(iso)) === '15');
+function digestBody(lead, items) {
+  const li = (f, rest) => `<li><a href="${esc(appLink('fac=' + f.id))}">${esc(facName(f))}</a>${rest}</li>`;
+  const days = n => ': ' + n + ' day' + (n === 1 ? '' : 's');
+  const secs = [
+    ['e3', 'Waiting on the wound rep and regional for contacts', x => li(x.f, (e3Names(x.f).length ? ' (' + esc([x.f.wound && x.f.wound.name, x.f.regional && x.f.regional.name].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ')) + ')' : '') + days(x.days))],
+    ['es', 'Waiting on ' + esGreet() + ' for provider and eSign info', x => li(x.f, days(x.days))],
+    ['risk', 'Ordering soon, Chicago handoff email not sent', x => li(x.f, ': orders ' + fmt(x.f.dates.ord))]
+  ];
+  return `<p>Hi ${esc(first(nameOf(lead)))},</p>` + secs.map(([k, title, row]) => { const l = items.filter(x => x.sec === k); return l.length ? `<p style="margin-bottom:2px"><b>${esc(title)}</b></p><ul style="margin-top:2px">${l.map(row).join('')}</ul>` : ''; }).join('');
+}
+function leadDigest() {
+  if (!st.settings.leadQuiet || isWE(st.today)) return;
+  const byLead = {};
+  st.facs.forEach(f => waitingFor(f).forEach(x => { const l = lc(amOf(f)); (byLead[l] = byLead[l] || []).push(x); }));
+  const leads = new Set([...Object.keys(byLead), ...st.mails.filter(m => m.code === 'E33' && m.day === st.today && m.status === 'Queued').map(m => m.to[0])]);
+  leads.forEach(lead => {
+    const today = st.mails.filter(m => m.code === 'E33' && m.day === st.today && m.to[0] === lead);
+    if (today.some(m => m.status === 'Sent')) return; // 1 a day
+    const items = byLead[lead] || [];
+    const body = items.length ? digestBody(lead, items) : '', h = hash(body);
+    // the list changed since it was queued: the old one is cancelled and the new one takes its place
+    const same = m => m.status === 'Queued' && m.key.split(':')[4] === h;
+    today.forEach(m => { if (m.status === 'Queued' && !same(m)) m.status = 'Cancelled'; });
+    if (!items.length || today.some(same)) return;
+    const key = 'm:E33:' + lead + ':' + st.today + ':' + h + ':' + today.length;
+    const n = new Set(items.map(x => x.f.id)).size;
+    const rec = mail({ key, code: 'E33', to: [lead], link: 'mytasks', subject: 'Still waiting: ' + n + ' facilit' + (n === 1 ? 'y' : 'ies'), body });
+    if (rec && rec.status === 'Queued') { const t = at3pm(st.today); if (t && Date.parse(t) > nowMs()) rec.sendOn = t; }
+  });
 }
 
 // ---------- user actions that aren't tasks ----------
