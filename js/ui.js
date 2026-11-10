@@ -352,7 +352,7 @@ function requestHtml() {
       <div class="rqi">One per line: <span class="q">Name; full address; corporate</span>. Use the Chicago (Gentell) name, usually the one with the state in parentheses. Our portal name gets added on the "Add to Brightree" task.</div>
       <textarea id="rq_fac" aria-label="Facilities being transferred" style="min-height:90px">${demo ? 'Waters Of Lagrange; 123 Demo St, LaGrange, IN 46761; Infinity Healthcare Management\nWaters Of Princeton; 456 Demo Ave, Princeton, IN 47670; Infinity Healthcare Management' : ''}</textarea><div id="rq_corpinfo" class="note"></div></section>
     <section><h2 class="rqh">Reason for transition</h2><textarea id="rq_why" class="plain" aria-label="Reason for transition">${demo ? 'Infinity is moving its Indiana buildings to Lakewood. Chicago already knows (demo).' : ''}</textarea></section>
-    <section><h2 class="rqh">Areas of care${tip('Leave "Not sure" and the app asks you later.')}</h2><div class="areas">${AREAS.map(a => fld(a, sel('rq_' + a, [...covOpts(a), 'Not sure'], 'Not sure', true))).join('')}</div></section>
+    <section><h2 class="rqh">Areas of care${tip('Leave "Not sure" and the app asks you later.')}</h2><div class="areas">${AREAS.map(a => fld(a, sel('rq_' + a, [...covOpts(a), 'Not sure'], 'Not sure', true))).join('')}</div><div class="predone" style="margin-top:8px">${chk('rq_covdiff', 'Some facilities have different areas of care' + tip('The areas above are the corporate\'s. Pick a different answer only where a facility is different. "Same as above" = the corporate\'s.'))}</div><div id="rq_covfac"></div></section>
     <section><h2 class="rqh">GNS Lakewood roles${tip('All optional. No intake rep: the corporate rule, or ' + esc(roleName('rules')) + ' picks one. The account manager gets copied on the emails the intake rep gets. The transition lead runs this transition: gets the tasks and emails.')}</h2>
       <div class="row">${fld('Account manager', sel('rq_acct', peopleOpts(repList()), '', true))}${fld('Intake rep', sel('rq_rep', peopleOpts(repList()), '', true))}${fld('Transition lead', sel('rq_am', peopleOpts(amList()), '', true))}</div></section>
     <section><h2 class="rqh">Gentell WC${tip('Optional. The Gentell WC Transition Lead sends the transfer email to the facility. Anyone at Gentell: start typing a name. They\'re copied on the Chicago handoff email and the in-service &amp; contacts request to the wound rep and regional. Blank: ' + esc(roleName('rules')) + ' picks one.')}</h2>
@@ -367,6 +367,17 @@ function requestHtml() {
       <div class="drop" id="rq_drop" tabindex="0"><b>Drag files here</b> or <label class="linkish" for="rq_files">browse</label><input type="file" id="rq_files" multiple hidden></div><div class="rqi" style="margin-top:6px">Emails: forward them to <span class="q">${esc(CFG.mailbox)}</span> with the facility name in the subject. They show up on the facility page under "Mailbox".</div><div id="rq_list" class="meta">${ui.dropped.map(f => esc(f.name)).join(', ')}</div></section>
     <div id="rq_err"></div><div><button class="btn pri" type="submit">Submit request</button></div></form>`;
 }
+// "Some facilities have different areas of care": 1 row per facility line, "Same as above" = the corporate's. Keeps picks by facility name when the lines change.
+const SAME_COV = 'Same as above';
+function redrawCovFac() {
+  const box = document.getElementById('rq_covfac'); if (!box) return;
+  if (!V('rq_covdiff')) { box.innerHTML = ''; return; }
+  const keep = {}; box.querySelectorAll('[data-covrow]').forEach(r => AREAS.forEach((a, j) => { const e = document.getElementById(r.id + '_' + j); if (e) keep[lc(r.dataset.covrow) + '|' + a] = e.value; }));
+  const facs = rqFacs();
+  box.innerHTML = facs.length ? `<div class="covfac">${facs.map((x, i) => `<div class="covrow" id="rq_cf_${i}" data-covrow="${esc(x.name)}"><div class="covname">${esc(x.name)}</div><div class="areas">${AREAS.map((a, j) => fld(a, sel('rq_cf_' + i + '_' + j, [SAME_COV, ...covOpts(a)], keep[lc(x.name) + '|' + a] || SAME_COV, true).replace('<option  value="">Select…</option>', '').replace('<option value="">Select…</option>', ''))).join('')}</div></div>`).join('')}</div>` : '<div class="meta">Add the facilities above first.</div>';
+}
+// facility-only areas of care from the request form, per line (only the ones that differ from "Same as above")
+function readCovFac(i) { const o = {}; if (!V('rq_covdiff')) return o; AREAS.forEach((a, j) => { const v = V('rq_cf_' + i + '_' + j); if (v && v !== SAME_COV) o[a] = v; }); return o; }
 // under the facilities box: which corporates are new to the app (catches typos)
 function corpInfo() {
   const box = $('#rq_corpinfo'); if (!box) return;
@@ -847,7 +858,7 @@ document.addEventListener('input', e => {
   }
   if (e.target.id === 'rq_fac') ui.confirmDup = false;
 });
-document.addEventListener('input', e => { if (e.target.id === 'rq_fac') { corpInfo(); if (PRE_INFO.some(k => V('rq_pre_' + k))) redrawPreInfo('rq_preinfo', 'rq_pi_', rqKeys(), rqFacs()); } });
+document.addEventListener('input', e => { if (e.target.id === 'rq_fac') { corpInfo(); redrawCovFac(); if (PRE_INFO.some(k => V('rq_pre_' + k))) redrawPreInfo('rq_preinfo', 'rq_pi_', rqKeys(), rqFacs()); } });
 // facility page: a step marked done is unticked (it wasn't actually done)
 async function unmarkClick(box, k) {
   const id = ui.openFac, f = facById(id); if (!f) return;
@@ -865,6 +876,7 @@ async function unmarkClick(box, k) {
 document.addEventListener('change', async e => {
   const id = e.target.id;
   if (id === 'rq_files') addFiles(e.target.files);
+  if (id === 'rq_covdiff') redrawCovFac();
   if (id.startsWith('rq_pre_')) setTimeout(() => { const n = document.querySelectorAll('.predone input:checked').length, c = $('#rq_precount'); if (c) c.textContent = n ? n + ' ticked' : ''; });
   // "Already done": later steps imply the earlier ones
   for (const pre of ['rq_pre_', 'fs_pre_']) {

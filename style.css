@@ -155,6 +155,9 @@ h1 .tip{font-size:13px}
 .rqi{font-size:13px;color:var(--muted)}
 .areas{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
 .areas select{width:100%}
+.covfac{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.covrow{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.covname{font-weight:600;margin-bottom:4px}
 @media (max-width:900px){.areas{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .rqd summary{list-style:none;cursor:pointer}
 .rqd summary::-webkit-details-marker{display:none}
