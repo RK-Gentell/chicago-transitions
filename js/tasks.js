@@ -245,6 +245,13 @@ const TT = {
     validate: t => { const f = facById(t.fac); if (!f.dates) return 'No dates yet: fix the address on the facility page first.'; if (!V('ok')) return 'Tick when saved.'; if (emrReady(f) && !V('emrok')) return 'Log into the EMR and tick when the access works.'; if (f.esignGot && !f.esignDone && !V('ps_es')) return 'Providers (eSign): pick where things stand.'; return ''; },
     done: (t, ctx) => { const f = facById(t.fac); if (f.esignGot && !f.esignDone && V('ps_es')) esignAnswer(f, V('ps_es'), ctx ? ctx.byName : ''); G(f).noteDone = true; f.gtc = { wound: '', regional: '' }; gtMark(f, gtRows(f, true)); if (V('emrok')) { f.emrChecked = st.today; f.emrCheckedBy = ctx ? ctx.byName : ''; } else if (!f.emrChecked) f.emrCheckDue = true; }
   },
+  // a change after the Chicago handoff email, when Settings "Don't email transition leads about their own tasks" is ticked (instead of the email)
+  LEAD_NOTE: {
+    title: t => t.subject || ('Changed after the Chicago handoff email: ' + facName(facById(t.fac))),
+    form: t => `<div class="instr">${t.note || ''}</div>${t.corr ? '<div class="note">Clicking "Dates changed: send correction" on the facility page closes this task.</div>' : ''}${chk('ok', 'Taken care of')}`,
+    example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when it\'s taken care of.',
+    done: () => {}
+  },
   EMR_CHECK: {
     title: t => 'Check EMR access: ' + facName(facById(t.fac)),
     form: t => { const f = facById(t.fac), g = G(f); return `<div class="instr">EMR access for this facility is set up now${g.emr ? ' (username <span class="q">' + esc(g.emr) + '</span>, QR code in the "Authenticator" folder)' : ''}. Log into the EMR and check that the access works and that we can see everything we need for this facility.</div><div class="note">Portal setup was done before the EMR access was ready, so this check comes separately.</div>${chk('ok', 'Logged in: the access works and we have everything we need')}`; },

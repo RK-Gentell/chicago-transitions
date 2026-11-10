@@ -280,7 +280,7 @@ function dateWarn(f, dos) {
 function saveDates(f, dos, by) {
   if (f.rec && dos === f.rec.dos) { f.dosChosen = ''; f.dosBy = ''; f.dates = f.rec; }
   else { f.dosChosen = dos; f.dosBy = by; f.dates = Object.assign(derive(f, dos), { why: [...(f.rec ? f.rec.why : []), 'Changed by ' + by + ' from the recommended ' + (f.rec ? fmtS(f.rec.dos) : '')], changed: true }); }
-  if (f.email1) mail({ key: 'm:E13:dates:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, subject: 'Dates changed after the Chicago handoff email: ' + facName(f), body: '<p>' + esc(by) + ' changed the dates after the Chicago handoff email went out. Fix the Ordering Calendar, then click "Dates changed: send correction" on the facility page.</p>', link: 'fac' });
+  if (f.email1) leadNote(f, 'm:E13:dates:' + f.id + ':' + uid(), 'Dates changed after the Chicago handoff email: ' + facName(f), '<p>' + esc(by) + ' changed the dates after the Chicago handoff email went out. Fix the Ordering Calendar, then click "Dates changed: send correction" on the facility page.</p>', true);
 }
 
 // ---------- stage ----------
@@ -385,10 +385,31 @@ function todo(t, subject, line, importance) {
 }
 // follow-ups go out as high importance; everything else normal (the "CT - Send emails" flow reads the Importance column)
 const HIGH_CODES = new Set(['E15', 'E16F', 'E16A', 'E17', 'E31F', 'E31A']);
+// Settings "Don't email transition leads about their own tasks" (leadQuiet): these emails skip the facility's transition lead
+// when it's their own task (or, with no task, their own facility). Kept: "New transition", "You're now the transition lead",
+// "Transition complete", a reminder someone sends by hand, tasks they got on a facility they don't lead, corporate tasks, and every CC.
+const LEAD_QUIET = new Set(['E8', 'E9', 'E10', 'E13', 'E16A', 'E17', 'E18', 'E19', 'E20', 'E23', 'E25', 'E26', 'E31A']);
+function quietLead(m) {
+  if (!st.settings.leadQuiet || !LEAD_QUIET.has(m.code)) return '';
+  if (/^m:E20:lead:/.test(m.key) || /:manual:/.test(m.key)) return '';
+  const t = m.task ? taskByKey(m.task) : null;
+  const f = (t ? t.fac : m.fac) ? facById(t ? t.fac : m.fac) : null; if (!f) return '';
+  const lead = lc(amOf(f));
+  return t && lc(t.assignee) !== lead ? '' : lead;
+}
+// a note to the transition lead that something changed after the Chicago handoff email. With leadQuiet it's a task instead.
+// corr: "Dates changed: send correction" closes the task
+function leadNote(f, key, subject, body, corr) {
+  if (!st.settings.leadQuiet) return mail({ key, code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject, body });
+  const t = newTask('LEAD_NOTE', { fac: f.id, assignee: amOf(f), amTask: true, subject, note: body, corr: !!corr });
+  return t;
+}
 function mail(m) {
   if (st.mails.some(x => x.key === m.key)) return null;
   const clean = a => [...new Set((a || []).filter(Boolean).map(lc))];
-  const toRaw = clean(m.to), ccRaw = clean(m.cc);
+  const quiet = quietLead(m);
+  const toRaw = clean(m.to).filter(e => e !== quiet), ccRaw = clean(m.cc);
+  if (quiet && !toRaw.length) return null;
   const bad = [...toRaw, ...ccRaw].filter(e => !validEmail(e));
   const to = toRaw.filter(validEmail), cc = ccRaw.filter(e => validEmail(e) && !to.includes(e));
   let subject = m.subject;
@@ -418,6 +439,8 @@ function flush() {
   pending = [];
 }
 function mailStillValid(m) {
+  // queued before "Don't email transition leads about their own tasks" was ticked, and only to the lead
+  const quiet = quietLead(m); if (quiet && (m.to || []).every(e => e === quiet)) return false;
   const c = m.cond; if (!c) return true;
   if (c.task) {
     const t = taskByKey(c.task); if (!t || done(t)) return false;
@@ -440,7 +463,7 @@ function mailStillValid(m) {
 }
 
 // ---------- tasks ----------
-const REPEATABLE = new Set(['PRICE', 'RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS', 'PORTAL_UPDATE', 'ESIGN_PORTAL']);
+const REPEATABLE = new Set(['LEAD_NOTE', 'PRICE', 'RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS', 'PORTAL_UPDATE', 'ESIGN_PORTAL']);
 function newTask(type, o) {
   const base = 't:' + type + ':' + (o.fac ? 'f' + o.fac : o.nf ? 'n' + o.nf : 'g' + lc(o.group));
   let key = base;
@@ -612,7 +635,11 @@ function sendEmail1(f, correction) {
   // handed off the old way (1 combined email): a correction is the same combined email
   if (correction && !f.e1Split) { mail({ key, code, to: [...s.e1To, f.rep, ...woundRegEmails(f)], cc: [...s.e1Cc, am, acctOf(f)], fac: f.id, noTag: true, link: 'none', subject: 'CORRECTION: ' + subj, body: '<p><b>Corrected dates below.</b></p>' + email1BodyOld(f) }); return; }
   mail({ key, code, to: [...s.e1To, f.rep, ctlEmail(f)], cc: [...s.e1Cc, am, acctOf(f)], fac: f.id, noTag: true, link: 'none', subject: (correction ? 'CORRECTION: ' : '') + subj, body: (correction ? '<p><b>Corrected dates below.</b></p>' : '') + email1Body(f) });
-  if (correction) { if (f.e1b) sendCtlEmail(f, true); return; }
+  if (correction) {
+    // "Dates changed: send correction" takes care of the "changed after the Chicago handoff email" tasks
+    tasksOf(f).filter(t => t.type === 'LEAD_NOTE' && t.corr && !done(t)).forEach(t => finishTask(t, st.me ? lc(st.me.email) : '', st.me ? st.me.name : ''));
+    if (f.e1b) sendCtlEmail(f, true); return;
+  }
   f.email1 = st.today; f.e1Split = true;
   // the email to the Gentell WC Transition Lead goes out from run() as soon as there is one (right away when there already is)
 }
@@ -888,7 +915,7 @@ function setCtl(f, c, byName) {
   if (!(f.e1b && !f.email2)) return;
   if (old && !f.e1bCtl) { f.e1bCtl = lc(old.email); f.e1bCtlName = old.name; } // their email went out before the app kept who got it
   if (old && now && now.email !== lc(old.email)) {
-    mail({ key: 'm:E13:ctl:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Gentell WC Transition Lead changed: ' + facName(f), body: '<p>' + esc(byName) + ' changed the Gentell WC Transition Lead from ' + esc(oldLabel) + ' to ' + esc(c.useRegional ? now.name + ' (the regional)' : now.name) + '. The email asking them to send the facility the transfer email went to ' + esc(f.e1bCtlName || old.name) + ' on ' + fmt(f.e1b) + '. Forward it to ' + esc(now.name) + ' if they need it.</p>' });
+    leadNote(f, 'm:E13:ctl:' + f.id + ':' + uid(), 'Gentell WC Transition Lead changed: ' + facName(f), '<p>' + esc(byName) + ' changed the Gentell WC Transition Lead from ' + esc(oldLabel) + ' to ' + esc(c.useRegional ? now.name + ' (the regional)' : now.name) + '. The email asking them to send the facility the transfer email went to ' + esc(f.e1bCtlName || old.name) + ' on ' + fmt(f.e1b) + '. Forward it to ' + esc(now.name) + ' if they need it.</p>');
     f.e1bCtlWho = now.email; // ctlRegCheck: this change was already told
   }
 }
@@ -900,7 +927,7 @@ function ctlRegCheck(f) {
   const told = f.e1bCtlWho || f.e1bCtl;
   if (!told) { f.e1bCtlWho = now.email; return; }
   if (told === now.email) return;
-  mail({ key: 'm:E13:ctlreg:' + f.id + ':' + hash(told + '>' + now.email), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Gentell WC Transition Lead changed: ' + facName(f), body: '<p>The regional for <b>' + esc(facName(f)) + '</b> is now ' + esc(now.name) + '. This facility uses the regional as the Gentell WC Transition Lead, so ' + esc(now.name) + ' is the WC lead now. The email asking them to send the facility the transfer email went to ' + esc(f.e1bCtlName || f.e1bCtl) + ' on ' + fmt(f.e1b) + '. Forward it to ' + esc(now.name) + ' if they need it.</p>' });
+  leadNote(f, 'm:E13:ctlreg:' + f.id + ':' + hash(told + '>' + now.email), 'Gentell WC Transition Lead changed: ' + facName(f), '<p>The regional for <b>' + esc(facName(f)) + '</b> is now ' + esc(now.name) + '. This facility uses the regional as the Gentell WC Transition Lead, so ' + esc(now.name) + ' is the WC lead now. The email asking them to send the facility the transfer email went to ' + esc(f.e1bCtlName || f.e1bCtl) + ' on ' + fmt(f.e1b) + '. Forward it to ' + esc(now.name) + ' if they need it.</p>');
   f.e1bCtlWho = now.email;
 }
 function applyRule(f, g) {
@@ -1647,7 +1674,7 @@ function editFacility(f, v, by, byName) {
   // what changes, and what each change sets off
   if (v.addr) { v.addr = normAddr(v.addr); }
   const state = v.addr ? stateFrom(v.addr) : f.state, oldState = f.state;
-  if (f.email1 && v.addr && state !== oldState) mail({ key: 'm:E13:state:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: 'Address changed after the Chicago handoff email: ' + facName(f), body: '<p>' + esc(byName) + ' changed the state from ' + esc(oldState || '(none)') + ' to ' + esc(state) + '. The dates didn\'t change. Check the ship point and delivery date, and send Chicago a correction if they\'re wrong.</p>' });
+  if (f.email1 && v.addr && state !== oldState) leadNote(f, 'm:E13:state:' + f.id + ':' + uid(), 'Address changed after the Chicago handoff email: ' + facName(f), '<p>' + esc(byName) + ' changed the state from ' + esc(oldState || '(none)') + ' to ' + esc(state) + '. The dates didn\'t change. Check the ship point and delivery date, and send Chicago a correction if they\'re wrong.</p>', true);
   const oldC = repLine(f), repWas = f.rep;
   const oldAm = amOf(f), closed = [], wrWas = JSON.stringify([f.wound || null, f.regional || null]);
   // a portal name typed in for the first time means it's in Brightree: Amy's "Add to Brightree" task isn't needed
@@ -1657,7 +1684,7 @@ function editFacility(f, v, by, byName) {
   if (v.rep) f.rep = v.rep; if (v.clin) f.clin = v.clin; if (v.acct) f.acct = v.acct; if (v.am) f.am = v.am;
   // the rep named on the handoff email / transfer notice changed (a new intake rep, or the account manager changed to or from David)
   const newC = repLine(f);
-  if (f.email1 && lc(newC.email) !== lc(oldC.email)) mail({ key: 'm:E13:rep:' + f.id + ':' + uid(), code: 'E13', to: [amOf(f)], fac: f.id, link: 'fac', subject: (f.rep !== repWas ? 'Intake rep' : 'Rep on the facility email') + ' changed after the Chicago handoff email: ' + facName(f), body: '<p>' + esc(byName) + ' changed ' + (f.rep !== repWas ? 'the intake rep from ' + esc(nameOf(repWas)) + ' to ' + esc(nameOf(f.rep)) : 'the account manager to ' + esc(nameOf(f.acct))) + '. The Chicago handoff email (and the transfer notice to the facility) named ' + esc(oldC.name) + '; it should now be ' + esc(newC.name) + '. Click "Dates changed: send correction" on the facility page to send Chicago the corrected email, or let the facility know yourself.</p>' });
+  if (f.email1 && lc(newC.email) !== lc(oldC.email)) leadNote(f, 'm:E13:rep:' + f.id + ':' + uid(), (f.rep !== repWas ? 'Intake rep' : 'Rep on the facility email') + ' changed after the Chicago handoff email: ' + facName(f), '<p>' + esc(byName) + ' changed ' + (f.rep !== repWas ? 'the intake rep from ' + esc(nameOf(repWas)) + ' to ' + esc(nameOf(f.rep)) : 'the account manager to ' + esc(nameOf(f.acct))) + '. The Chicago handoff email (and the transfer notice to the facility) named ' + esc(oldC.name) + '; it should now be ' + esc(newC.name) + '. Click "Dates changed: send correction" on the facility page to send Chicago the corrected email, or let the facility know yourself.</p>', true);
   if (v.none) { if (!G(f).standalone) makeStandalone(f); } else if (v.grp && lc(v.grp) !== lc(f.group) && grp(v.grp)) { f.group = grp(v.grp).name; settleFacCov(f); }
   if (v.wound) f.wound = v.wound; if (v.regional) f.regional = v.regional;
   // a new Gentell WC Transition Lead after their email went out (and the facility email hasn't): the new one never got it
