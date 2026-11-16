@@ -750,12 +750,15 @@ function setManualDates(f, i, byName) {
   f.dates = manualDatesObj(f); f.rec = null;
 }
 function markE3Done(f, by, day) { if (f.e3Done) return; f.e3Done = day || st.today; f.e3DoneBy = by; }
+// the reply that came into the mailbox also went to the transition lead (they were CC'd on our email and the sender hit reply-all):
+// they already have it, so the app doesn't send its own "To do" email about it (Nov 16 2026). The task is still made.
+const leadOnReply = (f, m) => [...(m.to || []), ...(m.cc || [])].map(lc).includes(lc(amOf(f)));
 // someone replied to Email 3: stop the follow-ups, AM puts in what they sent
 const e3Who = (f, from) => { const x = [f.wound, f.regional].find(p => p && lc(p.email) === lc(from)); return x ? x.name : (nameOf(from) || from); };
 function gotE3Reply(f, m) {
   f.e3Reply = { from: m.from, at: (m.received || '').slice(0, 10) || st.today, inbox: m._id || '' };
   const t = newTask('E3_REPLY', { fac: f.id, assignee: amOf(f), amTask: true, reply: f.e3Reply });
-  todo(t, 'reply to the contacts request for ' + facName(f), esc(e3Who(f, m.from)) + ' replied to the contacts request for <b>' + esc(facName(f)) + '</b>. Put in the info they sent.');
+  if (!leadOnReply(f, m)) todo(t, 'reply to the contacts request for ' + facName(f), esc(e3Who(f, m.from)) + ' replied to the contacts request for <b>' + esc(facName(f)) + '</b>. Put in the info they sent.');
 }
 // ---------- provider + eSign info (Oct 28 2026) ----------
 // 1 email per facility to Anthony Price (Settings "Provider and eSign info"), CC the transition lead, the moment the request is saved
@@ -800,7 +803,7 @@ function chaseEsign(f) {
 function markEsignGot(f, by, day) { if (f.esignGot) return; f.esignGot = day || st.today; f.esignBy = by || ''; }
 function markEsignDone(f, by) { if (f.esignDone) return; markEsignGot(f, by); f.esignDone = st.today; f.esignDoneBy = by || ''; }
 function gotEsignReply(f, m) {
-  const r = { from: m.from, at: (m.received || '').slice(0, 10) || st.today, inbox: m._id || '', preview: (m.preview || '').slice(0, 1000) };
+  const r = { from: m.from, at: (m.received || '').slice(0, 10) || st.today, inbox: m._id || '', preview: (m.preview || '').slice(0, 1000), lead: leadOnReply(f, m) ? lc(amOf(f)) : '' };
   f.esignReplies = [...(f.esignReplies || []), r];
   markEsignGot(f, m.from, r.at);
 }
@@ -1155,7 +1158,8 @@ function run() {
     // it came in after the portal setup was done: its own task (before that, it's on the portal setup task)
     if (f.esignGot && !f.esignDone && esPsDone(f) && !tasksOf(f, 'ESIGN_PORTAL').some(t => !done(t))) {
       const t = newTask('ESIGN_PORTAL', { fac: f.id, assignee: am, amTask: true });
-      todo(t, 'add the eSign providers for ' + facName(f), 'The provider and eSign info for <b>' + esc(facName(f)) + '</b> came in. Add the providers to the portal.');
+      // the lead was on Anthony's reply (reply-all): no second email about it
+      if (!esReplies(f).some(r => r.lead && r.lead === lc(am))) todo(t, 'add the eSign providers for ' + facName(f), 'The provider and eSign info for <b>' + esc(facName(f)) + '</b> came in. Add the providers to the portal.');
     }
 
     // corporate not known yet: Malka picks reps per facility; corporate asks wait for the FastCare task

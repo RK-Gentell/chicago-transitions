@@ -248,3 +248,7 @@ Waiting tasks (`isWaiting`: `opensOn` after today) are left out of "My tasks", "
 ## New facilities: amount of enteral patients (Nov 13 2026)
 - `n.entPts` = "Amount of enteral patients" (number; missing or '' = not entered, so older facilities show "Not entered"). Optional, whole number 0 or more (text box, checked in `nfProblem`, so "3.5" / "abc" get a message instead of being dropped). `nfEnt` / `nfEntVal` / `nfEntTxt`.
 - On the request (Facility section, next to "Enteral ships"), Edit details (once entered it can't be cleared, only changed), the new facility page, the `NF_SCHEDULE` task, the CSV, and bulk column "Amount of enteral patients" (blank OK). Not on any email.
+
+## No second email about a reply the lead already has (Nov 16 2026)
+- Anthony's eSign reply and the wound rep / regional's contacts reply go to the mailbox with the transition lead on them (they're CC'd on our email and reply-all). The app no longer sends its own "To do" (E13) email about that reply when the lead is in the reply's To or CC (`leadOnReply`). The task (`ESIGN_PORTAL`, `E3_REPLY`) is still made and shows in My tasks.
+- Lead not on the reply (sender replied only to the mailbox) → the "To do" email goes as before. eSign: `f.esignReplies[].lead` = the lead's email when they were on it; the `ESIGN_PORTAL` email is skipped when a reply in the current round had the current lead on it.
