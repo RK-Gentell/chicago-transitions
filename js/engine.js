@@ -635,7 +635,7 @@ function sendEmail1(f, correction) {
   const am = amOf(f), s = st.settings, subj = bothNames(f) + '- Transfer from GNS Chicago to Lakewood';
   const key = 'm:' + (correction ? 'E22' : 'E14') + ':' + f.id + (correction ? ':' + uid() : ''), code = correction ? 'E22' : 'E14';
   // handed off the old way (1 combined email): a correction is the same combined email
-  if (correction && !f.e1Split) { mail({ key, code, to: [...s.e1To, f.rep, ...woundRegEmails(f)], cc: [...s.e1Cc, am, acctOf(f)], fac: f.id, noTag: true, link: 'none', subject: 'CORRECTION: ' + subj, body: '<p><b>Corrected dates below.</b></p>' + email1BodyOld(f) }); return; }
+  if (correction && !f.e1Split && !f.notice) { mail({ key, code, to: [...s.e1To, f.rep, ...woundRegEmails(f)], cc: [...s.e1Cc, am, acctOf(f)], fac: f.id, noTag: true, link: 'none', subject: 'CORRECTION: ' + subj, body: '<p><b>Corrected dates below.</b></p>' + email1BodyOld(f) }); return; }
   mail({ key, code, to: [...s.e1To, f.rep, ctlEmail(f)], cc: [...s.e1Cc, am, acctOf(f)], fac: f.id, noTag: true, link: 'none', subject: (correction ? 'CORRECTION: ' : '') + subj, body: (correction ? '<p><b>Corrected dates below.</b></p>' : '') + email1Body(f) });
   if (correction) {
     // "Dates changed: send correction" takes care of the "changed after the Chicago handoff email" tasks
@@ -664,7 +664,11 @@ function sendCtlEmail(f, correction) {
 // and the Settings "Transfer notice to the facility" lists (the old e1bTo / e1bCc).
 const NOTICE_SUBJECT = f => facName(f) + ' - Transfer from GNS Chicago to Lakewood';
 const noticeContactsIn = f => !e3Pending(f) && (!f.email3 || !!f.e3Done);
-const noticeReady = f => !!(f.email1 && f.e1Split && !f.email2 && !f.complete && !f.hold && !f.deleted && f.dates);
+// Nov 17 2026, later: also facilities handed off before Oct 26 (no e1Split, GNS Chicago was asked): their "Chicago hasn't sent" task becomes this one, right away
+const noticeReady = f => !!(f.email1 && !f.email2 && !f.complete && !f.hold && !f.deleted && f.dates);
+const noticeWaitsContacts = f => f.e1Split && !noticeContactsIn(f);
+// who was asked to send it before the app did (gets a note when it goes out): 'ctl' (Email 1b), 'chicago' (old 1-email handoff the app sent), ''
+const noticeAsked = f => f.e1b ? 'ctl' : !f.e1Split && (handoffMail(f) || !preDone(f, 'e1')) ? 'chicago' : '';
 const noticeCc = f => [...new Set([ctlEmail(f), f.regional && f.regional.email, f.wound && f.wound.email, amOf(f), contactEmail(f), acctOf(f), ...(st.settings.e1bTo || []), ...(st.settings.e1bCc || [])].filter(Boolean).map(lc))];
 // names for the CC line on the task (people outside the Team list come from FastCare / the WC lead box)
 const noticeCcName = (f, e) => { const x = [ctlOf(f), f.regional, f.wound].find(p => p && lc(p.email) === e); return nameOf(e) !== e && nameOf(e) ? nameOf(e) : x ? x.name : e; };
@@ -706,7 +710,12 @@ function sendNotice(f, to, byName, body) {
   if (f.e1b) {
     const who = [...new Set([f.e1bCtl, ctlEmail(f)].filter(Boolean).map(lc))];
     if (who.length) mail({ key: 'm:E35:' + f.id, code: 'E35', to: who, cc: [amOf(f)], fac: f.id, noTag: true, link: 'none', subject: 'RE: ' + ctlSubject(f), body: `<p>Hi ${esc(first(f.e1bCtlName || (ctlOf(f) || {}).name || ''))},</p><p>The transfer notice for <b>${esc(facName(f))}</b> went out from the transitions mailbox today. No need to send it.</p><p>Thank you!<br>${esc(nameOf(amOf(f)))}</p>` });
+  } else if (noticeAsked(f) === 'chicago') {
+    // handed off before Oct 26 2026: GNS Chicago was asked (in the handoff email) to send it. Same people the handoff went to.
+    mail({ key: 'm:E35:' + f.id, code: 'E35', to: st.settings.e1To || [], cc: [amOf(f)], fac: f.id, noTag: true, link: 'none', subject: 'RE: ' + bothNames(f) + '- Transfer from GNS Chicago to Lakewood',
+      body: `<p>Hi ${esc(chiGreet(f))},</p><p>The transfer notice for <b>${esc(facName(f))}</b> went out from the transitions mailbox today. No need to send it.</p><p>Thank you!<br>${esc(nameOf(amOf(f)))}</p>` });
   }
+
 }
 // "Dates changed: send correction": the same people get a corrected transfer notice
 function sendNoticeCorrection(f) {
@@ -1322,7 +1331,7 @@ function run() {
     else if (f.email1 && f.e1Split && f.email3 && !inserviceDone(f) && fcIn && woundRegEmails(f).length) sendInservice(f);
     // since Nov 17 2026 the app sends the transfer notice itself (no more email asking the Gentell WC Transition Lead to send it):
     // the transition lead gets a task once the handoff email went and the contacts are in
-    if (noticeReady(f) && noticeContactsIn(f) && !tasksOf(f, 'FAC_NOTICE').some(t => !done(t) || t.status === 'Done')) {
+    if (noticeReady(f) && !noticeWaitsContacts(f) && !tasksOf(f, 'FAC_NOTICE').some(t => !done(t) || t.status === 'Done')) {
       const t = newTask('FAC_NOTICE', { fac: f.id, assignee: am, amTask: true });
       todo(t, 'send the transfer notice to ' + facName(f), 'Send <b>' + esc(facName(f)) + '</b> the transfer notice: paste the contacts from the portal, remove anyone who shouldn\'t get it, and click "Send transfer notice".');
     }
@@ -1337,7 +1346,7 @@ function run() {
     chaseEmail3(f);
     // after Email 2: the follow-up on Chicago isn't needed
     // the app sends the transfer notice now, so nobody chases the WC lead for it (Nov 17 2026)
-    if (f.email2 || f.e1Split) { const cf = fTask(f, 'CHICAGO_FOLLOW'); if (cf && !done(cf)) { cf.status = 'Not needed'; cf.doneOn = st.today; } }
+    if (f.email2 || f.email1) { const cf = fTask(f, 'CHICAGO_FOLLOW'); if (cf && !done(cf)) { cf.status = 'Not needed'; cf.doneOn = st.today; } }
     if (f.email2 || f.complete) tasksOf(f, 'FAC_NOTICE').forEach(t => { if (!done(t)) { t.status = 'Not needed'; t.doneOn = st.today; } });
     // at risk: ordering date within 3 business days and Email 1 not out
     if (f.dates && !f.email1 && f.riskFor !== f.dates.ord) {
@@ -1658,8 +1667,7 @@ function unmarkStep(f, k, by, byName) {
       break;
     case 'e2': {
       was.email2By = f.email2By; f.email2 = ''; f.email2By = '';
-      // the transfer notice was already asked for (or the old way, Chicago sends it): the lead follows up. Otherwise the email to the WC lead goes out first.
-      if (!reopened.length && !fTask(f, 'CHICAGO_FOLLOW') && f.email1 && !f.e1Split) { const t = newTask('CHICAGO_FOLLOW', { fac: f.id, assignee: amOf(f), amTask: true }); todo(t, 'check the transfer notice for ' + facName(f), 'GNS Chicago hasn\'t sent <b>' + esc(facName(f)) + '</b> the transfer notice yet. Reach out to ' + esc(facEmailWho(f)) + '.'); }
+      // run() makes the "Send the transfer notice" task again (Nov 17 2026)
       break; }
   }
   // completion is checked again on the next run (the "Transition complete" email isn't sent twice)

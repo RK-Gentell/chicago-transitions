@@ -261,3 +261,9 @@ Waiting tasks (`isWaiting`: `opensOn` after today) are left out of "My tasks", "
 - "Dates changed: send correction" also sends E34 "CORRECTION: …" to `f.notice.to` in the standard wording (edits aren't carried over; the confirm says so).
 - Older e3v2 facilities whose in-service ask was going on Email 1b get E27 `sendInservice` instead.
 - Facility page: "Transfer notice already sent" (was "Chicago sent the transfer notice") on `e1Split` facilities; the notice's recipients show under "Transfer notice to facility".
+
+## Transfer notice: always sent from the app (Nov 17 2026, later)
+- Raizy: the transfer notice is always sent through the app by the transition team. Facilities handed off before Oct 26 (no `e1Split`, GNS Chicago was asked in the handoff email) now get the `FAC_NOTICE` task too, right away (`noticeWaitsContacts` only holds `e1Split` facilities for the contacts). Every open CHICAGO_FOLLOW closes once the handoff went (`f.email1`); unticking "Transfer notice sent" no longer makes one (run() makes `FAC_NOTICE`).
+- `noticeAsked(f)`: 'ctl' (Email 1b went) or 'chicago' (old handoff, not marked done by hand). On send: E35 "went out today, no need to send it" to the WC lead (as before) or to Settings `e1To` with the `chiGreet` greeting, subject "RE: <bothNames>- Transfer from GNS Chicago to Lakewood", CC the lead. The task shows who was asked.
+- A correction on an old facility after the app sent the notice uses the new handoff body (no "please send the below"), plus the corrected notice.
+- Facility page button is "Transfer notice already sent" on every facility (marks it sent; the send task closes).
