@@ -328,7 +328,7 @@ NO_REOPEN.add('NF_REPS');
 // ---------- clicks, typing, forms ----------
 document.addEventListener('click', async e => {
   const T = e.target;
-  const row = T.closest('[data-nf]'); if (row) { ui.openNf = +row.dataset.nf; ui.openTask = ui.openFac = ui.openGroup = ui.next = null; renderLayer(); nfPreview('nfe_', ui.openNf); return; }
+  const row = T.closest('[data-nf]'); if (row) { ui.openNf = +row.dataset.nf; ui.openWork = ui.openTask = ui.openFac = ui.openGroup = ui.next = null; renderLayer(); nfPreview('nfe_', ui.openNf); return; }
   const fl = T.closest('[data-nffilter]'); if (fl) { ui.nfFilter = fl.dataset.nffilter; render(); return; }
   if (T.id === 'nfcsv') { nfCsv(); return; }
   const sd = T.closest('[data-nfsavedates]'); if (sd) { const id = +sd.dataset.nfsavedates, dos = V('nde_dos'); if (!dos) return; await act(() => { const n = nfById(id); if (!n || n.scheduled) return false; nfSaveDates(n, dos, meName()); }, 'Dates saved'); return; }

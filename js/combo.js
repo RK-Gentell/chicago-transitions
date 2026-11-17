@@ -16,6 +16,7 @@
   const blankOf = sel => [...sel.options].find(o => o.value === '');
 
   function enhance(sel) {
+    if (!sel.parentNode || !sel.isConnected) return; // already replaced by a newer screen before we got to it
     if (sel.dataset.combo || sel.multiple || sel.closest('.combo')) return;
     const real = [...sel.options].filter(o => o.value !== '');
     if (real.length < MIN) return;

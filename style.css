@@ -318,3 +318,91 @@ select:disabled,.combo-in:disabled{background:var(--soft);color:var(--muted);cur
 .mailprev[contenteditable=true]{cursor:text}.mailprev[contenteditable=true]:focus{border-color:var(--accent);outline:none}
 .mailprev{border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-top:6px;background:var(--panel);font-family:Calibri,Arial,sans-serif}
 @media (max-width:480px){.ntc{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"n x" "d x" "e e"}}
+
+/* ---------- My work screen (Nov 17 2026, js/work.js) ---------- */
+.p-wwait{background:#F1E8FB;color:#6B3FA0} .p-wother{background:var(--soft);color:var(--muted)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .p-wwait{background:#2C2142;color:#C4A3EE}}
+:root[data-theme="dark"] .p-wwait{background:#2C2142;color:#C4A3EE}
+.wsec{margin-bottom:22px}
+.wsech{display:flex;align-items:center;gap:10px;background:#003171;color:#fff;border-radius:10px 10px 0 0;padding:9px 14px;font-weight:500}
+.wsech .wn{background:#fff;color:#003171;border-radius:4px;padding:0 6px;font:700 11px/18px var(--num)}
+.wsech .info{color:rgba(255,255,255,.85)}
+.wsecb{background:var(--pane);border:1px solid var(--line);border-top:0;border-radius:0 0 10px 10px;padding:12px;display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));align-items:stretch}
+.wempty{color:var(--muted);padding:6px 2px}
+.wcard{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:12px 14px;display:flex;flex-direction:column;gap:8px;cursor:pointer;min-width:0;min-height:300px}
+.wcard:hover{border-color:var(--accent)}
+.wcard.sel{outline:2px solid var(--accent)}
+.wcard h3,.wqcard h3{margin:0;font-size:14.5px;font-weight:500}
+.wsub{color:var(--muted);font-size:12px}
+.wstep{display:flex;align-items:center;gap:8px;justify-content:space-between;border:1px solid var(--line2);border-radius:6px;padding:5px 6px 5px 9px;min-width:0;font-size:13px}
+.wstep .nm{flex:none;white-space:nowrap}
+.wstep .pill{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.wstep.ready{border-color:var(--muted)}
+.wstep.late{border-color:var(--bad);background:var(--bad-soft)}
+.wmore-row{color:var(--muted);font-size:12px;padding-left:2px}
+.wbot{margin-top:auto;display:flex;flex-direction:column;gap:8px}
+.wfoot{display:flex;flex-wrap:wrap;gap:12px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:8px;align-items:center}
+.wfoot b{color:var(--ink);font-family:var(--num);font-weight:600}
+.wlate{color:var(--bad);font-weight:600;font-size:12px}
+.wdone{position:relative;display:flex}
+.wdonebtn{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line2);background:var(--panel);color:var(--muted);border-radius:6px;padding:3px 8px;font-size:12px}
+.wdonebtn:hover{background:var(--soft)}
+.wdonepop{position:absolute;bottom:calc(100% + 4px);left:0;right:0;z-index:3;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(9,36,75,.18);padding:8px;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .2s,visibility .2s}
+.wdonepop .in{display:flex;flex-wrap:wrap;gap:4px;transform:translateY(6px);transition:transform .2s}
+.wdone:hover .wdonepop,.wdone:has(.wdonebtn:focus-visible) .wdonepop{opacity:1;visibility:visible}
+.wdone:hover .wdonepop .in,.wdone:has(.wdonebtn:focus-visible) .wdonepop .in{transform:none}
+.wpanel{background:var(--pane)}
+.wptitle{display:flex;justify-content:space-between;font:700 10.5px/1.4 var(--num);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.wbox{background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--shadow)}
+.wbox.late{border-color:var(--bad)}
+.wbox.closed{flex-direction:row;justify-content:space-between;align-items:center;text-align:left;cursor:pointer;font:inherit;color:inherit}
+.wbox.closed:hover{border-color:var(--accent)}
+.wbox .tt,.wbh .tt{font-weight:500;font-size:14px}
+.wbh{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.wbmeta{color:var(--muted);font-size:12px;margin-top:-6px}
+.wnew{font:700 10px/1.4 var(--num);letter-spacing:.04em;text-transform:uppercase;color:#fff;background:var(--accent);border-radius:4px;padding:2px 6px;white-space:nowrap}
+.wmore summary{cursor:pointer;color:var(--muted);font-size:12px}
+.wmore[open] summary{margin-bottom:8px}
+.wmore>div{margin-top:6px}
+.wquiet{border:1px dashed var(--line2);border-radius:10px;padding:12px 14px;background:var(--panel)}
+.wsect{background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.wsect summary{padding:10px 14px;cursor:pointer;font-weight:500;list-style:none;display:flex;justify-content:space-between}
+.wsect summary::-webkit-details-marker{display:none}
+.wsect summary::after{content:"+";color:var(--muted)}
+.wsect[open] summary::after{content:"–"}
+.wsect .in{padding:0 14px 12px}
+.wtl{display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:10px;align-items:start;padding:5px 0;font-size:13px}
+.wtl .d{width:10px;height:10px;border-radius:50%;border:2px solid var(--line2);margin-top:4px}
+.wtl .d.done{background:var(--ok);border-color:var(--ok)} .wtl .d.ready{background:var(--warn);border-color:var(--warn)} .wtl .d.wait{border-color:#6B3FA0} .wtl .d.other{border-color:var(--muted)}
+.wmail{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:6px 0;font-size:13px}
+.wmail>span:last-child{color:var(--muted);white-space:nowrap}
+.wqcard{background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-width:0;transition:opacity .3s,transform .3s,border-color .2s}
+.wqcard.saved{border-color:var(--ok)}
+.wqcard.leaving{opacity:0;transform:scale(.97)}
+.wqh{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.wage{font-size:11.5px;color:var(--muted);white-space:nowrap}
+.wage.old{color:var(--bad);font-weight:600}
+.wqact{border-top:1px solid var(--line);padding-top:10px;margin-top:auto;display:flex;flex-direction:column;gap:8px}
+.wbig input{width:18px;height:18px;accent-color:var(--ok)}
+.wyn{display:inline-flex;align-self:flex-start;border:1px solid var(--line2);border-radius:6px;overflow:hidden}
+.wyn button{border:0;background:var(--panel);padding:6px 0;width:64px;font-weight:500}
+.wyn button+button{border-left:1px solid var(--line2)}
+.wyn button.on,.wyn button.on:disabled{background:var(--accent);color:var(--accent-ink);opacity:1}
+.wdonetoday{margin-top:8px}
+.wdonetoday .row1{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-top:6px;flex-wrap:wrap}
+.wdonetoday .row1.flash{border-color:var(--ok);background:var(--ok-soft)}
+/* first-time tour / What's new */
+.tour-dim{position:fixed;inset:0;background:rgba(13,19,27,.45);z-index:80}
+.tour-spot{position:fixed;z-index:81;border-radius:8px;box-shadow:0 0 0 9999px rgba(13,19,27,.45),0 0 0 3px #fff;pointer-events:none}
+.touring .drawer{animation:none!important}
+.tour-tip{position:fixed;z-index:82;width:min(300px,calc(100% - 32px));background:var(--panel);color:var(--ink);border-radius:10px;box-shadow:0 10px 30px rgba(13,19,27,.3);padding:14px 16px;display:grid;gap:10px}
+.tour-tip.center{left:50%;top:50%;transform:translate(-50%,-50%);width:min(340px,calc(100% - 32px));text-align:center;padding:22px}
+.tour-tip h4{margin:0;font-size:15px;font-weight:500}
+.tour-tip p{margin:0;color:var(--muted)}
+.tour-nav{display:flex;align-items:center;gap:8px;justify-content:space-between}
+.tour-tip.center .tour-nav{justify-content:center}
+.tour-step{color:var(--muted);font-size:12px}
+.tour-skip{border:0;background:none;color:var(--muted);padding:4px}
+.newsdate{font:700 10.5px/1.4 var(--num);letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+@media (max-width:760px){.wsecb{grid-template-columns:minmax(0,1fr)}.wcard{min-height:0}}
+.wpanel header .linkish{border:0;background:none;padding:0;font-size:13px}

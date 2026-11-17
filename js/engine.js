@@ -1461,7 +1461,8 @@ function canReopen(t) {
   const f = t.fac ? facById(t.fac) : null;
   return !(f && (f.deleted || f.archived));
 }
-function reopenTask(t, to, by, byName, force) {
+// quiet: the person undoing their own answer (My work "Undo") doesn't get a "Back in your queue" email about it
+function reopenTask(t, to, by, byName, force, quiet) {
   if (force ? !(t && done(t)) : !canReopen(t)) return 'This task can\'t be put back.';
   (t.history = t.history || []).push({ doneBy: t.doneBy, doneByName: t.doneByName, doneOn: t.doneOn, reopenedBy: by, reopenedByName: byName, reopenedOn: st.today });
   t.status = 'Open'; t.doneBy = ''; t.doneByName = ''; t.doneOn = ''; t.reopened = st.today;
@@ -1471,7 +1472,7 @@ function reopenTask(t, to, by, byName, force) {
   if (t.type === 'PUMPS') { const f = facById(t.fac); if (f && f.pumps === 'checked') f.pumps = ''; }
   // portal setup done again covers every field, so any open "Update the portal" task isn't needed; the snapshot is retaken when it's done
   if (t.type === 'PORTAL_SETUP') { const f = facById(t.fac); if (f) { delete f.portalSnap; tasksOf(f, 'PORTAL_UPDATE').forEach(x => { if (!done(x)) { x.status = 'Not needed'; x.doneOn = st.today; } }); } }
-  mail({ key: 'm:E26:' + t.key + ':' + uid(), code: 'E26', to: [t.assignee], fac: t.fac, task: t.key, cond: { task: t.key },
+  if (!(quiet && by === t.assignee)) mail({ key: 'm:E26:' + t.key + ':' + uid(), code: 'E26', to: [t.assignee], fac: t.fac, task: t.key, cond: { task: t.key },
     subject: 'Back in your queue: ' + taskTitle(t), body: `<p>${esc(byName)} put this task back in the queue. It still needs to be done. Due ${fmt(t.due)}.</p>` });
   return '';
 }
