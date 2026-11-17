@@ -307,3 +307,14 @@ select:disabled,.combo-in:disabled{background:var(--soft);color:var(--muted);cur
 /* bulk upload preview */
 .card.bulkbad{border-color:var(--bad, #b42318);box-shadow:0 0 0 1px var(--bad, #b42318) inset}
 .errtxt{color:var(--bad, #b42318)}
+/* transfer notice task: 1 clean box per contact, columns lined up, ✕ on the right (Nov 17 2026) */
+.ntlist{display:flex;flex-direction:column;gap:8px}
+.ntc{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;grid-template-areas:"n e x" "d e x";gap:2px 14px;align-items:center;padding:12px 14px;border:1px solid var(--line2);border-radius:8px;background:var(--panel);box-shadow:var(--shadow)}
+.ntc-n{grid-area:n;font-weight:600}.ntc-d{grid-area:d;color:var(--muted);font-size:12.5px}.ntc-e{grid-area:e;overflow-wrap:anywhere}
+.ntc .ntx,.ntc .ntb{grid-area:x;justify-self:end}
+.ntx{width:34px;height:34px;border-radius:8px;border:1px solid var(--line2);background:transparent;color:var(--bad);font-size:15px;line-height:1}
+.ntx:hover{background:var(--bad-soft);border-color:var(--bad)}
+.ntc.off{background:var(--soft);box-shadow:none}.ntc.off .ntc-n,.ntc.off .ntc-e{color:var(--muted);text-decoration:line-through}
+.mailprev[contenteditable=true]{cursor:text}.mailprev[contenteditable=true]:focus{border-color:var(--accent);outline:none}
+.mailprev{border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-top:6px;background:var(--panel);font-family:Calibri,Arial,sans-serif}
+@media (max-width:480px){.ntc{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"n x" "d x" "e e"}}

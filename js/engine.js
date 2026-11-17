@@ -360,7 +360,7 @@ const note = s => '<p style="color:#6B6F75;font-size:9.5pt;margin:-4px 0 10px">'
 // one line per task in emails that cover several: facility name + its own buttons
 const taskList = (items, answers) => '<ul>' + items.map(([label, key]) => '<li style="margin:4px 0">' + label + ' &nbsp; ' + (answers || []).map(a => `<a href="${esc(taskUrl(key, a))}">${esc(a)}</a> &middot; `).join('') + `<a href="${esc(taskUrl(key))}">Open the task</a></li>`).join('') + '</ul>';
 // emails that only inform: they get a line at the bottom saying no action is needed
-const FYI_CODES = new Set(['E1', 'E11', 'E19', 'E23', 'E24', 'E25']);
+const FYI_CODES = new Set(['E1', 'E11', 'E19', 'E23', 'E24', 'E25', 'E35']);
 // said in the pumps email and task: from now on, every pump sent to the facility goes into the portal
 const PUMP_RULE = 'Once the pumps are in the portal, any pumps sent to this facility in the future must also be entered in the portal.';
 const PUMP_RULE_MANY = 'Once the pumps are in the portal, any pumps sent to these facilities in the future must also be entered in the portal.';
@@ -442,6 +442,7 @@ function mailStillValid(m) {
   // queued before "Don't email transition leads about their own tasks" was ticked, and only to the lead
   const quiet = quietLead(m); if (quiet && (m.to || []).every(e => e === quiet)) return false;
   if (m.code === 'E33' && !st.settings.leadQuiet) return false; // the 3 PM list stops when the box is unticked
+  if (m.code === 'E15') return false; // "has the facility email gone out?" to the WC lead: the app sends it now (Nov 17 2026)
   const c = m.cond; if (!c) return true;
   if (c.task) {
     const t = taskByKey(c.task); if (!t || done(t)) return false;
@@ -464,7 +465,7 @@ function mailStillValid(m) {
 }
 
 // ---------- tasks ----------
-const REPEATABLE = new Set(['LEAD_NOTE', 'PRICE', 'RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS', 'PORTAL_UPDATE', 'ESIGN_PORTAL']);
+const REPEATABLE = new Set(['LEAD_NOTE', 'PRICE', 'RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS', 'PORTAL_UPDATE', 'ESIGN_PORTAL', 'FAC_NOTICE']);
 function newTask(type, o) {
   const base = 't:' + type + ':' + (o.fac ? 'f' + o.fac : o.nf ? 'n' + o.nf : 'g' + lc(o.group));
   let key = base;
@@ -639,7 +640,7 @@ function sendEmail1(f, correction) {
   if (correction) {
     // "Dates changed: send correction" takes care of the "changed after the Chicago handoff email" tasks
     tasksOf(f).filter(t => t.type === 'LEAD_NOTE' && t.corr && !done(t)).forEach(t => finishTask(t, st.me ? lc(st.me.email) : '', st.me ? st.me.name : ''));
-    if (f.e1b) sendCtlEmail(f, true); return;
+    if (f.notice) sendNoticeCorrection(f); else if (f.e1b) sendCtlEmail(f, true); return;
   }
   f.email1 = st.today; f.e1Split = true;
   // the email to the Gentell WC Transition Lead goes out from run() as soon as there is one (right away when there already is)
@@ -655,6 +656,62 @@ function sendCtlEmail(f, correction) {
   if (withIns) f.inserviceAsked = st.today;
   mail({ key: 'm:E15:' + f.id, code: 'E15', to: [c.email], cc: [am], fac: f.id, noTag: true, link: 'none', day: addBiz(st.today, 3), cond: { fac: f.id, untilEmail2: true }, subject: 'RE: ' + ctlSubject(f), body: `<p>Hi ${esc(first(c.name))},</p><p>Checking in, has the facility email for <b>${esc(facName(f))}</b> gone out? Please CC ${esc(CFG.mailbox)} on it.</p><p>Thank you!<br>${esc(nameOf(am))}</p>` });
   newTask('CHICAGO_FOLLOW', { fac: f.id, assignee: am, amTask: true, opensOn: addBiz(st.today, 5) });
+}
+// ---------- the transfer notice, sent to the facility from the mailbox (Nov 17 2026) ----------
+// Before: the Gentell WC Transition Lead got an email (E14b) asking them to send it. Now the transition lead gets a FAC_NOTICE task
+// once the handoff email went and the contacts are in: they paste the portal's contacts table, ✕ anyone who shouldn't get it, and send.
+// To = the contacts they keep. CC = WC lead, regional, wound rep, transition lead, intake rep (David on his facilities), account manager,
+// and the Settings "Transfer notice to the facility" lists (the old e1bTo / e1bCc).
+const NOTICE_SUBJECT = f => facName(f) + ' - Transfer from GNS Chicago to Lakewood';
+const noticeContactsIn = f => !e3Pending(f) && (!f.email3 || !!f.e3Done);
+const noticeReady = f => !!(f.email1 && f.e1Split && !f.email2 && !f.complete && !f.hold && !f.deleted && f.dates);
+const noticeCc = f => [...new Set([ctlEmail(f), f.regional && f.regional.email, f.wound && f.wound.email, amOf(f), contactEmail(f), acctOf(f), ...(st.settings.e1bTo || []), ...(st.settings.e1bCc || [])].filter(Boolean).map(lc))];
+// names for the CC line on the task (people outside the Team list come from FastCare / the WC lead box)
+const noticeCcName = (f, e) => { const x = [ctlOf(f), f.regional, f.wound].find(p => p && lc(p.email) === e); return nameOf(e) !== e && nameOf(e) ? nameOf(e) : x ? x.name : e; };
+const noticeBody = f => facilityNotice(f) + '<p>' + esc(nameOf(amOf(f))) + '<br>Gentell Nutritional Services</p>';
+// "Include On" in the portal: email codes run together at the end of a row (ICSODR, ICSODRINVPLDT, DR …). Never a note.
+const INCLUDE_ON = /^(ICSO|DR|INV|PL|DT)+$/i;
+const EMAIL_IN = /[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+// the portal's contacts table, copied and pasted: First Name, Last Name, Department, Email, Note, Include On, Active.
+// Returns { list: [{ name, dept, email }], noEmail: [names] }. Repeats (same email, any capitals) show once.
+function parseContactsPaste(text, have) {
+  const seen = new Set((have || []).map(c => lc(c.email))), list = [], noEmail = [];
+  let cols = null;
+  String(text || '').split(/\r?\n/).forEach(line => {
+    if (!line.trim()) return;
+    const cells = (line.includes('\t') ? line.split('\t') : line.split(/\s{2,}/)).map(c => c.trim()), low = cells.map(lc);
+    if (low.includes('email') && (low.includes('first name') || low.includes('department'))) { cols = { first: low.indexOf('first name'), last: low.indexOf('last name'), dept: low.indexOf('department'), email: low.indexOf('email'), note: low.indexOf('note') }; return; }
+    const at = cols && EMAIL_IN.test(cells[cols.email] || '') ? cols.email : cells.findIndex(c => EMAIL_IN.test(c));
+    let first, last, dept, note;
+    if (cols && at === cols.email) { const c = i => i >= 0 ? cells[i] || '' : ''; first = c(cols.first); last = c(cols.last); dept = c(cols.dept); note = c(cols.note); }
+    else { const before = at < 0 ? cells : cells.slice(0, at); first = before[0] || ''; last = before[1] || ''; dept = before.slice(2).join(' '); note = at < 0 ? '' : cells[at + 1] || ''; }
+    if (INCLUDE_ON.test(note)) note = '';
+    if (INCLUDE_ON.test(dept)) dept = '';
+    const name = (lc(first) === lc(last) || lc(first).endsWith(' ' + lc(last)) ? first : (first + ' ' + last)).trim();
+    if (at < 0) { if (name && cells.length >= 3 && !INCLUDE_ON.test(name)) noEmail.push(name); return; } // a table row with no email
+    const email = cells[at].match(EMAIL_IN)[0], k = lc(email);
+    if (seen.has(k)) return; seen.add(k);
+    list.push({ name: name || email, dept: lc(dept) === 'other' && note ? note : dept, email });
+  });
+  return { list, noEmail };
+}
+// "Send transfer notice" on the FAC_NOTICE task. to = [{ name, dept, email }]
+// body: the email as the lead changed it on the task ('' = the standard wording)
+function sendNotice(f, to, byName, body) {
+  const again = !!f.notice;
+  mail({ key: 'm:E34:' + f.id + (again ? ':' + uid() : ''), code: 'E34', to: to.map(c => c.email), cc: noticeCc(f), fac: f.id, noTag: true, link: 'none', subject: NOTICE_SUBJECT(f), body: body || noticeBody(f) });
+  f.notice = { on: st.today, by: byName, edited: !!body, to: to.map(c => ({ name: c.name, dept: c.dept, email: lc(c.email), typed: !!c.typed })) };
+  f.email2 = st.today; f.email2By = 'Sent from the mailbox by ' + byName;
+  // the WC lead was already asked to send it (before Nov 17 2026): tell them it went, so the facility doesn't get 2
+  if (f.e1b) {
+    const who = [...new Set([f.e1bCtl, ctlEmail(f)].filter(Boolean).map(lc))];
+    if (who.length) mail({ key: 'm:E35:' + f.id, code: 'E35', to: who, cc: [amOf(f)], fac: f.id, noTag: true, link: 'none', subject: 'RE: ' + ctlSubject(f), body: `<p>Hi ${esc(first(f.e1bCtlName || (ctlOf(f) || {}).name || ''))},</p><p>The transfer notice for <b>${esc(facName(f))}</b> went out from the transitions mailbox today. No need to send it.</p><p>Thank you!<br>${esc(nameOf(amOf(f)))}</p>` });
+  }
+}
+// "Dates changed: send correction": the same people get a corrected transfer notice
+function sendNoticeCorrection(f) {
+  if (!f.notice || !(f.notice.to || []).length) return;
+  mail({ key: 'm:E34C:' + f.id + ':' + uid(), code: 'E34', to: f.notice.to.map(c => c.email), cc: noticeCc(f), fac: f.id, noTag: true, link: 'none', subject: 'CORRECTION: ' + NOTICE_SUBJECT(f), body: '<p><b>Please note the corrected dates below.</b></p>' + noticeBody(f) });
 }
 // who to reach out to when the facility email hasn't gone out: the Gentell WC Transition Lead (since Oct 26 2026), else the handoff greeting
 const facEmailWho = f => f.e1Split && ctlOf(f) ? ctlOf(f).name : chiGreet(f);
@@ -1261,8 +1318,14 @@ function run() {
     if (f.email1 && f.e1NoWound && !f.inserviceMail && fcIn && woundRegEmails(f).length) sendInservice(f);
     // no contacts request (contacts didn't need reviewing / already received): the in-service ask goes on its own
     else if (!e3Pending(f) && !f.email3 && !inserviceDone(f) && fcIn && f.wound && f.regional && ctlOf(f)) sendInservice(f);
-    // handoff sent: the email to the Gentell WC Transition Lead, once there is one
-    if (f.email1 && f.e1Split && !f.e1b && !f.email2 && ctlOf(f)) sendCtlEmail(f);
+    // older facilities whose contacts request went without the in-service ask: it was going on the email to the WC lead, which doesn't go anymore
+    else if (f.email1 && f.e1Split && f.email3 && !inserviceDone(f) && fcIn && woundRegEmails(f).length) sendInservice(f);
+    // since Nov 17 2026 the app sends the transfer notice itself (no more email asking the Gentell WC Transition Lead to send it):
+    // the transition lead gets a task once the handoff email went and the contacts are in
+    if (noticeReady(f) && noticeContactsIn(f) && !tasksOf(f, 'FAC_NOTICE').some(t => !done(t) || t.status === 'Done')) {
+      const t = newTask('FAC_NOTICE', { fac: f.id, assignee: am, amTask: true });
+      todo(t, 'send the transfer notice to ' + facName(f), 'Send <b>' + esc(facName(f)) + '</b> the transfer notice: paste the contacts from the portal, remove anyone who shouldn\'t get it, and click "Send transfer notice".');
+    }
     ctlRegCheck(f);
     gddDosMail(f);
     // portal setup done while EMR access wasn't ready: check it as soon as it is
@@ -1273,7 +1336,9 @@ function run() {
     if (e3t && !done(e3t)) { e3t.status = 'Not needed'; e3t.doneOn = st.today; }
     chaseEmail3(f);
     // after Email 2: the follow-up on Chicago isn't needed
-    if (f.email2) { const cf = fTask(f, 'CHICAGO_FOLLOW'); if (cf && !done(cf)) { cf.status = 'Not needed'; cf.doneOn = st.today; } }
+    // the app sends the transfer notice now, so nobody chases the WC lead for it (Nov 17 2026)
+    if (f.email2 || f.e1Split) { const cf = fTask(f, 'CHICAGO_FOLLOW'); if (cf && !done(cf)) { cf.status = 'Not needed'; cf.doneOn = st.today; } }
+    if (f.email2 || f.complete) tasksOf(f, 'FAC_NOTICE').forEach(t => { if (!done(t)) { t.status = 'Not needed'; t.doneOn = st.today; } });
     // at risk: ordering date within 3 business days and Email 1 not out
     if (f.dates && !f.email1 && f.riskFor !== f.dates.ord) {
       f.riskFor = f.dates.ord; const day = addBiz(f.dates.ord, -3);
@@ -1375,7 +1440,7 @@ function markEmail2(f, byName) {
 // ---------- put a done task back in the queue (it was checked off by mistake) ----------
 // Nothing the task saved is erased: re-doing it shows what's on file, so the person only changes what was wrong.
 // Not for "Schedule" (it sent the Chicago handoff email: use "Dates changed: send correction") or "Chicago hasn't sent".
-const NO_REOPEN = new Set(['SCHEDULE', 'CHICAGO_FOLLOW', 'EMAIL3_FOLLOW']);
+const NO_REOPEN = new Set(['SCHEDULE', 'CHICAGO_FOLLOW', 'EMAIL3_FOLLOW', 'FAC_NOTICE']);
 function canReopen(t) {
   if (!t || t.status !== 'Done' || NO_REOPEN.has(t.type)) return false;
   const f = t.fac ? facById(t.fac) : null;
@@ -1415,7 +1480,7 @@ function stepTasks(f, k) {
     case 'ps': return open(['PORTAL_SETUP']);
     case 'sched': return open(['BRIGHTREE', 'SCHEDULE', 'ADDRESS']);
     case 'e1': return [];
-    case 'e2': return open(['CHICAGO_FOLLOW']);
+    case 'e2': return open(['CHICAGO_FOLLOW', 'FAC_NOTICE']);
   }
   return [];
 }
@@ -1487,7 +1552,7 @@ function notifyClosed(f, closed, by, byName, what) {
 // Marked by hand (request "Already done" / "Mark steps done"): the flag and what it set are undone, and the task it skipped is made.
 // Done through its task: that task goes back in the queue to the same person (E26). Emails go out the way they would have.
 // Blocked while a later step that relies on it is done, and when the app already sent the email the step stands for.
-const STEP_TYPES = { added: ['PORTAL_ADD'], pumps: ['PUMPS'], gdd: ['GDD'], wr: ['FASTCARE'], e3: ['E3_REPLY'], ct: ['CONTACTS_PORTAL'], esp: ['ESIGN_PORTAL'], emr: ['EMR_PORTAL'], ps: ['PORTAL_SETUP'], sched: ['SCHEDULE'], e2: ['CHICAGO_FOLLOW'] };
+const STEP_TYPES = { added: ['PORTAL_ADD'], pumps: ['PUMPS'], gdd: ['GDD'], wr: ['FASTCARE'], e3: ['E3_REPLY'], ct: ['CONTACTS_PORTAL'], esp: ['ESIGN_PORTAL'], emr: ['EMR_PORTAL'], ps: ['PORTAL_SETUP'], sched: ['SCHEDULE'], e2: ['CHICAGO_FOLLOW', 'FAC_NOTICE'] };
 // later steps that rely on this one: untick those first
 const STEP_LATER = { added: ['ps', 'emr', 'ct', 'esp'], e3: ['ct'], es: ['esp'], ps: ['sched'], e1: ['e2'] };
 // a later step counts only when it was really done (contacts / EMR / eSign show as done by themselves when there's nothing to add)
@@ -1594,7 +1659,7 @@ function unmarkStep(f, k, by, byName) {
     case 'e2': {
       was.email2By = f.email2By; f.email2 = ''; f.email2By = '';
       // the transfer notice was already asked for (or the old way, Chicago sends it): the lead follows up. Otherwise the email to the WC lead goes out first.
-      if (!reopened.length && !fTask(f, 'CHICAGO_FOLLOW') && f.email1 && (f.e1b || !f.e1Split)) { const t = newTask('CHICAGO_FOLLOW', { fac: f.id, assignee: amOf(f), amTask: true }); todo(t, 'check the transfer notice for ' + facName(f), 'GNS Chicago hasn\'t sent <b>' + esc(facName(f)) + '</b> the transfer notice yet. Reach out to ' + esc(facEmailWho(f)) + '.'); }
+      if (!reopened.length && !fTask(f, 'CHICAGO_FOLLOW') && f.email1 && !f.e1Split) { const t = newTask('CHICAGO_FOLLOW', { fac: f.id, assignee: amOf(f), amTask: true }); todo(t, 'check the transfer notice for ' + facName(f), 'GNS Chicago hasn\'t sent <b>' + esc(facName(f)) + '</b> the transfer notice yet. Reach out to ' + esc(facEmailWho(f)) + '.'); }
       break; }
   }
   // completion is checked again on the next run (the "Transition complete" email isn't sent twice)
