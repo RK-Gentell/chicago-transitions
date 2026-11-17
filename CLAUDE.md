@@ -267,3 +267,6 @@ Waiting tasks (`isWaiting`: `opensOn` after today) are left out of "My tasks", "
 - `noticeAsked(f)`: 'ctl' (Email 1b went) or 'chicago' (old handoff, not marked done by hand). On send: E35 "went out today, no need to send it" to the WC lead (as before) or to Settings `e1To` with the `chiGreet` greeting, subject "RE: <bothNames>- Transfer from GNS Chicago to Lakewood", CC the lead. The task shows who was asked.
 - A correction on an old facility after the app sent the notice uses the new handoff body (no "please send the below"), plus the corrected notice.
 - Facility page button is "Transfer notice already sent" on every facility (marks it sent; the send task closes).
+
+## Transfer notice: too close to the first order date (Nov 17 2026, evening)
+- Raizy: if the first DOS is tomorrow or earlier (`f.dates.dos <= add(st.today, 1)`) and the notice hasn't gone, run() closes any open `FAC_NOTICE` (Not needed), sends nothing (no notice, no E35 note), and records `f.email2` with `email2By` "Not sent: first order date … was too close" + `f.noticeSkipped`, so the facility can still complete.

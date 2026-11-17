@@ -1331,6 +1331,12 @@ function run() {
     else if (f.email1 && f.e1Split && f.email3 && !inserviceDone(f) && fcIn && woundRegEmails(f).length) sendInservice(f);
     // since Nov 17 2026 the app sends the transfer notice itself (no more email asking the Gentell WC Transition Lead to send it):
     // the transition lead gets a task once the handoff email went and the contacts are in
+    // first order date (DOS) is tomorrow or earlier: too late for the notice. Close the send task, send nothing (no note either), and
+    // record it as not sent so the facility can still complete (Raizy, Nov 17 2026)
+    if (noticeReady(f) && f.dates.dos <= add(st.today, 1)) {
+      tasksOf(f, 'FAC_NOTICE').forEach(t => { if (!done(t)) { t.status = 'Not needed'; t.doneOn = st.today; } });
+      f.email2 = st.today; f.email2By = 'Not sent: first order date ' + fmtS(f.dates.dos) + ' was too close'; f.noticeSkipped = true;
+    }
     if (noticeReady(f) && !noticeWaitsContacts(f) && !tasksOf(f, 'FAC_NOTICE').some(t => !done(t) || t.status === 'Done')) {
       const t = newTask('FAC_NOTICE', { fac: f.id, assignee: am, amTask: true });
       todo(t, 'send the transfer notice to ' + facName(f), 'Send <b>' + esc(facName(f)) + '</b> the transfer notice: paste the contacts from the portal, remove anyone who shouldn\'t get it, and click "Send transfer notice".');
