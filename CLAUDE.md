@@ -280,3 +280,14 @@ Waiting tasks (`isWaiting`: `opensOn` after today) are left out of "My tasks", "
 - First-time tour (`TOURS`, once per person per browser, key `ct_tour:work-2026-11-17:<email>` in localStorage; Skip counts as seen; no localStorage = no tour): leads get up to 6 steps (only the ones with something to point at); others get 1 box "My work was updated". The highlight is measured again on scroll / resize.
 - "What's new": add `{ id, date, title, text }` to the top of `WHATS_NEW` for a significant change: each person sees it once (newest only). Keep it to 1 heading + 1 or 2 short lines.
 - combo.js: skips a dropdown that was already replaced before it got upgraded (was a console error when the screen redrew twice quickly). `toast()` replaces the previous toast.
+
+## New look on the other screens (Nov 18 2026)
+- `js/look.js` (after work.js, before ui.js). On while Settings "New look" → "Use the new look on the other screens" is ticked (`settings.newLook`, on unless `false`). **To go back:** untick it and save: every other screen is exactly as before (body class `newlook` off, old renderers). My work has its own switch (`newWork`). Or `git revert` the commit.
+- Nothing here changes data, tasks or emails. Existing blocks are moved into sections, never rebuilt, so every id, field and handler still works.
+- All open tasks (`allLookHtml`): facility / new facility / corporate cards in "Overdue or due today" (only when there are some), "Open", "Nothing to do right now"; every open task is a line (click = that task, assignee name, "Remind" when `canRemind`), outside waits ("Waiting on …"), "✓ N completed" on hover, DOS / Delivery Date, then "Recently done". Same filters as before.
+- Completed steps (`doneSteps`, also My work's cards): the facility's steps (`stepIsDone` for every `PRE_ITEMS` key, short names `STEP_SHORT`) plus any other finished task. So steps marked done on the request or the facility page count too.
+- Corporates (`groupsLookHtml`): cards with rep rule, areas of care, price table, EMR login, contacts, corporate note, open corporate tasks, "Copy from corporate…" + Copy, Edit.
+- Facility page (`lookFac`, runs after renderLayer): the action buttons move into an "Actions" menu at the top; "Your tasks" (open tasks for you, click to open); sections Where it stands (open), Details (kv + Edit details; forced open by tracker "Edit details"), Dates, Areas of care, Contacts, Emails (came in + from the app), Attachments, Notes, then Mark steps done. Open/closed is remembered while the app is open (`secState`).
+- Corporate page (`lookCorp`): Rep rule (open), Areas of care, Portal and contacts, Apply to open facilities, Save. Settings (`lookSettings`): every card is a section.
+- Request forms: numbered steps (CSS counter on `h2.rqh`), the optional "Already done" keeps its number in line and says "Optional · click to open".
+- New facilities tracker: "Open task" column (task + who; click opens it) while the new look is on.

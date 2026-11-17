@@ -33,12 +33,12 @@ const wKey = t => t.fac ? 'f' + t.fac : t.nf ? 'n' + t.nf : 'g' + lc(t.group || 
 const myOpen = () => openTasksFor(forWho()).filter(t => !isWaiting(t));
 
 // ---------- what a facility is waiting on (people outside the app, or someone else on the team) ----------
-function wWaits(f) {
+function wWaits(f, noTasks) {
   const w = [];
   if (f.hold) return [{ n: 'On hold', who: 'Put on hold', k: 'other' }];
-  st.tasks.filter(t => t.fac === f.id && !done(t) && !t.archived && !isWaiting(t) && t.assignee !== forWho()).sort(wSort)
+  if (!noTasks) st.tasks.filter(t => t.fac === f.id && !done(t) && !t.archived && !isWaiting(t) && t.assignee !== forWho()).sort(wSort)
     .forEach(t => w.push({ n: wShort(t), who: nameOf(t.assignee) || 'nobody yet', k: 'other' }));
-  st.tasks.filter(t => !t.fac && !t.nf && f.group && lc(t.group) === lc(f.group) && !done(t) && !t.archived && !isWaiting(t) && t.assignee !== forWho())
+  if (!noTasks) st.tasks.filter(t => !t.fac && !t.nf && f.group && lc(t.group) === lc(f.group) && !done(t) && !t.archived && !isWaiting(t) && t.assignee !== forWho())
     .forEach(t => w.push({ n: wShort(t), who: nameOf(t.assignee) || 'nobody yet', k: 'other' }));
   if (hasPrice(G(f)) && !f.inPortal && !fTask(f, 'PORTAL_ADD')) w.push({ n: 'Add to Brightree', who: roleName('portal'), k: 'other' });
   if (ctlNeeded(f) && !w.some(x => x.n === 'Pick the reps')) w.push({ n: 'Gentell WC Transition Lead', who: roleName('rules'), k: 'other' });
@@ -46,7 +46,8 @@ function wWaits(f) {
   if (f.esignAsk && !f.esignGot && !f.esignDone) w.push({ n: 'Provider and eSign info', who: esGreet(), k: 'wait' });
   return w;
 }
-const wDoneSteps = f => [...new Set(tasksOf(f).filter(t => t.status === 'Done').sort(wSort).map(wShort))];
+// steps done on the facility: from its steps (tasks, "Already done", Mark steps done) and any other finished task (doneSteps, look.js)
+const wDoneSteps = f => doneSteps(f);
 
 // ---------- screen ----------
 function workHtml() {
@@ -183,7 +184,7 @@ async function qFinish(key, fn, label) {
 // ---------- clicks ----------
 document.addEventListener('click', async e => {
   const T = e.target;
-  if (T.closest('[data-wdone]')) { e.stopPropagation(); return; } // completed steps show on hover only
+  if (T.closest('[data-wdone]')) { e.stopImmediatePropagation(); return; } // completed steps show on hover only (and the click doesn't open the card)
   const wc = T.closest('[data-work]'); if (wc && !T.closest('a,button:not([data-work])')) { ui.openWork = wc.dataset.work; ui.openTask = ui.openFac = ui.openGroup = ui.openNf = ui.next = null; ui.answer = null; ui.workSeen = null; renderLayer(); return; }
   const wo = T.closest('[data-wopen]'); if (wo) { ui.openTask = wo.dataset.wopen; ui.answer = null; renderLayer(); const b = document.querySelector('.wpanel .wbox:not(.closed)'); if (b) b.scrollIntoView({ block: 'nearest' }); return; }
   const qg = T.closest('[data-qgdd]'); if (qg) { const key = qg.dataset.qgdd, f0 = facById((taskByKey(key) || {}).fac);

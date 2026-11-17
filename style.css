@@ -406,3 +406,51 @@ select:disabled,.combo-in:disabled{background:var(--soft);color:var(--muted);cur
 .newsdate{font:700 10.5px/1.4 var(--num);letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
 @media (max-width:760px){.wsecb{grid-template-columns:minmax(0,1fr)}.wcard{min-height:0}}
 .wpanel header .linkish{border:0;background:none;padding:0;font-size:13px}
+
+/* ---------- New look on the other screens (Nov 18 2026, js/look.js; only with body.newlook) ---------- */
+.newlook main h1{font-weight:500}
+.newlook .tablewrap{border-radius:10px}
+.newlook th{background:var(--pane);position:sticky;top:0;z-index:1}
+.newlook .filters{gap:8px}
+.newlook main h2.mailsec{background:#003171;color:#fff;border-radius:10px;padding:8px 14px;font-size:14px;margin:18px 0 8px;display:flex;align-items:center;gap:10px}
+.newlook main h2.mailsec .meta{color:#fff;background:rgba(255,255,255,.18);border-radius:4px;padding:0 6px;font:700 11px/18px var(--num)}
+.newlook main h2.mailsec .btn{border-color:rgba(255,255,255,.6);color:#fff;background:transparent}
+.wcard.wall,.wcard.wcorp{min-height:0}
+.wch{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.wstep[data-task]{cursor:pointer}
+.wstep[data-task]:hover{border-color:var(--accent)}
+.wrow-r{display:inline-flex;align-items:center;gap:6px;min-width:0}
+.wrow-r .pill{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.wremind{border:0;background:none;color:var(--accent);font-size:11.5px;padding:0;text-decoration:underline;white-space:nowrap}
+.wcopy{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.wcopy select{flex:1 1 140px;min-width:0;font-size:12.5px;padding:4px 8px}
+.wcopy .btn.pri{margin-left:auto}
+/* facility / corporate page in sections */
+.newlook .drawer.lookfac,.newlook .drawer[aria-label="Corporate"]{background:var(--pane)}
+.newlook .drawer header{gap:8px;align-items:flex-start}
+.lmenu{position:relative}
+.lmlist{position:absolute;right:0;top:calc(100% + 4px);z-index:50;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(9,36,75,.18);padding:6px;display:flex;flex-direction:column;min-width:min(280px,80vw)}
+.lmlist .btn{border:0;background:none;text-align:left;padding:7px 10px;border-radius:6px;color:var(--ink);font-weight:400;font-size:13px}
+.lmlist .btn:hover{background:var(--soft)}
+.lmlist [data-fact="del"]{color:var(--bad);margin-left:0!important}
+.lmine{display:flex;flex-direction:column;gap:8px}
+.wsect .in>.card.in-sec,.wsect .in>.card{border:0;box-shadow:none;padding:0!important;background:none}
+.wsect .in>.tablewrap{box-shadow:none}
+.wsect .wst{font-weight:500}
+.wsect summary .infow{margin-left:6px;margin-right:auto}
+.wsect .in{display:flex;flex-direction:column;gap:10px}
+details.wsect-like{background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:none;padding:10px 14px!important}
+.newlook .settings-grid.lookset{display:flex;flex-direction:column;gap:10px;max-width:980px}
+.newlook main>.wsect{margin-top:14px;max-width:980px}
+/* request forms: numbered steps; the optional "Already done" step keeps its number in line */
+.newlook form.rqform{counter-reset:rqstep;display:flex;flex-direction:column;gap:12px;background:none;border:0;box-shadow:none;padding:0}
+.newlook form.rqform>section,.newlook form.rqform>.rqsec{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.newlook form.rqform h2.rqh{counter-increment:rqstep;display:flex;align-items:center;gap:10px;margin:0 0 8px;font-size:15px}
+.newlook form.rqform h2.rqh::before{content:counter(rqstep);flex:none;display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#003171;color:#fff;font:700 12px/1 var(--num)}
+.newlook form.rqform details.rqd>summary{list-style:none;cursor:pointer}
+.newlook form.rqform details.rqd>summary::-webkit-details-marker{display:none}
+.newlook form.rqform details.rqd>summary h2.rqh{margin:0}
+.newlook form.rqform details.rqd>summary h2.rqh::after{content:"Optional · click to open";margin-left:auto;font:400 12px var(--sans);color:var(--muted)}
+.newlook form.rqform details.rqd[open]>summary h2.rqh::after{content:"Optional · click to close"}
+.newlook form.rqform details.rqd[open]>summary{margin-bottom:8px}
+.newlook form.rqform details.rqd>summary h2.rqh::before,.newlook form.rqform details.rqd[open]>summary h2.rqh::before{transform:none;border:0;width:24px;height:24px;margin-right:0;transition:none}
