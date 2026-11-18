@@ -36,7 +36,7 @@ function allLookHtml(all, ts, flt, facOk) {
 function allCard(k, arr) {
   const h = wHead(k); if (!h) return '';
   const rows = arr.map(t => { const l = wLate(t); return `<div class="wstep ${l === 'Overdue' ? 'late' : ''}" data-task="${esc(t.key)}" tabindex="0" role="button" title="Open: ${esc(taskTitle(t))}"><span class="nm">${esc(wShort(t))}</span><span class="wrow-r"><span class="pill ${t.assignee === me() ? 'p-ready' : 'p-wother'}" title="${esc(nameOf(t.assignee))}">${esc(nameOf(t.assignee) || 'Nobody')}</span>${mayRemind(t) && canRemind(t) ? `<button class="wremind" data-remind="${esc(t.key)}" title="Email ${esc(nameOf(t.assignee))} a reminder now" aria-label="Send ${esc(nameOf(t.assignee))} a reminder">Remind</button>` : ''}</span></div>`; });
-  if (h.f) wWaits(h.f, true).forEach(x => rows.push(`<div class="wstep"><span class="nm">${esc(x.n)}</span><span class="pill ${x.k === 'wait' ? 'p-wwait' : 'p-wother'}" title="Waiting on ${esc(x.who)}">Waiting on ${esc(x.who)}</span></div>`));
+  if (h.f) wWaits(h.f, true).forEach(x => rows.push(`<div class="wstep"><span class="nm">${esc(x.n)}</span><span class="wrow-r"><span class="pill ${x.k === 'wait' ? 'p-wwait' : 'p-wother'}" title="Waiting on ${esc(x.who)}">Waiting on ${esc(x.who)}</span>${x.e3 ? e3RemindLink(h.f) : ''}</span></div>`));
   const f = h.f, d = f ? f.dates : h.n ? h.n.dates : null;
   const lateT = arr.map(wLate).find(x => x === 'Overdue') || arr.map(wLate).find(Boolean) || '';
   const [s, c] = f ? stageOf(f) : h.n ? nfStage(h.n) : ['', ''];
