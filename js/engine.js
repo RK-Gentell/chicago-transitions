@@ -536,9 +536,10 @@ const canRemind = t => !done(t) && !t.archived && !isWaiting(t) && nowMs() >= ne
 // a weekend lands on 8 am Eastern the next business day
 function remSlot(ms) { const d = etDay(new Date(ms).toISOString()); return isWE(d) ? Date.parse(nextBizDay(d) + 'T12:00:00Z') : ms; }
 // scheduled reminders closer than 24 hours to the one before move later. Sent ones and ones a person sent never move.
-function spaceReminders(t) {
+function spaceReminders(t) { spaceList(remindersOf(t)); }
+function spaceList(list) {
   let last = -Infinity;
-  remindersOf(t).forEach(m => {
+  list.forEach(m => {
     if (m.status === 'Queued' && !isManualRem(m) && remAt(m) < last + REM_GAP) { const iso = new Date(remSlot(last + REM_GAP)).toISOString(); m.sendOn = iso; m.day = etDay(iso); }
     last = Math.max(last, remAt(m));
   });
@@ -778,21 +779,68 @@ function sendEmail3(f) {
   f.email3 = st.today; f.e3v2 = true;
   mail({ key: 'm:E16:' + f.id, code: 'E16', to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [ctlEmail(f), f.rep, acctOf(f), roleEmail('rules'), amOf(f)], fac: f.id, noTag: true, link: 'none', subject: E3_SUBJECT(f), body: email3Body(f), ...e3Attach(f) });
 }
-// One step at a time: only the next follow-up is ever queued, and it's cancelled the moment "Done" comes in.
+// Follow-ups use the task reminder timing (Nov 18 2026): the contacts are "due" 2 business days after the request (or after
+// "keep following up"), then follow-ups 1, 2 and 4 business days after that (the 3rd CCs the escalation person), and the transition
+// lead hears "No reply" the day the 3rd goes. Only the next follow-up is ever queued, and it's cancelled the moment a reply comes in.
+// A transition lead / admin can send one by hand ("Remind"); never 2 within 24 hours, the next automatic one moves to 24 hours later.
+const E3_DUE = 2, E3_REM = [1, 2, 4];
+const e3Start = f => (f.e3Round ? f.e3RoundFrom : f.email3) || f.email3;
+const e3Due = f => addBiz(e3Start(f), E3_DUE);
+const e3RoundOf = k => +((k.match(/^m:E3F:\d+:r(\d+):/) || [])[1] || 0);
+const e3Pre = f => 'm:E3F:' + f.id + ':' + (f.e3Round ? 'r' + f.e3Round + ':' : '');
+// this round's follow-up emails (not cancelled)
+const e3Mails = f => st.mails.filter(m => m.fac === f.id && m.key.startsWith('m:E3F:') && e3RoundOf(m.key) === (f.e3Round || 0) && m.status !== 'Cancelled');
+const e3Rems = f => e3Mails(f).filter(m => m.code === 'E16F' && m.status !== 'Failed').sort((a, b) => remAt(a) - remAt(b));
+const e3Auto = f => e3Mails(f).filter(m => m.code === 'E16F' && !isManualRem(m)).sort((a, b) => a.day < b.day ? -1 : a.day > b.day ? 1 : 0);
+const lastE3Rem = f => { const now = nowMs(); return e3Rems(f).filter(m => m.status === 'Sent' || remAt(m) <= now).pop() || null; };
+const nextE3RemAt = f => { const l = lastE3Rem(f); return l ? remAt(l) + REM_GAP : 0; };
+const e3Chasing = f => !!f.email3 && !f.e3Done && !f.e3Reply && !f.hold && !f.complete && !f.deleted;
+const canRemindE3 = f => e3Chasing(f) && nowMs() >= nextE3RemAt(f);
+function setMailDay(m, d) { const day = d > st.today ? d : st.today; m.day = day; m.sendOn = day > st.today ? day + 'T12:00:00Z' : new Date(nowMs() - 60000).toISOString(); }
+function e3FollowBody(f, again) {
+  const am = amOf(f);
+  return `${e3Hi(f)}<p>${again ? 'Following up again on my email below' : 'Just following up on my email below'} about <b>${esc(facName(f))}</b>. Can you please ${f.e3v2 && !f.e3Ins ? '' : 'get the in-service booked and '}send over the contact info?</p><p>Thank you!<br>${esc(nameOf(am))}</p><hr>${email3Body(f)}`;
+}
+function e3FollowMail(f, key, day, again, escalate) {
+  return mail({ key, code: 'E16F', day, cond: { fac: f.id, e3Round: f.e3Round || 0 }, ...e3Attach(f), to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [ctlEmail(f), amOf(f), escalate ? roleEmail('escalate') : ''], fac: f.id, noTag: true, link: 'none', subject: 'RE: ' + E3_SUBJECT(f), body: e3FollowBody(f, again) });
+}
 function chaseEmail3(f) {
   if (!f.email3 || f.e3Done || f.e3Reply) return;
-  const round = f.e3Round || 0, pre = 'm:E3F:' + f.id + ':' + (round ? 'r' + round + ':' : '');
-  const roundOf = k => +((k.match(/^m:E3F:\d+:r(\d+):/) || [])[1] || 0);
-  const mine = st.mails.filter(m => m.fac === f.id && m.key.startsWith('m:E3F:') && roundOf(m.key) === round);
-  if (mine.some(m => m.status === 'Queued')) return;
-  const used = mine.filter(m => m.status !== 'Cancelled');
-  const step = used.length + 1; if (step > 3) return;
-  const last = used.map(m => m.day).sort().pop() || (round ? f.e3RoundFrom : f.email3);
-  const day = addBiz(last, 3), key = pre + step + ':' + mine.length, am = amOf(f), cond = { fac: f.id, e3Round: round };
-  if (step < 3) mail({ key, code: 'E16F', day, cond, ...e3Attach(f), to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [ctlEmail(f), am], fac: f.id, noTag: true, link: 'none', subject: 'RE: ' + E3_SUBJECT(f),
-      body: `${e3Hi(f)}<p>${step === 1 ? 'Just following up on my email below' : 'Following up again on my email below'} about <b>${esc(facName(f))}</b>. Can you please ${f.e3v2 && !f.e3Ins ? '' : 'get the in-service booked and '}send over the contact info?</p><p>Thank you!<br>${esc(nameOf(am))}</p><hr>${email3Body(f)}` });
-  else mail({ key, code: 'E16A', day, cond, to: [am], fac: f.id, link: 'fac', subject: 'No reply to the contacts request: ' + facName(f),
-      body: `<p>${esc(e3Names(f).join(' and ') || 'The wound rep and regional')} didn't reply to the contacts request for <b>${esc(facName(f))}</b>, even after 2 follow-ups. Please reach out to them.</p>` + note('When it\'s taken care of, click "Contacts: taken care of" on the facility page. The facility can\'t be marked complete until then.') });
+  const pre = e3Pre(f), n = () => st.mails.filter(m => m.fac === f.id && m.key.startsWith('m:E3F:') && e3RoundOf(m.key) === (f.e3Round || 0)).length;
+  let alert = e3Mails(f).find(m => m.code === 'E16A');
+  if (alert && alert.status !== 'Queued') return; // the lead was already told (this or the old timing): nothing more this round
+  let auto = e3Auto(f);
+  if (alert && auto.length < 3) { alert.status = 'Cancelled'; alert = null; } // queued the old way (after 2): the 3rd follow-up goes first
+  // queued ones follow the current timing (facilities that started on the old timing move over; sent ones count)
+  auto.forEach((m, i) => { if (m.status === 'Queued') { const d = addBiz(e3Due(f), E3_REM[i]); if (m.day !== d && !(d <= st.today && m.day <= st.today)) setMailDay(m, d); } });
+  if (auto.length < 3 && !auto.some(m => m.status === 'Queued')) {
+    const i = auto.length;
+    e3FollowMail(f, pre + (i + 1) + ':' + n(), addBiz(e3Due(f), E3_REM[i]), e3Rems(f).length > 0, i === 2);
+  }
+  spaceList(e3Rems(f));
+  auto = e3Auto(f);
+  if (auto.length === 3) {
+    const day = auto[2].day, am = amOf(f);
+    if (!alert) mail({ key: pre + 'a:' + n(), code: 'E16A', day, cond: { fac: f.id, e3Round: f.e3Round || 0 }, to: [am], fac: f.id, link: 'fac', subject: 'No reply to the contacts request: ' + facName(f),
+      body: `<p>${esc(e3Names(f).join(' and ') || 'The wound rep and regional')} didn't reply to the contacts request for <b>${esc(facName(f))}</b>, even after 3 follow-ups. Please reach out to them.</p>` + note('When it\'s taken care of, click "Contacts: taken care of" on the facility page. The facility can\'t be marked complete until then.') });
+    else if (alert.day !== day) setMailDay(alert, day);
+  }
+}
+// a transition lead (or admin) sends a follow-up on the contacts request now. Returns '' or why it can't.
+function sendE3Reminder(f, by, byName) {
+  if (!f || !f.email3) return 'The contacts request hasn\'t gone out yet.';
+  if (f.e3Done || f.e3Reply) return 'The contacts are already in.';
+  if (f.hold) return 'This facility is on hold.';
+  if (f.complete || f.deleted) return 'This facility isn\'t open.';
+  if (!canRemindE3(f)) return 'A follow-up went out less than 24 hours ago. Next one possible ' + whenET(nextE3RemAt(f)) + '.';
+  const iso = new Date(nowMs() - 60000).toISOString();
+  const m = e3FollowMail(f, e3Pre(f) + 'manual:' + etDay(iso), st.today, e3Rems(f).length > 0, false);
+  if (!m) return 'A follow-up on the contacts request already went out today.';
+  m.sendOn = iso; m.day = etDay(iso);
+  f.e3LastRemind = { at: iso, by, byName };
+  spaceList(e3Rems(f));
+  chaseEmail3(f); // keeps the "No reply" alert on the 3rd follow-up's day
+  return '';
 }
 // request said some steps are already done: set what those steps would have set, so their tasks never get made
 function applyPre(f, pre, l, info) {
@@ -1399,9 +1447,14 @@ function chaseAlertDay(f, code, round, gap) {
   const fu = st.mails.filter(m => m.fac === f.id && m.code === code && m.status !== 'Cancelled' && roundOf(m.key) === round);
   return fu.length < 2 ? '' : addBiz(fu.map(m => m.day).sort().pop(), gap);
 }
+// the contacts request's "No reply" day: the 3rd automatic follow-up's day (or the day the lead was told on the old timing)
+function e3AlertDay(f) {
+  const ms = e3Mails(f), a = ms.find(m => m.code === 'E16A' && m.status !== 'Queued'), auto = e3Auto(f);
+  return a ? a.day : auto.length >= 3 ? auto[2].day : '';
+}
 function waitingFor(f) {
   if (f.hold || f.complete || f.deleted || f.archived) return [];
-  const out = [], d3 = f.email3 && !f.e3Done && !f.e3Reply && chaseAlertDay(f, 'E16F', f.e3Round || 0, 3);
+  const out = [], d3 = f.email3 && !f.e3Done && !f.e3Reply && e3AlertDay(f);
   if (d3 && st.today >= d3) out.push({ sec: 'e3', f, days: bizCount((f.e3Round ? f.e3RoundFrom : f.email3) || f.email3, st.today) });
   const de = f.esignAsk && !f.esignGot && !f.esignDone && chaseAlertDay(f, 'E31F', f.esignRound || 0, 2);
   if (de && st.today >= de) out.push({ sec: 'es', f, days: bizCount((f.esignRound ? f.esignRoundFrom : f.esignAsk) || f.esignAsk, st.today) });

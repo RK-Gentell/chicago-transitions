@@ -42,7 +42,7 @@ function wWaits(f, noTasks) {
     .forEach(t => w.push({ n: wShort(t), who: nameOf(t.assignee) || 'nobody yet', k: 'other' }));
   if (hasPrice(G(f)) && !f.inPortal && !fTask(f, 'PORTAL_ADD')) w.push({ n: 'Add to Brightree', who: roleName('portal'), k: 'other' });
   if (ctlNeeded(f) && !w.some(x => x.n === 'Pick the reps')) w.push({ n: 'Gentell WC Transition Lead', who: roleName('rules'), k: 'other' });
-  if (f.email3 && !f.e3Done && !f.e3Reply) w.push({ n: 'Contacts', who: e3Names(f).join(', ') || 'wound rep and regional', k: 'wait' });
+  if (f.email3 && !f.e3Done && !f.e3Reply) w.push({ n: 'Contacts', who: e3Names(f).join(', ') || 'wound rep and regional', k: 'wait', e3: f.id });
   if (f.esignAsk && !f.esignGot && !f.esignDone) w.push({ n: 'Provider and eSign info', who: esGreet(), k: 'wait' });
   return w;
 }
@@ -78,7 +78,7 @@ function wHead(k) {
 function wCard(k, mine) {
   const h = wHead(k); if (!h) return '';
   const rows = mine.map(t => { const l = wLate(t); return `<div class="wstep ready ${l === 'Overdue' ? 'late' : ''}"><span class="nm">${esc(wShort(t))}</span><span class="pill p-ready">Ready</span></div>`; });
-  if (h.f) wWaits(h.f).forEach(x => rows.push(`<div class="wstep"><span class="nm">${esc(x.n)}</span><span class="pill ${x.k === 'wait' ? 'p-wwait' : 'p-wother'}" title="Waiting on ${esc(x.who)}">Waiting on ${esc(x.who)}</span></div>`));
+  if (h.f) wWaits(h.f).forEach(x => rows.push(`<div class="wstep"><span class="nm">${esc(x.n)}</span><span class="wrow-r"><span class="pill ${x.k === 'wait' ? 'p-wwait' : 'p-wother'}" title="Waiting on ${esc(x.who)}">Waiting on ${esc(x.who)}</span>${x.e3 ? e3RemindLink(h.f) : ''}</span></div>`));
   const shown = rows.length > W_ROWS ? rows.slice(0, W_ROWS - 1).join('') + `<div class="wmore-row">+${rows.length - W_ROWS + 1} more. Open to see all</div>` : rows.join('') || '<div class="wmore-row">Nothing open right now.</div>';
   const doneList = h.f ? wDoneSteps(h.f) : [];
   const lateT = mine.map(wLate).find(x => x === 'Overdue') || mine.map(wLate).find(Boolean) || '';
@@ -119,7 +119,7 @@ function wStands(f) {
     const s = done(t) ? ['done', '✓ Done', t.doneByName || nameOf(t.doneBy)] : isWaiting(t) ? ['', 'Starts ' + fmtS(t.opensOn), nameOf(t.assignee)] : t.assignee === forWho() ? ['ready', 'Ready', 'You'] : ['other', 'Waiting on ' + nameOf(t.assignee), ''];
     return `<div class="wtl"><span class="d ${s[0]}"></span><div>${esc(wShort(t))}${s[2] ? `<div class="meta">${esc(s[2])}</div>` : ''}</div><span class="pill ${s[0] === 'done' ? 'p-done' : s[0] === 'ready' ? 'p-ready' : 'p-wother'}">${esc(s[1])}</span></div>`;
   });
-  wWaits(f).filter(x => x.k === 'wait').forEach(x => rows.push(`<div class="wtl"><span class="d wait"></span><div>${esc(x.n)}</div><span class="pill p-wwait">Waiting on ${esc(x.who)}</span></div>`));
+  wWaits(f).filter(x => x.k === 'wait').forEach(x => rows.push(`<div class="wtl"><span class="d wait"></span><div>${esc(x.n)}${x.e3 ? e3RemInfo(f) : ''}</div><span class="wrow-r"><span class="pill p-wwait">Waiting on ${esc(x.who)}</span>${x.e3 ? e3RemindLink(f) : ''}</span></div>`));
   return `<details class="wsect"><summary>Where it stands</summary><div class="in">${rows.join('') || '<div class="meta">Nothing yet.</div>'}</div></details>`;
 }
 function wDetails(f) {
