@@ -146,10 +146,11 @@ const TT = {
   },
   EMR: {
     title: t => 'EMR access for ' + t.group,
-    form: t => { const gf = facsOfGroup(t.group).filter(x => !x.hold); return `<div class="instr">Enter "Emr", "Emr Username" and "Emr Password" in the portal on each facility below. Save the QR code on the server in the "Authenticator" folder, named the username.</div><div class="note">Only the username goes in here: the system needs it to ask corporate to add new facilities in this group to the same login.</div><ul>${gf.map(x => '<li>' + esc(facName(x)) + (x.inPortal ? '' : ' <b>(not in the portal yet)</b>') + '</li>').join('')}</ul>${fld('"Emr Username"', txt('user', grp(t.group).emr || '', 'e.g. ihcm.lakewood'))}${chk('ok', 'Entered in the portal on every facility above, and saved the QR code')}`; },
+    form: t => { const gf = facsOfGroup(t.group).filter(x => !x.hold); return `<div class="instr">Enter "Emr", "Emr Username" and "Emr Password" in the portal on each facility below. Save the QR code on the server in the "Authenticator" folder, named the username.</div><div class="note">Only the username goes in here. Facilities that come into this corporate later get the EMR info from the transition lead at portal setup, copied from these.</div><ul>${gf.map(x => '<li>' + esc(facName(x)) + (x.inPortal ? '' : ' <b>(not in the portal yet)</b>') + '</li>').join('')}</ul>${fld('"Emr Username"', txt('user', grp(t.group).emr || '', 'e.g. ihcm.lakewood'))}${chk('ok', 'Entered in the portal on every facility above, and saved the QR code')}`; },
     example: () => ({ user: 'ihcm.lakewood', ok: true }),
     validate: () => V('user') && V('ok') ? '' : 'Enter the username and confirm it\'s in the portal.',
-    done: t => { const g = grp(t.group); g.emr = V('user'); g.emrNew = true; }
+    // the facilities she covered: on the list and in Brightree now (the rest get the EMR info at portal setup)
+    done: t => { const g = grp(t.group); g.emr = V('user'); g.emrNew = true; g.emrFacs = facsOfGroup(t.group).filter(x => !x.hold && x.inPortal).map(x => x.id); }
   },
   EMR_ADD: {
     title: t => 'Confirm corporate added ' + facName(facById(t.fac)) + ' to the EMR login',
@@ -241,9 +242,9 @@ const TT = {
   },
   PORTAL_SETUP: {
     title: t => 'Portal setup: ' + facName(facById(t.fac)),
-    form: t => { const f = facById(t.fac); return f.dates ? portalForm(f) : '<div class="err">No dates yet: the facility needs a full address with a state that has a ship point. Fix it on the facility page.</div>'; }, example: t => ({ ok: true, emrok: emrReady(facById(t.fac)) }),
-    validate: t => { const f = facById(t.fac); if (!f.dates) return 'No dates yet: fix the address on the facility page first.'; if (!V('ok')) return 'Tick when saved.'; if (emrReady(f) && !V('emrok')) return 'Log into the EMR and tick when the access works.'; if (f.esignGot && !f.esignDone && !V('ps_es')) return 'Providers (eSign): pick where things stand.'; return ''; },
-    done: (t, ctx) => { const f = facById(t.fac); if (f.esignGot && !f.esignDone && V('ps_es')) esignAnswer(f, V('ps_es'), ctx ? ctx.byName : ''); G(f).noteDone = true; f.gtc = { wound: '', regional: '' }; gtMark(f, gtRows(f, true)); if (V('emrok')) { f.emrChecked = st.today; f.emrCheckedBy = ctx ? ctx.byName : ''; } else if (!f.emrChecked) f.emrCheckDue = true; }
+    form: t => { const f = facById(t.fac); return f.dates ? portalForm(f) : '<div class="err">No dates yet: the facility needs a full address with a state that has a ship point. Fix it on the facility page.</div>'; }, example: t => { const f = facById(t.fac); return { ok: true, emrok: emrReady(f) || emrLeadNeeds(f) }; },
+    validate: t => { const f = facById(t.fac); if (!f.dates) return 'No dates yet: fix the address on the facility page first.'; if (!V('ok')) return 'Tick when saved.'; if (emrReady(f) || emrLeadNeeds(f)) { const e = emrCheckProblem(); if (e) return e; } if (f.esignGot && !f.esignDone && !V('ps_es')) return 'Providers (eSign): pick where things stand.'; return ''; },
+    done: (t, ctx) => { const f = facById(t.fac); if (f.esignGot && !f.esignDone && V('ps_es')) esignAnswer(f, V('ps_es'), ctx ? ctx.byName : ''); G(f).noteDone = true; f.gtc = { wound: '', regional: '' }; gtMark(f, gtRows(f, true)); if (emrReady(f) || emrLeadNeeds(f)) emrCheckDone(f, emrLeadNeeds(f), ctx, 'at portal setup'); else if (!f.emrChecked) f.emrCheckDue = true; }
   },
   // a change after the Chicago handoff email, when Settings "Don't email transition leads about their own tasks" is ticked (instead of the email)
   LEAD_NOTE: {
@@ -254,14 +255,22 @@ const TT = {
   },
   EMR_CHECK: {
     title: t => 'Check EMR access: ' + facName(facById(t.fac)),
-    form: t => { const f = facById(t.fac), g = G(f); return `<div class="instr">EMR access for this facility is set up now${g.emr ? ' (username <span class="q">' + esc(g.emr) + '</span>, QR code in the "Authenticator" folder)' : ''}. Log into the EMR and check that the access works and that we can see everything we need for this facility.</div><div class="note">Portal setup was done before the EMR access was ready, so this check comes separately.</div>${chk('ok', 'Logged in: the access works and we have everything we need')}`; },
-    example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when you\'ve checked the access.',
-    done: (t, ctx) => { const f = facById(t.fac); f.emrChecked = st.today; f.emrCheckedBy = ctx ? ctx.byName : ''; }
+    form: t => { const f = facById(t.fac), g = G(f); return `<div class="instr">EMR access for this facility is set up now${g.emr ? ' (username <span class="q">' + esc(g.emr) + '</span>, QR code in the "Authenticator" folder)' : ''}. Log into the EMR and check that the access works and that we can see everything we need for this facility.</div><div class="note">${t.key.includes('#') || f.emrFixed ? 'Priscilla fixed the access, so check it again.' : 'Portal setup was done before the EMR access was ready, so this check comes separately.'}</div>${emrChecks(false)}`; },
+    example: () => ({ emrok: true }), validate: () => emrCheckProblem(),
+    done: (t, ctx) => emrCheckDone(facById(t.fac), false, ctx, '')
   },
   EMR_PORTAL: {
     title: t => 'EMR info in portal: ' + facName(facById(t.fac)),
-    form: t => { const g = G(facById(t.fac)); return `<div class="instr">Fill "Emr", "Emr Username" (<span class="q">${esc(g.emr || 'the corporate\'s username')}</span>) and "Emr Password". Save the QR code in the "Authenticator" folder named <span class="q">${esc(g.emr || 'the username')}</span>.</div>${chk('ok', 'Done')}`; },
-    example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when done.', done: () => { }
+    form: t => `${emrCopyInstr(facById(t.fac))}${emrChecks(true)}`,
+    example: () => ({ emrok: true }), validate: () => emrCheckProblem(),
+    done: (t, ctx) => emrCheckDone(facById(t.fac), true, ctx, '')
+  },
+  // the transition lead logged in and can't get into this facility
+  EMR_FIX: {
+    title: t => 'EMR access problem: ' + facName(facById(t.fac)),
+    form: t => { const f = facById(t.fac), g = G(f), b = f.emrBad || {}; return `<div class="instr">${esc(b.byName || 'The transition lead')} logged into the <b>${esc(g.name)}</b> EMR${g.emr ? ' (username <span class="q">' + esc(g.emr) + '</span>)' : ''}${b.where ? ' ' + esc(b.where) : ''} and can't get into <b>${esc(facName(f))}</b>${b.on ? ' (' + fmt(b.on) + ')' : ''}. Get it added to the login, then mark this done.</div><div class="note">The transition lead gets a "Check EMR access" task when you do.</div>${chk('ok', 'Fixed: this facility is on the login')}`; },
+    example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when it\'s fixed.',
+    done: (t, ctx) => { const f = facById(t.fac); (f.emrFixes = f.emrFixes || []).push(Object.assign({}, f.emrBad, { fixedOn: st.today, fixedBy: ctx ? ctx.byName : '' })); f.emrBad = null; f.emrFixed = st.today; f.emrChecked = ''; f.emrCheckDue = true; }
   },
   CONTACTS_PORTAL: {
     title: t => 'Contacts into portal: ' + facName(facById(t.fac)),
@@ -350,6 +359,21 @@ function gtSetupBox(f) {
   const rows = gtRows(f, true), miss = GT_ROLES.filter(r => !f[r.k]);
   return `<div class="sect">Contacts: Gentell wound rep + regional</div>${rows.length ? `<div class="instr">"Add Contact" for each, with this Department. Leave "Include On": the Department sets it (overview email + doc request email).</div>${gtTable(rows)}` : ''}${miss.length ? `<div class="note">No ${miss.map(r => r.k === 'wound' ? 'wound rep' : 'regional').join(' or ')} yet (FastCare isn't done). You'll get a "Contacts into portal" task once ${miss.length > 1 ? 'they\'re' : 'it\'s'} in.</div>` : ''}`;
 }
+// ---------- EMR info copied from another facility of the corporate (Nov 18 2026) ----------
+function emrCopyInstr(f) {
+  const g = G(f), src = emrFrom(f);
+  return `<div class="instr">This corporate already has EMR access. Copy "Emr", "Emr Username" and "Emr Password" from ${src ? '<b>' + esc(facName(src)) + '</b> (same corporate)' : 'another <b>' + esc(g.name) + '</b> facility in the portal'} into this facility.${g.emr ? ' "Emr Username" is <span class="q">' + esc(g.emr) + '</span>.' : ''} The QR code is already in the "Authenticator" folder${g.emr ? ' (named <span class="q">' + esc(g.emr) + '</span>)' : ''}. Don't make a new one.</div><div class="instr">Then log into the EMR and check that you can get into this facility and see everything we need.</div>`;
+}
+// copy: the lead also put the EMR info in. Ticking "doesn't work" gives Priscilla a task.
+const emrChecks = (copy, ok) => chk('emrok', copy ? 'Entered the EMR info and logged in: the access works and we have everything we need' : 'Logged in: the access works and we have everything we need', ok)
+  + chk('emrbad', copy ? 'Entered the EMR info, but the access doesn\'t work for this facility (Priscilla gets a task)' : 'The access doesn\'t work for this facility (Priscilla gets a task)');
+const emrCheckProblem = () => V('emrok') && V('emrbad') ? 'EMR access: tick only 1 box.' : V('emrok') || V('emrbad') ? '' : 'EMR access: log in, then tick whether the access works.';
+function emrCheckDone(f, copy, ctx, where) {
+  const by = ctx ? ctx.byName : '';
+  if (copy && (V('emrok') || V('emrbad'))) { f.emrInfo = st.today; f.emrInfoBy = by; }
+  if (V('emrok')) { f.emrChecked = st.today; f.emrCheckedBy = by; }
+  else if (V('emrbad')) { f.emrBad = { on: st.today, byName: by, where }; f.emrChecked = ''; f.emrCheckDue = true; }
+}
 function portalForm(f) {
   const g = FG(f), d = f.dates, rep = nameOf(f.rep);
   const nonCovEnt = g.cov.Enteral === 'Covered and Noncovered';
@@ -362,8 +386,12 @@ function portalForm(f) {
     ['"Auto-supply ENFIT adapter"', nonCovEnt ? 'Check it if the pump is Kangaroo or Omni. Otherwise leave it' : 'Leave unchecked (enteral isn\'t non-covered)'],
     ['"Notes" and "General Info"', 'Transition from Chicago / anything useful from the report (skip respiratory) / no spike set on the report → "Rep to find out which spike set they use at the first pump-fed patient"']];
   if (!g.noteDone) rows.push(['Corporate note ("Corporates")', 'Don\'t charge shipping for special orders or pumps (we will charge for rush shipping, but get corp approval for rush orders)']);
-  const g0 = G(f), emr = emrReady(f);
-  const emrBox = `<div class="sect">EMR access</div>` + (emr ? `<div class="instr">Log into the EMR${g0.emr ? ' (username <span class="q">' + esc(g0.emr) + '</span>, QR code in the "Authenticator" folder)' : ''} and check that the access works and that we can see everything we need for this facility.</div>${chk('emrok', 'Logged in: the access works and we have everything we need', !!f.emrChecked)}` : `<div class="note">EMR access isn't set up for this facility yet${f.emrChecked ? '' : '. You can finish the portal setup now; you\'ll get a "Check EMR access" task as soon as it\'s ready'}.</div>`);
+  const g0 = G(f);
+  const emrBox = `<div class="sect">EMR access</div>` + (f.emrBad ? `<div class="note">Waiting on Priscilla: the access didn't work for this facility (${fmt(f.emrBad.on)}). You'll get a "Check EMR access" task when she fixes it.</div>`
+    : emrLeadNeeds(f) ? emrCopyInstr(f) + emrChecks(true)
+    : emrPortalOpen(f) ? `<div class="note">Finish the "EMR info in portal" task for this facility. It has the EMR steps.</div>`
+    : emrReady(f) ? `<div class="instr">Log into the EMR${g0.emr ? ' (username <span class="q">' + esc(g0.emr) + '</span>, QR code in the "Authenticator" folder)' : ''} and check that the access works and that we can see everything we need for this facility.</div>${emrChecks(false, !!f.emrChecked)}`
+    : `<div class="note">EMR access isn't set up for this facility yet${f.emrChecked ? '' : '. You can finish the portal setup now; you\'ll get a "Check EMR access" task as soon as it\'s ready'}.</div>`);
   return `<div class="instr">portal.isgmed.com → "Facilities" → "Facilities" → search 1 word → check "Corporate" → edit pencil. Leave every other field as it is. Have the Brightree report open for the pump, spike set and supplements lines.</div><div class="note">Nothing here gets typed back into this app.</div><div class="tablewrap"><table class="vals">${rows.map(r => `<tr><td>${esc(r[0])}</td><td><b>${esc(r[1])}</b></td></tr>`).join('')}</table></div>${gtSetupBox(f)}<div class="note">Other contacts are a separate task, so this doesn't wait on them.</div>${chk('ok', 'Saved ("Facility successfully updated.")' + (gtRows(f, true).length ? ', and the contacts above added' : ''))}${emrBox}${esSetupBox(f)}`;
 }
 // providers who sign the forms (from Anthony Price): on the portal setup when they're in; otherwise a separate task later

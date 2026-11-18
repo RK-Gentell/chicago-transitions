@@ -465,7 +465,7 @@ function mailStillValid(m) {
 }
 
 // ---------- tasks ----------
-const REPEATABLE = new Set(['LEAD_NOTE', 'PRICE', 'RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS', 'PORTAL_UPDATE', 'ESIGN_PORTAL', 'FAC_NOTICE']);
+const REPEATABLE = new Set(['EMR_FIX', 'EMR_CHECK', 'LEAD_NOTE', 'PRICE', 'RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS', 'PORTAL_UPDATE', 'ESIGN_PORTAL', 'FAC_NOTICE']);
 function newTask(type, o) {
   const base = 't:' + type + ':' + (o.fac ? 'f' + o.fac : o.nf ? 'n' + o.nf : 'g' + lc(o.group));
   let key = base;
@@ -1254,9 +1254,10 @@ function run() {
       }
       const gf = facsOfGroup(g.name).filter(x => !x.hold);
       if (!g.emr && !g.existing && !gTask(g.name, 'EMR') && gf.length && gf.every(x => x.inPortal)) {
-        const t = newTask('EMR', { group: g.name, assignee: roleEmail('emr') });
+        const t = newTask('EMR', { group: g.name, assignee: roleEmail('emr'), facs: gf.map(x => x.id) });
         mail({ key: 'm:E7:' + t.key, code: 'E7', to: [t.assignee], cc: [am], task: t.key, cond: { task: t.key }, subject: 'EMR access: ' + g.name, body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>We need EMR access for <b>${esc(g.name)}</b>. These are in the portal: ${gf.map(x => esc(facName(x))).join(', ')}.</p><p>Please enter "Emr", "Emr Username" and "Emr Password" on each one and save the QR code on the server in the "Authenticator" folder, named the username. Then mark the task done.</p>` });
       }
+      emrTaskUpdate(g, gf);
     }
     // dates (frozen once Email 1 went out)
     // no usable state (address missing or no ship point for it): no dates, so nothing can be scheduled with a wrong delivery date
@@ -1271,12 +1272,9 @@ function run() {
     }
     // Amy adds it to Brightree once the price table is in
     if (hasPrice(g) && f.address && !fTask(f, 'PORTAL_ADD') && !f.inPortal) addAmy(f);
-    // existing EMR login: ask corporate to add this facility
-    const main = mainCorp(g);
-    if ((g.emr || g.existing) && !g.emrNew && !fTask(f, 'EMR_ADD') && !preDone(f, 'emr')) {
-      const t = newTask('EMR_ADD', { fac: f.id, assignee: am, amTask: true });
-      if (main) mail({ key: 'm:E7b:' + t.key, code: 'E7b', to: [main.email], cc: [am], fac: f.id, link: 'none', subject: 'Add ' + facName(f) + ' to your EMR login', body: `<p>Hi ${esc(main.first)},</p><p>Can you add <b>${esc(facName(f))}</b> to the existing EMR login${g.emr ? ' <b>' + esc(g.emr) + '</b>' : ''}? Thank you!<br>${esc(nameOf(am))}</p>` });
-    }
+    // EMR: the corporate is never emailed (since Nov 18 2026). Old "Confirm corporate added … to the EMR login" tasks still open: not needed,
+    // the facility's EMR info goes in at portal setup (or "EMR info in portal" when portal setup is already done)
+    tasksOf(f, 'EMR_ADD').forEach(t => { if (!done(t)) { t.status = 'Not needed'; t.doneOn = st.today; t.emrMoved = true; } });
     if (f.inPortal && !fTask(f, 'PUMPS') && !f.pumps) {
       const tp = newTask('PUMPS', { fac: f.id, assignee: roleEmail('pumps') });
       queue('E9', tp.assignee, f, tp, (fs, ts) => fs.length === 1
@@ -1288,9 +1286,16 @@ function run() {
       const t = newTask('PORTAL_SETUP', { fac: f.id, assignee: am, amTask: true });
       todo(t, 'portal setup for ' + facName(f), 'Set up <b>' + esc(facName(f)) + '</b> in the portal.');
     }
-    if (!fTask(f, 'EMR_PORTAL') && (g.emr || g.existing) && !g.emrNew && !preDone(f, 'emr') && f.inPortal && done(fTask(f, 'EMR_ADD'))) {
+    // EMR info the transition lead still has to put in, and portal setup is already done (it's on the portal setup otherwise)
+    if (emrLeadNeeds(f) && f.inPortal && (done(fTask(f, 'PORTAL_SETUP')) || preDone(f, 'ps'))) {
       const t = newTask('EMR_PORTAL', { fac: f.id, assignee: am, amTask: true });
-      todo(t, 'EMR info for ' + facName(f), 'Put the EMR info for <b>' + esc(facName(f)) + '</b> in the portal.');
+      if (!done(t)) todo(t, 'EMR info for ' + facName(f), 'Put the EMR info for <b>' + esc(facName(f)) + '</b> in the portal, copied from another ' + esc(g.name) + ' facility, and check the access works.');
+    }
+    // "Access doesn't work for this facility": Priscilla gets a task (E7P)
+    if (f.emrBad && !f.emrBad.task) {
+      const t = newTask('EMR_FIX', { fac: f.id, assignee: roleEmail('emr') }); f.emrBad.task = t.key;
+      mail({ key: 'm:E7P:' + t.key, code: 'E7P', to: [t.assignee], cc: [am], fac: f.id, task: t.key, cond: { task: t.key }, subject: 'EMR access problem: ' + facName(f),
+        body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>${esc(f.emrBad.byName || 'The transition lead')} logged into the <b>${esc(g.name)}</b> EMR${g.emr ? ' (username ' + esc(g.emr) + ')' : ''}${f.emrBad.where ? ' ' + esc(f.emrBad.where) : ''} and can't get into <b>${esc(facName(f))}</b>. Please get it added to the login, then mark the task done.</p>` });
     }
     {
       const fc = fTask(f, 'FASTCARE'), openCP = tasksOf(f, 'CONTACTS_PORTAL').some(t => !done(t));
@@ -1329,7 +1334,7 @@ function run() {
     ctlRegCheck(f);
     gddDosMail(f);
     // portal setup done while EMR access wasn't ready: check it as soon as it is
-    if (f.emrCheckDue && !f.emrChecked && emrReady(f) && !fTask(f, 'EMR_CHECK')) { const t = newTask('EMR_CHECK', { fac: f.id, assignee: am, amTask: true }); todo(t, 'check EMR access for ' + facName(f), 'EMR access for <b>' + esc(facName(f)) + '</b> is set up now. Log in and check it works.'); }
+    if (f.emrCheckDue && !f.emrChecked && emrReady(f) && !tasksOf(f, 'EMR_CHECK').some(t => !done(t))) { const t = newTask('EMR_CHECK', { fac: f.id, assignee: am, amTask: true }); todo(t, 'check EMR access for ' + facName(f), 'EMR access for <b>' + esc(facName(f)) + '</b> is set up now. Log in and check it works.'); }
     // older facilities had an "Email 3 follow-up" task: carry over its answer, close it if still open
     const e3t = fTask(f, 'EMAIL3_FOLLOW');
     if (e3t && e3t.status === 'Done') markE3Done(f, e3t.doneBy, e3t.doneOn);
@@ -1440,7 +1445,7 @@ function markEmail2(f, byName) {
 // ---------- put a done task back in the queue (it was checked off by mistake) ----------
 // Nothing the task saved is erased: re-doing it shows what's on file, so the person only changes what was wrong.
 // Not for "Schedule" (it sent the Chicago handoff email: use "Dates changed: send correction") or "Chicago hasn't sent".
-const NO_REOPEN = new Set(['SCHEDULE', 'CHICAGO_FOLLOW', 'EMAIL3_FOLLOW', 'FAC_NOTICE']);
+const NO_REOPEN = new Set(['EMR_ADD', 'SCHEDULE', 'CHICAGO_FOLLOW', 'EMAIL3_FOLLOW', 'FAC_NOTICE']);
 function canReopen(t) {
   if (!t || t.status !== 'Done' || NO_REOPEN.has(t.type)) return false;
   const f = t.fac ? facById(t.fac) : null;
@@ -1499,7 +1504,7 @@ function stepIsDone(f, k) {
     case 'ct': return (f.contacts || []).every(c => c.inPortal) && !stepTasks(f, 'ct').length && fcDoneNew(f) && !(f.ctNeed && !done(taskByKey(f.ctNeedTask)));
     case 'es': return !!(f.esignGot || f.esignDone);
     case 'esp': return !!f.esignDone;
-    case 'emr': return !!done(fTask(f, 'EMR_PORTAL')) || (!!g.emrNew && !!g.emr);
+    case 'emr': return emrInfoIn(f);
     case 'ps': return !!done(fTask(f, 'PORTAL_SETUP'));
     case 'sched': return !!(f.manualDates || f.schedDone || done(fTask(f, 'SCHEDULE')) || (f.email1 && !handoffOnly(f)));
     case 'e1': return !!f.email1;
@@ -1507,8 +1512,47 @@ function stepIsDone(f, k) {
   }
   return false;
 }
-// EMR access for this facility is in the portal (new login entered by the EMR person, or the existing login + EMR info task)
-const emrReady = f => { const g = G(f); return preDone(f, 'emr') || done(fTask(f, 'EMR_PORTAL')) || (!!g.emrNew && !!g.emr && !!f.inPortal && done(gTask(g.name, 'EMR'))); };
+// ---------- EMR access (Nov 18 2026) ----------
+// The corporate is never emailed. Priscilla's "EMR access for <corporate>" task gets the first login and enters the EMR info on every
+// facility on it; facilities that come in while it's open go on it (E7U). Facilities she covered = g.emrFacs (in Brightree when she finished).
+// Any other facility of a corporate with a login (came in after, or the corporate already had one) gets its EMR info from the transition
+// lead at portal setup, copied from another facility of the corporate (or "EMR info in portal" if portal setup is already done).
+// "Access doesn't work" → f.emrBad → EMR_FIX for Priscilla → "Check EMR access" for the lead.
+const emrLogin = g => !!(g && (g.emr || g.existing || done(gTask(g.name, 'EMR'))));
+const emrCovered = f => { const g = G(f); return !!(g && (g.emrFacs || []).includes(f.id)); };
+const emrInfoIn = f => preDone(f, 'emr') || !!f.emrInfo || !!done(fTask(f, 'EMR_PORTAL')) || emrCovered(f);
+const emrPortalOpen = f => tasksOf(f, 'EMR_PORTAL').some(t => !done(t) && !t.parked);
+// the transition lead still has to put this facility's EMR info in the portal
+const emrLeadNeeds = f => !!f.group && emrLogin(G(f)) && !emrInfoIn(f) && !f.emrBad && !emrPortalOpen(f);
+// EMR access for this facility is in the portal and not waiting on Priscilla
+const emrReady = f => emrInfoIn(f) && !f.emrBad;
+// a facility of the same corporate to copy the EMR info from: one Priscilla did first, then any with the info in
+function emrFrom(f) {
+  const xs = facsOfGroup(f.group).filter(x => x.id !== f.id && !x.deleted).sort((a, b) => facName(a).localeCompare(facName(b)));
+  return xs.find(emrCovered) || xs.find(x => emrInfoIn(x) && !x.emrBad) || null;
+}
+// was this facility in Brightree on that day? (no "Add to Brightree" task = it was in from the start)
+function inPortalBy(f, day) {
+  if (!f.inPortal) return false;
+  const t = tasksOf(f, 'PORTAL_ADD').filter(x => x.status === 'Done').pop();
+  return !t || !t.doneOn || t.doneOn <= day;
+}
+// Priscilla's task: facilities that come in while it's open go on it, and she gets 1 email per batch.
+// Done before Nov 18 2026: which facilities she covered is worked out once from when they were added to Brightree.
+function emrTaskUpdate(g, gf) {
+  const et = gTask(g.name, 'EMR'); if (!et) return;
+  if (done(et)) {
+    if (!g.emrFacs) g.emrFacs = g.emrNew && g.emr && et.status === 'Done' ? facsOfGroup(g.name).filter(x => inPortalBy(x, et.doneOn || st.today)).map(x => x.id) : [];
+    return;
+  }
+  if (!et.facs) { et.facs = gf.map(x => x.id); return; } // open from before: start from what's on it now, no email
+  const add = gf.filter(x => !et.facs.includes(x.id)); if (!add.length) return;
+  add.forEach(x => et.facs.push(x.id));
+  const ids = add.map(x => x.id);
+  mail({ key: 'm:E7U:' + et.key + ':' + ids.join('-'), code: 'E7U', to: [et.assignee], cc: [...new Set(add.map(amOf))], task: et.key, cond: { task: et.key },
+    subject: 'EMR access: ' + g.name + ' (more facilities)',
+    body: `<p>Hi ${esc(first(nameOf(et.assignee)))},</p><p>These facilities were added to <b>${esc(g.name)}</b> while your EMR access task is still open:</p><ul>${add.map(x => '<li>' + esc(facName(x)) + (x.inPortal ? ' (in the portal)' : ' (not in the portal yet)') + '</li>').join('')}</ul><p>They're on your task now. Please include them when you enter the EMR info.</p>` });
+}
 // later steps include the earlier ones (same as the request form)
 const stepChain = keys => { const p = new Set(keys); Object.keys(PRE_IMPLY).forEach(k => { if (p.has(k)) PRE_IMPLY[k].forEach(x => p.add(x)); }); return [...p]; };
 function stepProblem(f, keys) {
@@ -1558,7 +1602,7 @@ const STEP_LATER = { added: ['ps', 'emr', 'ct', 'esp'], e3: ['ct'], es: ['esp'],
 // a later step counts only when it was really done (contacts / EMR / eSign show as done by themselves when there's nothing to add)
 function laterDone(f, x) {
   if (x === 'ct') return preDone(f, 'ct') || tasksOf(f, 'CONTACTS_PORTAL').some(t => t.status === 'Done');
-  if (x === 'emr') return preDone(f, 'emr') || !!done(fTask(f, 'EMR_PORTAL'));
+  if (x === 'emr') return preDone(f, 'emr') || !!done(fTask(f, 'EMR_PORTAL')) || !!f.emrInfo;
   return stepIsDone(f, x);
 }
 const stepLabel = k => { const x = PRE_ITEMS.find(i => i[0] === k); return x ? x[1].split(' (')[0] : k; };
@@ -1634,10 +1678,11 @@ function unmarkStep(f, k, by, byName) {
       break;
     case 'esp': f.esignDone = ''; f.esignDoneBy = ''; break;
     case 'emr':
-      // the corporate never confirmed this facility was added to the EMR login (closed by "Mark steps done"): ask again
-      if (!reopened.length) { const ea = fTask(f, 'EMR_ADD'); if (ea && ea.closedOnFac && done(ea) && !reopenTask(ea, '', by, byName, true)) reopened.push(ea); }
-      if (g && g.emrNew && g.emr && !reopened.length) { // EMR access came from the corporate's own "EMR access" task
-        g.emrWas = g.emr; g.emr = ''; g.emrNew = false;
+      // the transition lead put it in at portal setup: they get "EMR info in portal" (or it's on the portal setup again)
+      if (!reopened.length && f.emrInfo) { was.emrInfo = f.emrInfo; f.emrInfo = ''; f.emrChecked = ''; }
+      else if (g && emrCovered(f) && !reopened.length) { // EMR access came from the corporate's own "EMR access" task
+        if (g.emrNew) { g.emrWas = g.emr; g.emr = ''; g.emrNew = false; }
+        g.emrFacs = g.emrFacs.filter(x => x !== f.id);
         const ts = st.tasks.filter(t => !t.fac && lc(t.group) === lc(g.name) && t.type === 'EMR' && done(t)), t = ts[ts.length - 1];
         if (t && !reopenTask(t, '', by, byName, true)) reopened.push(t);
       }
