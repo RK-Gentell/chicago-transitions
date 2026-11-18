@@ -11,7 +11,7 @@ const ui = { shots: {}, view: 'mytasks', openTask: null, openFac: null, openGrou
 const $ = s => document.querySelector(s);
 const me = () => st.me.email;
 const meName = () => st.me.name;
-function toast(t) { const el = document.createElement('div'); el.className = 'toast'; el.textContent = t; document.body.appendChild(el); setTimeout(() => el.remove(), 3200); }
+function toast(t) { document.querySelectorAll('.toast').forEach(x => x.remove()); const el = document.createElement('div'); el.className = 'toast'; el.textContent = t; document.body.appendChild(el); setTimeout(() => el.remove(), 3200); }
 function setStatus(t, bad) { const e = $('#status'); if (e) { e.textContent = t; e.className = 'status' + (bad ? ' bad' : ''); } }
 
 // ---------- start ----------
@@ -100,7 +100,7 @@ async function act2(fn, okMsg) {
 }
 const bkCount = () => { const c = $('#bk_count'); if (c) c.textContent = ui.sel.size + ' selected'; const a = $('#bk_all'), boxes = [...document.querySelectorAll('[data-selfac]')]; if (a) a.checked = boxes.length > 0 && boxes.every(x => x.checked); };
 async function poll() {
-  if (ui.busy || document.visibilityState !== 'visible' || ui.openTask || ui.openFac || ui.openGroup || ui.openNf || ui.next || ['new', 'nfnew', 'bulkct', 'bulknf', 'settings'].includes(ui.view)) return;
+  if (ui.busy || document.visibilityState !== 'visible' || ui.openWork || ui.openTask || ui.openFac || ui.openGroup || ui.openNf || ui.next || ['new', 'nfnew', 'bulkct', 'bulknf', 'settings'].includes(ui.view)) return;
   const a = document.activeElement; if (a && a.dataset && a.dataset.leadnote) return; // typing notes on the tracker
   if ([...document.querySelectorAll('#bkbox input, #bkbox select')].some(x => x.value)) return; // something typed into "Change selected"
   try { ui.busy = true; await STORE.load({ full: true }); await settle(); ui.busy = false; render(); } catch (e) { ui.busy = false; console.error(e); }
@@ -133,8 +133,7 @@ function waitingOn(f) {
   st.tasks.filter(t => !t.fac && f.group && lc(t.group) === lc(f.group) && !done(t)).forEach(t => w.push(taskTitle(t) + ' (' + nameOf(t.assignee) + ')'));
   if (hasPrice(g) && !f.inPortal && !fTask(f, 'PORTAL_ADD')) w.push('Add to Brightree (' + roleName('portal') + ')');
   if (ctlNeeded(f)) w.push('Gentell WC Transition Lead (' + roleName('rules') + ', "Pick the reps")');
-  if (f.email1 && !f.email2 && !f.e1Split) w.push('Chicago’s transfer notice to the facility');
-  if (f.email1 && f.e1Split && !f.email2 && !noticeContactsIn(f)) w.push('Contacts, before the transfer notice to the facility goes out');
+  if (f.email1 && !f.email2 && noticeWaitsContacts(f)) w.push('Contacts, before the transfer notice to the facility goes out');
   if (f.email3 && !f.e3Done && !f.e3Reply) w.push('Reply to the contacts request (' + (e3Names(f).join(' / ') || 'wound rep / regional') + ')');
   if (f.email2 && !done(fTask(f, 'GDD'))) w.push('GDD answer (' + roleName('gdd') + ')');
   if (f.esignAsk && !f.esignGot && !f.esignDone) w.push('Provider and eSign info (' + esGreet() + ')');
@@ -206,10 +205,11 @@ function render() {
   // nav
   const mine = openTasksFor(forWho()).filter(t => !isWaiting(t)).length;
   const open = st.tasks.filter(t => !done(t) && !t.archived && !isWaiting(t)).length;
-  const nav = [['mytasks', 'My tasks', mine], ['tracker', 'Tracker', st.facs.filter(f => !f.complete).length], ['nftracker', 'New facilities tracker', nfs().filter(n => !n.scheduled && !n.deleted).length], ['all', 'All open tasks', open], ['groups', 'Corporates', Object.keys(st.groups).length], ['analytics', 'Analytics', ''], ['sep'], ['inbox', 'Mailbox', st.inbox.length], ['outbox', 'Outbox', st.mails.filter(m => m.status === 'Queued').length || ''], ...(admin ? [['settings', 'Settings', '']] : []), ['sep'], ['new', '+ New transition request', ''], ['nfnew', '+ New facility scheduling request', '']];
+  const nav = [['mytasks', typeof workOn === 'function' && workOn() && isAm(forWho()) ? 'My work' : 'My tasks', mine], ['tracker', 'Tracker', st.facs.filter(f => !f.complete).length], ['nftracker', 'New facilities tracker', nfs().filter(n => !n.scheduled && !n.deleted).length], ['all', 'All open tasks', open], ['groups', 'Corporates', Object.keys(st.groups).length], ['analytics', 'Analytics', ''], ['sep'], ['inbox', 'Mailbox', st.inbox.length], ['outbox', 'Outbox', st.mails.filter(m => m.status === 'Queued').length || ''], ...(admin ? [['settings', 'Settings', '']] : []), ['sep'], ['new', '+ New transition request', ''], ['nfnew', '+ New facility scheduling request', '']];
   $('#nav').innerHTML = nav.map(n => n[0] === 'sep' ? '<div class="sep"></div>' : `<button class="${ui.view === n[0] ? 'on' : ''}" data-view="${n[0]}"><span>${n[1]}</span><span class="count">${n[2]}</span></button>`).join('');
   const m = $('#main');
-  if (ui.view === 'mytasks') {
+  if (ui.view === 'mytasks' && typeof workOn === 'function' && workOn()) { m.innerHTML = workHtml(); setTimeout(maybeIntro, 50); }
+  else if (ui.view === 'mytasks') {
     const all = openTasksFor(forWho()).filter(t => !isWaiting(t)), F = ui.myF; // tasks that haven't started yet only show on the facility page
     const ts = all.filter(t => (!F.fac || t.fac === +F.fac) && (!F.corp || corpKey(t) === F.corp));
     const who = admin && !demo ? `<label class="meta" for="forwho">Show tasks for</label><select id="forwho">${[...new Set([me(), ...sortedPeople().map(p => lc(p.email)).filter(Boolean)])].map(e => `<option value="${esc(e)}" ${e === forWho() ? 'selected' : ''}>${esc(nameOf(e))}${e === me() ? ' (me)' : ''}</option>`).join('')}</select>` : '';
@@ -224,10 +224,11 @@ function render() {
     const whos = [...new Set(all.map(t => t.assignee).filter(Boolean))].sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
     const open = st.facs.filter(f => !f.complete && !f.archived && !f.hold);
     const flt = `<div class="filters"><select id="at_lead" aria-label="Transition lead"><option value="">All transition leads</option>${leads.map(e => `<option value="${esc(e)}" ${e === F.lead ? 'selected' : ''}>${esc(nameOf(e))}</option>`).join('')}</select><select id="at_who" aria-label="Assigned to"><option value="">Anyone's tasks</option>${whos.map(e => `<option value="${esc(e)}" ${e === F.who ? 'selected' : ''}>${esc(nameOf(e))}${e === me() ? ' (me)' : ''}</option>`).join('')}</select>${facSel('at_fac', all, F.fac, open)}${corpSel('at_corp', all, F.corp, open)}${F.lead || F.who || F.fac || F.corp ? '<button class="btn sm" data-clearf="all">Clear filters</button>' : ''}<span class="meta">${ts.length} of ${all.length} tasks</span></div>`;
+    if (lookOn()) m.innerHTML = allLookHtml(all, ts, flt, facOk); else
     m.innerHTML = `<h1>All open tasks</h1><p class="sub">Anyone can open anyone's task and finish it. The app records who actually did it, and the person it was assigned to gets an FYI email. "Transition lead" shows every task on the facilities they run, whoever it's assigned to. Tasks that haven't started yet are on the facility page.</p>${flt}<div class="list">${groupedTasks(ts, true, true, facOk) || '<div class="empty">No open tasks match.</div>'}</div>${doneTable()}`;
   } else if (ui.view === 'analytics') { m.innerHTML = analyticsHtml(); analyticsAfter();
   } else if (ui.view === 'tracker') m.innerHTML = trackerHtml();
-  else if (ui.view === 'groups') m.innerHTML = groupsHtml();
+  else if (ui.view === 'groups') m.innerHTML = lookOn() ? groupsLookHtml() : groupsHtml();
   else if (ui.view === 'inbox') m.innerHTML = inboxHtml();
   else if (ui.view === 'outbox') m.innerHTML = outboxHtml();
   else if (ui.view === 'settings') m.innerHTML = admin ? settingsHtml() : '<div class="empty">Only admins can change settings.</div>';
@@ -462,6 +463,8 @@ function settingsHtml() {
     <div class="row" style="margin-top:8px"><button type="button" class="btn sm" id="addperson">+ Add a person</button><button type="button" class="btn sm" id="findemails">Find missing emails</button></div></div>
   <div class="card"><b>Intake reps picked at scheduling</b>${tip('Facilities with this account manager get no intake rep until they\'re scheduled. On the schedule task, the first rep below with 0 or 1 facilities ordering that day gets it, otherwise the first with 2. Everyone at 3 or more: the date moves to the next business day. Facilities already scheduled keep their rep.')}<div class="row" style="margin-top:8px">${fld('Account manager', sel('s_autoacct', [...P].filter(p => p.rep && validEmail(p.email)).sort(byName).map(p => [lc(p.email), p.name]), (s.autoRep || {}).acct || '', true), 'Blank = off: every facility gets its intake rep the usual way.')}${fld('Their reps, in the order they get picked (1 name per line)', `<textarea id="s_autoreps" class="plain">${esc(((s.autoRep || {}).reps || []).map(e => nameOf(e)).join('\n'))}</textarea>`, 'Each one needs "Rep / account manager" ticked under Team.')}</div></div>
   <div class="card"><b>New facility scheduling</b>${tip('When a new facility (not from GNS Chicago) is scheduled, the account manager and intake rep get an email, plus these people. The schedule lead is CC\'d.')}<div class="row" style="margin-top:8px">${fld('"Scheduled" email also goes to (1 email per line)', `<textarea id="s_nfnotify" class="plain">${esc((s.nfNotify || []).join('\n'))}</textarea>`)}</div></div>
+  <div class="card"><b>My work screen</b>${tip('Ticked: transition leads see their facilities as cards and work each one in a side panel; everyone else checks off pumps and GDD right on the screen. Untick to go back to the old "My tasks" list for everyone. Nothing else changes either way.')}<div style="margin-top:8px">${chk('s_newwork', 'Use the new My work screen', s.newWork !== false)}</div></div>
+  <div class="card"><b>New look</b>${tip('Ticked: All open tasks and Corporates show as cards, and the facility page, corporate page and Settings are grouped into sections that open on click. Untick to go back to the old look everywhere else. Nothing else changes either way.')}<div style="margin-top:8px">${chk('s_newlook', 'Use the new look on the other screens', s.newLook !== false)}</div></div>
   <div class="card"><b>Transition lead emails</b>${tip('Ticked: transition leads find their own tasks in "My tasks" instead of getting emails about them. Changes after the Chicago handoff email (dates, address, rep, Gentell WC Transition Lead) come as a task instead of an email.')}<div style="margin-top:8px">${chk('s_leadquiet', 'Don\'t email transition leads about their own tasks', s.leadQuiet)}</div><div class="hint">Stops, for the facility's transition lead: to-do emails, reminders, "Reassigned to you", "Back in your queue", "Done by", "Not needed anymore", "On hold" / "Back on", "No reply" and "At risk" alerts. Still sent: "New transition", "You're now the transition lead", "Transition complete", reminders someone sends by hand, tasks on a facility they aren't the transition lead for, and every email they're CC'd on.</div></div>
   <div class="card"><b>Who does what</b><div class="row" style="margin-top:8px">${Object.entries(ROLES).map(([r, l]) => fld(esc(l), sel('role_' + r, personOpts, s.roles[r], true))).join('')}</div></div>
   <div class="card"><b>Chicago handoff email</b><div class="row" style="margin-top:8px">${fld('Greeting name', txt('s_greet', s.chicagoGreeting), '"Hi ___,"')}${fld('Greeting name when we don\'t take enteral', txt('s_greet2', s.chicagoGreetingNoEnt || 'Brittany'), 'Used when enteral is "Don\'t Supply".')}</div><div class="row">${fld('To (1 email per line)', `<textarea id="s_e1to" class="plain">${esc(s.e1To.join('\n'))}</textarea>`, 'The new intake rep is added automatically.')}${fld('CC (1 email per line)', `<textarea id="s_e1cc" class="plain">${esc(s.e1Cc.join('\n'))}</textarea>`, 'The transition lead and account manager are added automatically.')}</div><div class="meta">Only the new date and "stop supplying". The Gentell WC Transition Lead is added to To automatically.</div></div>
@@ -502,13 +505,14 @@ function readSettingsForm() {
   const autoReps = lines('s_autoreps').map(n => { const p = rows.find(r => lc(r.name) === lc(n)) || rows.find(r => lc(r.email) === lc(n)); if (!p) errs.push('Intake reps picked at scheduling: "' + n + '" isn\'t on the Team list.'); else if (!p.rep || !validEmail(p.email)) errs.push('Intake reps picked at scheduling: ' + p.name + ' needs an email and "Rep / account manager" ticked.'); return p ? lc(p.email) : ''; }).filter(Boolean);
   if (V('s_autoacct') && !autoReps.length) errs.push('Intake reps picked at scheduling: add at least 1 rep, or leave the account manager blank.');
   if (new Set(autoReps).size !== autoReps.length) errs.push('Intake reps picked at scheduling: a rep is listed twice.');
-  return { errs, val: { people: rows, roles, chicagoGreeting: V('s_greet'), chicagoGreetingNoEnt: V('s_greet2') || 'Brittany', e1To, e1Cc, e1bTo, e1bCc, esignTo, esignGreet: V('s_esgreet') || 'Anthony', inserviceUrl: V('s_inservice'), biller: V('s_biller'), tier2Price: V('s_tier2') || '2022 Tier 2', helperDays: hd, amDays: ad, warehouses: lines('s_wh'), depts, shipEnt, shipOst, autoRep: { acct: V('s_autoacct'), reps: autoReps }, nfNotify, leadQuiet: !!V('s_leadquiet') } };
+  return { errs, val: { people: rows, roles, chicagoGreeting: V('s_greet'), chicagoGreetingNoEnt: V('s_greet2') || 'Brittany', e1To, e1Cc, e1bTo, e1bCc, esignTo, esignGreet: V('s_esgreet') || 'Anthony', inserviceUrl: V('s_inservice'), biller: V('s_biller'), tier2Price: V('s_tier2') || '2022 Tier 2', helperDays: hd, amDays: ad, warehouses: lines('s_wh'), depts, shipEnt, shipOst, autoRep: { acct: V('s_autoacct'), reps: autoReps }, nfNotify, leadQuiet: !!V('s_leadquiet'), newWork: !!V('s_newwork'), newLook: !!V('s_newlook') } };
 }
 
 // ---------- drawers ----------
 function renderLayer() {
   const L = $('#layer');
   if (ui.next) { const f = facById(ui.next.fac); L.innerHTML = f ? nextDrawer(f, ui.next.from) : ''; if (!f || !L.innerHTML) ui.next = null; }
+  else if (ui.openWork && typeof workPanel === 'function') { L.innerHTML = workPanel(ui.openWork); if (!L.innerHTML) ui.openWork = null; }
   else if (ui.openTask) { const t = taskByKey(ui.openTask); L.innerHTML = t ? taskDrawer(t) : ''; if (!t) ui.openTask = null; }
   else if (ui.openFac) { const f = facById(ui.openFac); L.innerHTML = f ? facDrawer(f) : ''; }
   else if (ui.openGroup) { const g = grp(ui.openGroup); L.innerHTML = g ? corpDrawer(g) : ''; }
@@ -516,6 +520,7 @@ function renderLayer() {
   else L.innerHTML = '';
   if (ui.openTask) { const g = document.getElementById('g'); if (g && g.value === 'Yes') { const b = document.getElementById('whbox'); if (b) b.hidden = false; } }
   syncRepLocks();
+  lookAfter();
 }
 const closeX = '<button class="btn sm" data-close aria-label="Close">✕</button>';
 // right after the Brightree report or the portal setup is done: recommend doing the next one now, with a button straight to it
@@ -538,7 +543,25 @@ function taskDrawer(t) {
   const req = f && f.req ? st.reqs.find(r => r.key === f.req) : null;
   const quick = ui.answer && def.quick && !isDone ? `<div class="card" style="padding:12px;border-color:var(--accent)"><b>Record "${esc(ui.answer)}" for this task?</b><div class="meta">You clicked "${esc(ui.answer)}" in the email.</div><div class="row" style="margin-top:8px"><button class="btn pri" data-quick="${esc(ui.answer)}">Yes, record "${esc(ui.answer)}"</button><button class="btn" data-noquick>No, let me fill the form</button></div></div>` : '';
   return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="Task"><header><div style="min-width:0;flex:1"><div class="meta">${t.nf ? (() => { const n = nfById(t.nf); return n ? `<span class="linkish" data-nf="${n.id}">${esc(n.name)}</span> · ${nfNo(n)} · new facility · ${esc(n.group)}` : 'New facility'; })() : f ? `<span class="linkish" data-fac="${f.id}">${esc(facName(f))}</span>${chiName(f) ? ' (Chicago: ' + esc(f.name) + ')' : ''} · CT-${pad(f.id)} · ${esc(f.group)} · ${facLink(f).replace('Facility page', 'Open facility page')}` : 'Corporate: ' + esc(t.group === '__nocorp' ? 'not known yet' : t.group)}</div><h1 style="font-size:17px">${esc(def.title(t))}</h1><div class="meta">Assigned to <b>${esc(nameOf(t.assignee))}</b> · due ${fmt(t.due)}${isWaiting(t) ? ' · starts ' + fmt(t.opensOn) : ''} · ${esc(t.status)}</div>${isHighTask(t) ? HIGH_PILL : ''}</div>${closeX}</header><div class="body">
-  ${isDone ? `<div class="okmsg">${t.status === 'Not needed' ? 'Not needed anymore' : 'Done by <b>' + esc(t.doneByName || nameOf(t.doneBy)) + '</b>'} on ${fmt(t.doneOn)}${t.doneBy && t.doneBy !== t.assignee ? ' (assigned to ' + esc(nameOf(t.assignee)) + ')' : ''}${t.closedOnFac ? ', marked done on the facility page' : ''}.</div>${reopenCard(t, ppl)}` : `
+${taskBody(t)}
+  </div></div>`;
+}
+// the inside of a task: its form and everything that can be done with it. compact = a box in the My work panel
+function taskBody(t, compact) {
+  const def = TT[t.type], f = t.fac ? facById(t.fac) : null, isDone = done(t);
+  const ppl = [...new Map([[t.assignee, nameOf(t.assignee)], ...people().filter(p => validEmail(p.email)).map(p => [lc(p.email), p.name])]).entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), undefined, { sensitivity: 'base' }));
+  const quick = ui.answer && def.quick && !isDone ? `<div class="card" style="padding:12px;border-color:var(--accent)"><b>Record "${esc(ui.answer)}" for this task?</b><div class="meta">You clicked "${esc(ui.answer)}" in the email.</div><div class="row" style="margin-top:8px"><button class="btn pri" data-quick="${esc(ui.answer)}">Yes, record "${esc(ui.answer)}"</button><button class="btn" data-noquick>No, let me fill the form</button></div></div>` : '';
+  if (compact) {
+    const more = [mayRemind(t) ? `<div class="row" style="align-items:center;justify-content:space-between"><span class="meta">${(() => { const l = lastReminder(t); return l ? 'Last reminder ' + esc(whenET(remAt(l))) + '.' : 'No reminder sent yet.'; })()}</span>${remindBtn(t)}</div>` : '',
+      `<div class="row" style="align-items:center"><label for="re" class="meta">Reassign to</label><select id="re">${ppl.map(([e, n]) => `<option value="${esc(e)}" ${e === t.assignee ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select><button class="btn sm" id="re_go">Reassign</button></div>`].filter(Boolean).join('');
+    const notes = [isHighTask(t) ? 'High importance: the Brightree report is done. Schedule as soon as possible, before the last delivery dates change.' : '', me() !== t.assignee ? 'This is ' + nameOf(t.assignee) + '\'s task. You can finish it anyway. It\'ll say "Done by ' + meName() + '" and ' + nameOf(t.assignee) + ' gets an FYI email.' : '', t.reopened ? 'Put back in the queue ' + fmt(t.reopened) + '. What was entered last time is filled in: change only what was wrong.' : ''].filter(Boolean);
+    return `<div class="wbmeta">Due ${fmtS(t.due)}${notes.length ? tip(notes.map(esc).join('<br><br>')) : ''}</div>
+  ${quick}
+  ${f && (f.files || []).length ? `<div class="meta">${(f.files || []).length ? '<b>Attachments:</b> ' + f.files.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>`).join(', ') : ''}</div>` : ''}
+  <form id="tf" style="display:flex;flex-direction:column;gap:12px">${def.form(t)}<div id="tf_err"></div><div class="row" style="align-items:center"><button class="btn pri" type="submit">${def.submit ? esc(def.submit(t)) : 'Mark done'}</button>${STORE.mode === 'demo' ? '<button class="btn" type="button" id="tf_ex">Fill example</button>' : ''}</div></form>
+  <details class="wmore"><summary>Reassign${mayRemind(t) ? ' or remind' : ''}</summary>${more}</details>`;
+  }
+  return `  ${isDone ? `<div class="okmsg">${t.status === 'Not needed' ? 'Not needed anymore' : 'Done by <b>' + esc(t.doneByName || nameOf(t.doneBy)) + '</b>'} on ${fmt(t.doneOn)}${t.doneBy && t.doneBy !== t.assignee ? ' (assigned to ' + esc(nameOf(t.assignee)) + ')' : ''}${t.closedOnFac ? ', marked done on the facility page' : ''}.</div>${reopenCard(t, ppl)}` : `
   ${t.reopened ? `<div class="note">Put back in the queue ${fmt(t.reopened)}${(t.history || []).length ? ' by ' + esc(t.history[t.history.length - 1].reopenedByName) : ''}. What was entered last time is filled in below: change only what was wrong.</div>` : ''}
   ${quick}
   ${me() !== t.assignee ? `<div class="instr">This is ${esc(nameOf(t.assignee))}'s task. You can finish it anyway. It'll say "Done by ${esc(meName())}" and ${esc(nameOf(t.assignee))} gets an FYI email.</div>` : ''}
@@ -547,8 +570,7 @@ function taskDrawer(t) {
   <form id="tf" style="display:flex;flex-direction:column;gap:12px">${def.form(t)}<div id="tf_err"></div><div class="row" style="align-items:center"><button class="btn pri" type="submit">${def.submit ? esc(def.submit(t)) : 'Mark done'}</button>${STORE.mode === 'demo' ? '<button class="btn" type="button" id="tf_ex">Fill example</button>' : ''}</div></form>
   ${mayRemind(t) ? `<div class="card" style="padding:10px"><div class="row" style="align-items:center;justify-content:space-between"><span class="meta">${(() => { const l = lastReminder(t); return l ? 'Last reminder ' + esc(whenET(remAt(l))) + '.' : 'No reminder sent yet.'; })()} ${canRemind(t) ? '' : 'Next one possible ' + esc(whenET(nextReminderAt(t))) + '.'}</span>${remindBtn(t)}</div></div>` : ''}
   ${f && t.assignee === amOf(f) ? noteBox(f, 'task') : ''}
-  <div class="card" style="padding:10px"><div class="row" style="align-items:center"><label for="re" class="meta">Reassign to</label><select id="re">${ppl.map(([e, n]) => `<option value="${esc(e)}" ${e === t.assignee ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select><button class="btn sm" id="re_go">Reassign</button></div></div>`}
-  </div></div>`;
+  <div class="card" style="padding:10px"><div class="row" style="align-items:center"><label for="re" class="meta">Reassign to</label><select id="re">${ppl.map(([e, n]) => `<option value="${esc(e)}" ${e === t.assignee ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select><button class="btn sm" id="re_go">Reassign</button></div></div>`}`;
 }
 // a done task checked off by mistake: put it back for the same person or someone else
 function reopenCard(t, ppl) {
@@ -584,7 +606,7 @@ function facDrawer(f) {
   return `<div class="scrim" data-close></div><div class="drawer" role="dialog" aria-label="Facility"><header><div style="flex:1;min-width:0"><div class="meta">CT-${pad(f.id)} · ${esc(f.group || 'corporate not known yet')}</div><h1 style="font-size:17px">${esc(facName(f))}</h1>${chiTag(f)}<span class="pill ${c}">${s}</span>${atRisk(f) ? ' <span class="pill p-risk">At risk</span>' : ''}</div>${closeX}</header><div class="body">
   ${editDetails(f, R, A)}
   <div class="kv"><div>Chicago name</div><div>${esc(f.name)}</div><div>Address</div><div>${esc(f.address) || '-'} ${f.state ? '(' + esc(f.state) + ')' : ''}</div><div>Intake / clinical rep</div><div>${esc(nameOf(f.rep)) || autoRepTxt(f) || 'none'} / ${esc(nameOf(f.clin) || '-')}${f.repAuto ? '<div class="meta">' + (f.repAuto.override ? 'Picked by hand at scheduling (the rules picked ' + esc(nameOf(f.repAuto.pick) || 'nobody: everyone was full') + ')' : 'Picked automatically at scheduling') + ', ordering ' + fmtS(f.repAuto.ord) + '</div>' : ''}${(f.repHistory || []).length ? '<div class="meta">Intake rep before: ' + f.repHistory.map(h => esc(nameOf(h.rep)) + ' (cleared ' + fmtS(h.on) + ')').join(', ') + '</div>' : ''}</div><div>Account manager</div><div>${esc(nameOf(acctOf(f)) || '-')}</div><div>Transition lead</div><div>${esc(nameOf(amOf(f)))}</div><div>Wound rep / regional</div><div>${esc(f.wound ? f.wound.name : '-')} / ${esc(f.regional ? f.regional.name : '-')}</div><div>Gentell WC Transition Lead</div><div>${ctlOf(f) ? esc(ctlShow(f)) + ' <span class="meta">' + esc(ctlEmail(f)) + '</span>' : ctlSet(f) ? esc(ctlShow(f)) : ctlNeeded(f) ? '<span class="meta">Not picked yet (' + esc(roleName('rules')) + ', "Pick the reps")</span>' : '-'}${f.e1b ? '<div class="meta">Emailed to send the facility email ' + fmtS(f.e1b) + '</div>' : ''}</div><div>Providers (eSign)</div><div>${esStatus(f)}</div><div>Why</div><div>${esc(f.why) || '-'}</div>${(f.files || []).length ? `<div>Attachments</div><div>${f.files.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>`).join(', ')}</div>` : ''}<div>Pumps checked / GDD</div><div>${f.pumps === 'already done' ? 'Yes (already done when requested)' : f.pumps ? 'Yes' : 'not yet'} / ${esc(f.gdd || '?')}${f.gddWh ? ' (' + esc(f.gddWh) + ')' : ''}</div>${f.dates ? `<div>First DOS</div><div class="num">${fmt(f.dates.dos)}</div><div>Ordering</div><div class="num">${fmt(f.dates.ord)}</div><div>Delivery</div><div class="num">${fmt(f.dates.del)} · OS Days ${f.dates.os}</div>` : ''}<div>Chicago handoff email</div><div class="num">${fmtS(f.email1) || '-'}</div><div>Transfer notice to facility</div><div class="num">${fmtS(f.email2) || '-'}${f.email2By ? ' (' + esc(f.email2By) + ')' : ''}${f.notice ? '<div class="meta">To: ' + f.notice.to.map(c => esc(c.name)).join(', ') + '</div>' : ''}</div><div>Contacts request</div><div class="num">${fmtS(f.email3) || '-'}</div>${f.email3 ? `<div>Their reply</div><div>${f.e3Done ? 'Taken care of ' + fmtS(f.e3Done) + (f.e3DoneBy ? ' (' + esc(nameOf(f.e3DoneBy) || f.e3DoneBy) + ')' : '') : f.e3Reply ? 'Replied ' + fmtS(f.e3Reply.at) + ', the transition lead is putting it in' : 'Waiting for their reply'}</div>` : ''}${f.pre ? `<div>Done before the request</div><div>${esc(preList(f).join(', '))}</div>` : ''}</div>
-  <div class="row">${f.email1 && !f.email2 ? '<button class="btn pri sm" data-fact="e2">' + (f.e1Split ? 'Transfer notice already sent' : 'Chicago sent the transfer notice') + '</button>' : ''}${f.email1 ? '<button class="btn sm" data-fact="corr">Dates changed: send correction</button>' : ''}${f.email3 && !f.e3Done ? '<button class="btn sm" data-fact="e3done">Contacts: taken care of</button>' : ''}<button class="btn sm" data-fact="hold">${f.hold ? 'Take off hold' : 'Put on hold'}</button>${isAdmin(me()) ? '<button class="btn sm" data-fact="del" style="margin-left:auto">Delete (test or mistake)</button>' : ''}${demo && f.email1 && !f.email2 ? '<button class="btn sm" data-fact="sim_e2">Demo: Chicago CCs the mailbox on the transfer notice</button>' : ''}${demo && f.email3 && !f.e3Done && !f.e3Reply ? '<button class="btn sm" data-fact="sim_e3">Demo: wound rep replies to the contacts request</button>' : ''}${demo && f.esignAsk && !f.esignGot && !f.esignDone ? '<button class="btn sm" data-fact="sim_es">Demo: Anthony replies with the eSign info</button>' : ''}</div>
+  <div class="row">${f.email1 && !f.email2 ? '<button class="btn pri sm" data-fact="e2">' + 'Transfer notice already sent' + '</button>' : ''}${f.email1 ? '<button class="btn sm" data-fact="corr">Dates changed: send correction</button>' : ''}${f.email3 && !f.e3Done ? '<button class="btn sm" data-fact="e3done">Contacts: taken care of</button>' : ''}<button class="btn sm" data-fact="hold">${f.hold ? 'Take off hold' : 'Put on hold'}</button>${isAdmin(me()) ? '<button class="btn sm" data-fact="del" style="margin-left:auto">Delete (test or mistake)</button>' : ''}${demo && f.email1 && !f.email2 ? '<button class="btn sm" data-fact="sim_e2">Demo: Chicago CCs the mailbox on the transfer notice</button>' : ''}${demo && f.email3 && !f.e3Done && !f.e3Reply ? '<button class="btn sm" data-fact="sim_e3">Demo: wound rep replies to the contacts request</button>' : ''}${demo && f.esignAsk && !f.esignGot && !f.esignDone ? '<button class="btn sm" data-fact="sim_es">Demo: Anthony replies with the eSign info</button>' : ''}</div>
   ${noteBox(f, 'fac')}
   ${attachCard('ct', f)}
   ${stepsCard(f)}
@@ -669,11 +691,11 @@ function fillExample(t) {
 // ---------- clicks ----------
 document.addEventListener('click', async e => {
   const T = e.target;
-  const v = T.closest('[data-view]'); if (v) { ui.view = v.dataset.view; if (v.dataset.outfilter) ui.outFilter = v.dataset.outfilter; ui.openTask = ui.openFac = ui.openGroup = ui.openNf = ui.next = null; render(); return; }
-  if (T.closest('[data-close]')) { ui.openTask = ui.openFac = ui.openGroup = ui.openNf = ui.next = null; ui.answer = null; renderLayer(); return; }
-  const gt = T.closest('[data-gotask]'); if (gt) { ui.next = null; ui.openTask = gt.dataset.gotask; ui.openFac = ui.openGroup = null; ui.answer = null; renderLayer(); return; }
+  const v = T.closest('[data-view]'); if (v) { ui.view = v.dataset.view; if (v.dataset.outfilter) ui.outFilter = v.dataset.outfilter; ui.openWork = ui.openTask = ui.openFac = ui.openGroup = ui.openNf = ui.next = null; render(); return; }
+  if (T.closest('[data-close]')) { ui.openWork = ui.openTask = ui.openFac = ui.openGroup = ui.openNf = ui.next = null; ui.answer = null; renderLayer(); return; }
+  const gt = T.closest('[data-gotask]'); if (gt) { ui.next = null; ui.openWork = null; ui.openTask = gt.dataset.gotask; ui.openFac = ui.openGroup = null; ui.answer = null; renderLayer(); return; }
   if (T.closest('[data-leadnote]')) { e.stopPropagation(); return; } // typing in the tracker notes box doesn't open the facility
-  const ef = T.closest('[data-editfac]'); if (ef) { e.stopPropagation(); ui.openFac = +ef.dataset.editfac; ui.editOpen = ui.openFac; ui.openTask = ui.openGroup = null; renderLayer(); const b = document.getElementById('fdetbox'); if (b) b.scrollIntoView({ block: 'start' }); return; }
+  const ef = T.closest('[data-editfac]'); if (ef) { e.stopPropagation(); ui.openWork = null; ui.openFac = +ef.dataset.editfac; ui.editOpen = ui.openFac; ui.openTask = ui.openGroup = null; renderLayer(); const b = document.getElementById('fdetbox'); if (b) b.scrollIntoView({ block: 'start' }); return; }
   const sn = T.closest('[data-savenote]'); if (sn) { const id = +sn.dataset.savenote, box = document.getElementById(sn.dataset.notebox); if (!box) return; const ok = await saveNote(id, box.value.trim()); if (!ok && !ui.errors.length) toast('No changes to save.'); return; }
   const rc = T.closest('[data-recheckbt]'); if (rc) { const id = +rc.dataset.recheckbt, vals = { le: V('rc_le'), lo: V('rc_lo'), cad: V('rc_cad') }; let res = null;
     const f0 = facById(id), pre = f0 && (updateBtCheck(f0, vals)); if (pre) { $('#rc_err').innerHTML = '<div class="err">' + esc(pre) + '</div>'; return; }
@@ -689,7 +711,7 @@ document.addEventListener('click', async e => {
   if (T.id === 'bk_all') { document.querySelectorAll('[data-selfac]').forEach(x => { x.checked = T.checked; T.checked ? ui.sel.add(+x.dataset.selfac) : ui.sel.delete(+x.dataset.selfac); }); bkCount(); return; }
   if (T.closest('#bkbox > summary')) setTimeout(() => { const d = $('#bkbox'); ui.bkOpen = !!(d && d.open); });
   // "Facility page" link inside a task row: opens the facility, not the task (Ctrl/middle-click still opens a new tab)
-  const fp = T.closest('[data-facpage]'); if (fp) { if (e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); ui.openFac = +fp.dataset.facpage; ui.openTask = ui.openGroup = null; ui.answer = null; renderLayer(); return; }
+  const fp = T.closest('[data-facpage]'); if (fp) { if (e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); ui.openWork = null; ui.openFac = +fp.dataset.facpage; ui.openTask = ui.openGroup = null; ui.answer = null; renderLayer(); return; }
   const rm = T.closest('[data-remind]'); if (rm) { e.stopPropagation(); const key = rm.dataset.remind; let why = '', who = ''; rm.disabled = true;
     await act(() => { const t = taskByKey(key); who = t ? nameOf(t.assignee) : ''; why = sendReminder(t, me(), meName()); if (why) return false; });
     if (why) toast(why); else if (!ui.errors.length) toast('Reminder sent to ' + who + '. No more reminders on this task for 24 hours.'); return; }
@@ -698,9 +720,9 @@ document.addEventListener('click', async e => {
   const ds = T.closest('[data-donesort]'); if (ds) { const k = ds.dataset.donesort; ui.doneSort = ui.doneSort.k === k ? { k, dir: -ui.doneSort.dir } : { k, dir: k === 'on' ? -1 : 1 }; render(); return; }
   if (T.closest('[data-doneall]')) { ui.doneAll = !ui.doneAll; render(); return; }
   if (typeof analyticsClick === 'function' && analyticsClick(T)) return;
-  const tk = T.closest('[data-task]'); if (tk) { ui.openTask = tk.dataset.task; ui.openFac = ui.openGroup = ui.openNf = null; ui.answer = null; renderLayer(); return; }
-  const fr = T.closest('[data-fac]'); if (fr && !T.closest('select') && !T.closest('textarea')) { ui.editOpen = null; ui.openFac = +fr.dataset.fac; ui.openTask = ui.openGroup = ui.openNf = null; renderLayer(); return; }
-  const eg = T.closest('[data-editgrp]'); if (eg) { ui.openGroup = eg.dataset.editgrp; ui.openTask = ui.openFac = null; renderLayer(); return; }
+  const tk = T.closest('[data-task]'); if (tk) { ui.openWork = null; ui.openTask = tk.dataset.task; ui.openFac = ui.openGroup = ui.openNf = null; ui.answer = null; renderLayer(); return; }
+  const fr = T.closest('[data-fac]'); if (fr && !T.closest('select') && !T.closest('textarea')) { ui.editOpen = null; ui.openWork = null; ui.openFac = +fr.dataset.fac; ui.openTask = ui.openGroup = ui.openNf = null; renderLayer(); return; }
+  const eg = T.closest('[data-editgrp]'); if (eg) { ui.openGroup = eg.dataset.editgrp; ui.openWork = ui.openTask = ui.openFac = null; renderLayer(); return; }
   if (T.id === 'reload') { ui.errors = []; await act(async () => { }); return; }
   if (T.id === 'refresh') { await act(async () => { }, 'Up to date'); return; }
   if (T.id === 'signout') { STORE.signOut(); return; }
@@ -803,7 +825,7 @@ document.addEventListener('click', async e => {
     toast(found + ' of ' + rows.length + ' found. Check them, then "Save settings".'); return;
   }
   if (T.id === 'nextDay') { st.today = addBiz(st.today, 1); await act(() => { }, 'Now ' + fmt(st.today)); return; }
-  if (T.id === 'reset') { await STORE.init(); ui.view = 'new'; ui.openTask = ui.openFac = ui.openGroup = null; ui.errors = []; render(); toast('Demo reset'); return; }
+  if (T.id === 'reset') { await STORE.init(); ui.view = 'new'; ui.openWork = ui.openTask = ui.openFac = ui.openGroup = null; ui.errors = []; render(); toast('Demo reset'); return; }
 });
 function segSync(id) { const h = document.getElementById(id), g = document.querySelector(`[data-seg="${id}"]`); if (!h || !g) return; g.querySelectorAll('.segb').forEach(b => { const on = b.dataset.segval === h.value; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); }); }
 
@@ -826,7 +848,7 @@ document.addEventListener('submit', async e => {
     }
     const ok = await act(() => { const t2 = taskByKey(key); if (!t2 || done(t2)) { toast('Someone already finished this task.'); return false; } TT[t2.type].done(t2, { by: me(), byName: meName() }); finishTask(t2, me(), meName()); }, 'Done. Recorded as done by ' + meName() + '.');
     if (ok) { if (t.type === 'FASTCARE') { delete ui.shots.fc_fac; delete ui.shots.fc_corp; } if (t.type === 'FAC_NOTICE') ui.notice = null; ui.openTask = null;
-      if (['BRIGHTREE', 'PORTAL_SETUP'].includes(t.type) && !ui.errors.length && nextStep(facById(t.fac), t.type)) ui.next = { fac: t.fac, from: t.type };
+      if (!ui.openWork && ['BRIGHTREE', 'PORTAL_SETUP'].includes(t.type) && !ui.errors.length && nextStep(facById(t.fac), t.type)) ui.next = { fac: t.fac, from: t.type };
       renderLayer(); }
     return;
   }
@@ -926,14 +948,14 @@ document.addEventListener('change', async e => {
   const np = id.match(/^de_push_(\d+)$/); if (np) { const fid = +np[1], push = e.target.checked; await act(() => { const f = facById(fid); if (!f || !!f.noPush === !push) return false; f.noPush = !push; f.noPushBy = meName(); }, push ? 'Pushed out' : 'Not pushed out: back to the original dates'); return; }
   if (id === 'fd_gdd') { const b = $('#fd_whbox'); if (b) b.hidden = e.target.value !== 'Yes'; }
   const ln = e.target.dataset && e.target.dataset.leadnote; if (ln) { const val = e.target.value.trim(); setTimeout(async () => { const nx = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.leadnote : null; await saveNote(+ln, val); if (nx) { const el = document.querySelector(`[data-leadnote="${nx}"]`); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } } }); }
-  if (id === 'who') { const p = person(e.target.value); st.me = { email: lc(p.email), name: p.name }; ui.openTask = ui.openFac = ui.openGroup = null; render(); }
+  if (id === 'who') { const p = person(e.target.value); st.me = { email: lc(p.email), name: p.name }; ui.openWork = ui.openTask = ui.openFac = ui.openGroup = null; render(); }
   if (id === 'forwho') { ui.forWho = e.target.value === me() ? null : e.target.value; Object.assign(ui.myF, { fac: '', corp: '' }); render(); }
   if (id === 'mt_fac' || id === 'mt_corp') { ui.myF[id.slice(3)] = e.target.value; render(); }
   if (['at_lead', 'at_who', 'at_fac', 'at_corp'].includes(id)) { ui.allF[id.slice(3)] = e.target.value; render(); }
   if (typeof analyticsChange === 'function') analyticsChange(e.target);
   const li = e.target.closest && e.target.closest('[data-linkin]'); if (li && li.value) { const mid = li.dataset.linkin, fid = +li.value; await act(() => { const m = st.inbox.find(x => String(x._id) === String(mid)); if (m) { m.fac = fid; m.processed = true; } }, 'Linked'); }
 });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && (ui.openTask || ui.openFac || ui.openGroup || ui.openNf || ui.next)) { ui.openTask = ui.openFac = ui.openGroup = ui.openNf = ui.next = null; renderLayer(); } if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('task')) e.target.click(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && (ui.openWork || ui.openTask || ui.openFac || ui.openGroup || ui.openNf || ui.next)) { ui.openWork = ui.openTask = ui.openFac = ui.openGroup = ui.openNf = ui.next = null; renderLayer(); } if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('task')) e.target.click(); });
 function addFiles(list) { ui.dropped = [...ui.dropped, ...list]; const l = $('#rq_list'); if (l) l.textContent = ui.dropped.map(f => f.name).join(', '); }
 document.addEventListener('dragover', e => { const z = e.target.closest && e.target.closest('#rq_drop'); if (z) { e.preventDefault(); z.classList.add('over'); } });
 document.addEventListener('dragleave', e => { const z = e.target.closest && e.target.closest('#rq_drop'); if (z) z.classList.remove('over'); });
