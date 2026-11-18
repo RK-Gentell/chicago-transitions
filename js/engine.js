@@ -465,7 +465,7 @@ function mailStillValid(m) {
 }
 
 // ---------- tasks ----------
-const REPEATABLE = new Set(['EMR_FIX', 'EMR_CHECK', 'LEAD_NOTE', 'PRICE', 'RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS', 'PORTAL_UPDATE', 'ESIGN_PORTAL', 'FAC_NOTICE']);
+const REPEATABLE = new Set(['CORP_NOTE', 'EMR_FIX', 'EMR_CHECK', 'LEAD_NOTE', 'PRICE', 'RULE', 'CONTACTS_PORTAL', 'GDD_PORTAL', 'E3_REPLY', 'ADDRESS', 'PORTAL_UPDATE', 'ESIGN_PORTAL', 'FAC_NOTICE']);
 function newTask(type, o) {
   const base = 't:' + type + ':' + (o.fac ? 'f' + o.fac : o.nf ? 'n' + o.nf : 'g' + lc(o.group));
   let key = base;
@@ -1267,6 +1267,7 @@ function run() {
         mail({ key: 'm:E7:' + t.key, code: 'E7', to: [t.assignee], cc: [am], task: t.key, cond: { task: t.key }, subject: 'EMR access: ' + g.name, body: `<p>Hi ${esc(first(nameOf(t.assignee)))},</p><p>We need EMR access for <b>${esc(g.name)}</b>. These are in the portal: ${gf.map(x => esc(facName(x))).join(', ')}.</p><p>Please enter "Emr", "Emr Username" and "Emr Password" on each one and save the QR code on the server in the "Authenticator" folder, named the username. Then mark the task done.</p>` });
       }
       emrTaskUpdate(g, gf);
+      corpNote(g);
     }
     // dates (frozen once Email 1 went out)
     // no usable state (address missing or no ship point for it): no dates, so nothing can be scheduled with a wrong delivery date
@@ -1534,6 +1535,22 @@ function stepIsDone(f, k) {
 // Any other facility of a corporate with a login (came in after, or the corporate already had one) gets its EMR info from the transition
 // lead at portal setup, copied from another facility of the corporate (or "EMR info in portal" if portal setup is already done).
 // "Access doesn't work" → f.emrBad → EMR_FIX for Priscilla → "Check EMR access" for the lead.
+// corporate note ("Don't charge shipping…", Nov 18 2026): 1 task per corporate for the transition lead of the first facility
+// added to Brightree (was a line on portal setup, which used to set g.noteDone). Ticked on the corporate page → the task closes.
+const CORP_NOTE_TEXT = 'Don\'t charge shipping for special orders or pumps (we will charge for rush shipping, but get corp approval for rush orders)';
+const btAddedOn = x => { const t = tasksOf(x, 'PORTAL_ADD').filter(y => y.status === 'Done').pop(); return t ? (t.doneAt || t.doneOn || '') : ''; };
+function corpNote(g) {
+  const open = st.tasks.filter(t => !t.fac && !t.nf && t.type === 'CORP_NOTE' && lc(t.group) === lc(g.name) && !done(t));
+  if (g.noteDone) { open.forEach(t => { t.status = 'Not needed'; t.doneOn = st.today; }); return; }
+  if (open.length) return;
+  const inBt = facsOfGroup(g.name).filter(x => x.inPortal && !x.hold && !x.complete && !x.deleted)
+    .sort((a, b) => (btAddedOn(a) || '9').localeCompare(btAddedOn(b) || '9') || a.id - b.id);
+  if (!inBt.length) return;
+  const t = newTask('CORP_NOTE', { group: g.name, assignee: amOf(inBt[0]) });
+  mail({ key: 'm:E13:' + t.key, code: 'E13', to: [t.assignee], task: t.key, cond: { task: t.key }, subject: 'To do: Corporate note for ' + g.name, body: `<p>Add the corporate note to <b>${esc(g.name)}</b> in the portal ("Corporates"):</p><p><i>${esc(CORP_NOTE_TEXT)}</i></p><p>Then mark the task done. Facilities in this corporate can't be marked scheduled until it's done.</p>` });
+}
+// open corporate tasks that have to be done before a facility's Schedule task can be marked done
+const corpBlockers = f => f && f.group ? st.tasks.filter(t => !t.fac && !t.nf && lc(t.group) === lc(f.group) && ['CORP_NOTE', 'EMR'].includes(t.type) && !done(t) && !t.archived) : [];
 const emrLogin = g => !!(g && (g.emr || g.existing || done(gTask(g.name, 'EMR'))));
 const emrCovered = f => { const g = G(f); return !!(g && (g.emrFacs || []).includes(f.id)); };
 const emrInfoIn = f => preDone(f, 'emr') || !!f.emrInfo || !!done(fTask(f, 'EMR_PORTAL')) || emrCovered(f);

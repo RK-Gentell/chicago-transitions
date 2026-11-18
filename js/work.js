@@ -14,7 +14,7 @@ const isLeadView = () => isAm(forWho());
 
 // short step names for cards (the full title is still on the task itself)
 const WSHORT = {
-  RULE: 'Pick the reps', AREAS: 'Areas of care', PRICE: 'Price table', EMR: 'EMR access', EMR_ADD: 'EMR login', PORTAL_ADD: 'Add to Brightree',
+  RULE: 'Pick the reps', AREAS: 'Areas of care', PRICE: 'Price table', CORP_NOTE: 'Corporate note', EMR: 'EMR access', EMR_ADD: 'EMR login', PORTAL_ADD: 'Add to Brightree',
   PUMPS: 'Pumps', GDD: 'GDD orders', GDD_PORTAL: 'GDD warehouse in portal', FASTCARE: 'FastCare', BRIGHTREE: 'Brightree report',
   PORTAL_SETUP: 'Portal setup', LEAD_NOTE: 'Changed after the handoff email', EMR_CHECK: 'Check EMR access', EMR_PORTAL: 'EMR info in portal', EMR_FIX: 'EMR access problem',
   CONTACTS_PORTAL: 'Contacts into portal', SCHEDULE: 'Schedule', ADDRESS: 'Address', ESIGN_PORTAL: 'eSign info into portal',
@@ -22,7 +22,7 @@ const WSHORT = {
   CHICAGO_FOLLOW: 'Chicago facility email', NF_SCHEDULE: 'Schedule', NF_REPS: 'Pick the reps', NF_RECAL: 'Fix the Ordering Calendar'
 };
 // the order the steps are usually done in (boxes in the panel and rows on a card follow it)
-const WORDER = ['RULE', 'AREAS', 'PRICE', 'EMR', 'FASTCARE', 'ADDRESS', 'PORTAL_ADD', 'EMR_ADD', 'PUMPS', 'GDD', 'BRIGHTREE', 'PORTAL_SETUP', 'EMR_FIX', 'EMR_CHECK', 'EMR_PORTAL', 'GDD_PORTAL',
+const WORDER = ['RULE', 'AREAS', 'PRICE', 'CORP_NOTE', 'EMR', 'FASTCARE', 'ADDRESS', 'PORTAL_ADD', 'EMR_ADD', 'PUMPS', 'GDD', 'BRIGHTREE', 'PORTAL_SETUP', 'EMR_FIX', 'EMR_CHECK', 'EMR_PORTAL', 'GDD_PORTAL',
   'SCHEDULE', 'NF_REPS', 'NF_SCHEDULE', 'NF_RECAL', 'CHICAGO_FOLLOW', 'E3_REPLY', 'EMAIL3_FOLLOW', 'CONTACTS_PORTAL', 'ESIGN_PORTAL', 'FAC_NOTICE', 'PORTAL_UPDATE', 'LEAD_NOTE'];
 const wShort = t => WSHORT[t.type] || taskTitle(t);
 const wOrd = t => { const i = WORDER.indexOf(t.type); return i < 0 ? 99 : i; };
@@ -146,7 +146,7 @@ const wAge = t => bizCount(t.reopened || t.opensOn || t.created || st.today, st.
 function quickWorkHtml(ts, all, flt) {
   const byType = {}; ts.forEach(t => (byType[t.type] = byType[t.type] || []).push(t));
   const oldest = arr => arr.sort((a, b) => wAge(b) - wAge(a) || (a.due < b.due ? -1 : 1));
-  const secs = Object.entries(byType).map(([type, arr]) => [type, oldest(arr)]).sort((a, b) => wAge(b[1][0]) - wAge(a[1][0]));
+  const secs = Object.entries(byType).map(([type, arr]) => [type, oldest(arr)]).sort((a, b) => (a[1].some(isCorpTask) ? 0 : 1) - (b[1].some(isCorpTask) ? 0 : 1) || wAge(b[1][0]) - wAge(a[1][0]));
   const doneToday = st.tasks.filter(t => ['PUMPS', 'GDD'].includes(t.type) && t.status === 'Done' && t.doneOn === st.today && t.doneBy === forWho() && t.assignee === forWho())
     .sort((a, b) => (b.doneAt || '').localeCompare(a.doneAt || ''));
   const body = secs.map(([type, arr]) => wSec(WSHORT[type] || taskTitle(arr[0]).split(':')[0], arr.length, arr.map(qCard).join(''), QUICK_HELP[type])).join('');

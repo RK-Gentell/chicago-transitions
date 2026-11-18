@@ -144,6 +144,12 @@ const TT = {
     validate: () => V('price') ? '' : 'Enter the price table.',
     done: t => { grp(t.group).price = V('price'); }
   },
+  CORP_NOTE: {
+    title: t => 'Corporate note for ' + t.group,
+    form: t => `<div class="instr">portal.isgmed.com → "Corporates" → search <span class="q">${esc(t.group)}</span> → edit. Add this note:</div><div class="tablewrap"><table class="vals"><tr><td>Note</td><td><b>${esc(CORP_NOTE_TEXT)}</b></td></tr></table></div><div class="note">Facilities in this corporate can't be marked scheduled until this is done.</div>${chk('ok', 'Added the note to the corporate in the portal')}`,
+    example: () => ({ ok: true }), validate: () => V('ok') ? '' : 'Tick when the note is in the portal.',
+    done: t => { grp(t.group).noteDone = true; }
+  },
   EMR: {
     title: t => 'EMR access for ' + t.group,
     form: t => { const gf = facsOfGroup(t.group).filter(x => !x.hold); return `<div class="instr">Enter "Emr", "Emr Username" and "Emr Password" in the portal on each facility below. Save the QR code on the server in the "Authenticator" folder, named the username.</div><div class="note">Only the username goes in here. Facilities that come into this corporate later get the EMR info from the transition lead at portal setup, copied from these.</div><ul>${gf.map(x => '<li>' + esc(facName(x)) + (x.inPortal ? '' : ' <b>(not in the portal yet)</b>') + '</li>').join('')}</ul>${fld('"Emr Username"', txt('user', grp(t.group).emr || '', 'e.g. ihcm.lakewood'))}${chk('ok', 'Entered in the portal on every facility above, and saved the QR code')}`; },
@@ -244,7 +250,7 @@ const TT = {
     title: t => 'Portal setup: ' + facName(facById(t.fac)),
     form: t => { const f = facById(t.fac); return f.dates ? portalForm(f) : '<div class="err">No dates yet: the facility needs a full address with a state that has a ship point. Fix it on the facility page.</div>'; }, example: t => { const f = facById(t.fac); return { ok: true, emrok: emrReady(f) || emrLeadNeeds(f) }; },
     validate: t => { const f = facById(t.fac); if (!f.dates) return 'No dates yet: fix the address on the facility page first.'; if (!V('ok')) return 'Tick when saved.'; if (emrReady(f) || emrLeadNeeds(f)) { const e = emrCheckProblem(); if (e) return e; } if (f.esignGot && !f.esignDone && !V('ps_es')) return 'Providers (eSign): pick where things stand.'; return ''; },
-    done: (t, ctx) => { const f = facById(t.fac); if (f.esignGot && !f.esignDone && V('ps_es')) esignAnswer(f, V('ps_es'), ctx ? ctx.byName : ''); G(f).noteDone = true; f.gtc = { wound: '', regional: '' }; gtMark(f, gtRows(f, true)); if (emrReady(f) || emrLeadNeeds(f)) emrCheckDone(f, emrLeadNeeds(f), ctx, 'at portal setup'); else if (!f.emrChecked) f.emrCheckDue = true; }
+    done: (t, ctx) => { const f = facById(t.fac); if (f.esignGot && !f.esignDone && V('ps_es')) esignAnswer(f, V('ps_es'), ctx ? ctx.byName : ''); f.gtc = { wound: '', regional: '' }; gtMark(f, gtRows(f, true)); if (emrReady(f) || emrLeadNeeds(f)) emrCheckDone(f, emrLeadNeeds(f), ctx, 'at portal setup'); else if (!f.emrChecked) f.emrCheckDue = true; }
   },
   // a change after the Chicago handoff email, when Settings "Don't email transition leads about their own tasks" is ticked (instead of the email)
   LEAD_NOTE: {
@@ -280,8 +286,8 @@ const TT = {
   },
   SCHEDULE: {
     title: t => 'Schedule: ' + facName(facById(t.fac)),
-    form: t => { const f = facById(t.fac); return f.dates ? scheduleForm(f) : '<div class="err">No dates yet: the facility needs a full address with a state that has a ship point. Fix it on the facility page.</div>'; }, example: () => ({}),
-    validate: t => { const f = facById(t.fac); if (!f.dates || !stateOK(f)) return 'No dates yet: fix the address on the facility page first.'; if (f.email1) return ''; const s = settingsProblems(); if (s.length) return 'The Chicago handoff email can\'t go out until Settings are finished: ' + s.join(' '); if (autoPending(f) && !V('sc_rep')) return 'Pick the intake rep.'; if (!f.rep && !autoPending(f)) return 'The facility has no intake rep.'; if (f.dates.ord < st.today) return 'The ordering date has passed. Change the dates above and click "Save dates" first.'; return ''; },
+    form: t => { const f = facById(t.fac); return corpBlockBox(f) + (f.dates ? scheduleForm(f) : '<div class="err">No dates yet: the facility needs a full address with a state that has a ship point. Fix it on the facility page.</div>'); }, example: () => ({}),
+    validate: t => { const f = facById(t.fac), cb = corpBlockers(f); if (cb.length) return 'Do the corporate task' + (cb.length > 1 ? 's' : '') + ' for ' + f.group + ' first: ' + cb.map(x => taskTitle(x) + ' (' + nameOf(x.assignee) + ')').join(', ') + '.'; if (!f.dates || !stateOK(f)) return 'No dates yet: fix the address on the facility page first.'; if (f.email1) return ''; const s = settingsProblems(); if (s.length) return 'The Chicago handoff email can\'t go out until Settings are finished: ' + s.join(' '); if (autoPending(f) && !V('sc_rep')) return 'Pick the intake rep.'; if (!f.rep && !autoPending(f)) return 'The facility has no intake rep.'; if (f.dates.ord < st.today) return 'The ordering date has passed. Change the dates above and click "Save dates" first.'; return ''; },
     // the handoff email was already marked sent: done only records the schedule
     // David's facilities: the intake rep is set now. Left as the rules picked it → picked again with the latest numbers (someone may have scheduled in between).
     done: (t, ctx) => { const f = facById(t.fac); if (autoPending(f)) autoAssign(f, V('sc_auto') === V('sc_rep') ? '' : V('sc_rep'), ctx ? ctx.byName : ''); if (f.email1) f.schedDone = st.today; else sendEmail1(f); }
@@ -386,7 +392,6 @@ function portalForm(f) {
     ...AREAS.map(a => ['"CoverageType": ' + a + (f.cov && f.cov[a] ? ' (this facility only)' : ''), g.cov[a] + (a === 'Supplements' ? ' (report shows supplements sent → Facility Bulk Order)' : '')]),
     ['"Auto-supply ENFIT adapter"', nonCovEnt ? 'Check it if the pump is Kangaroo or Omni. Otherwise leave it' : 'Leave unchecked (enteral isn\'t non-covered)'],
     ['"Notes" and "General Info"', 'Transition from Chicago / anything useful from the report (skip respiratory) / no spike set on the report → "Rep to find out which spike set they use at the first pump-fed patient"']];
-  if (!g.noteDone) rows.push(['Corporate note ("Corporates")', 'Don\'t charge shipping for special orders or pumps (we will charge for rush shipping, but get corp approval for rush orders)']);
   const g0 = G(f);
   const emrBox = `<div class="sect">EMR access</div>` + (f.emrBad ? `<div class="note">Waiting on Priscilla: the access didn't work for this facility (${fmt(f.emrBad.on)}). You'll get a "Check EMR access" task when she fixes it.</div>`
     : emrLeadNeeds(f) ? emrCopyInstr(f) + emrChecks(true)
@@ -401,6 +406,11 @@ function esSetupBox(f) {
   if (f.esignDone) return h + '<div class="meta">Already in the portal' + (f.esignDoneBy ? ' (' + esc(f.esignDoneBy) + ')' : '') + '.</div>';
   if (f.esignGot) return h + esignPortalBox(f, 'ps_');
   return h + '<div class="note">Not in yet' + (f.esignAsk ? ': we asked ' + esc(esGreet()) + ' on ' + fmt(f.esignAsk) : '') + '. You\'ll get a separate task once it comes in. Nothing here waits on it.</div>';
+}
+// Schedule task: open corporate tasks (corporate note, EMR access) come first; "Mark done" is blocked until they're done
+function corpBlockBox(f) {
+  const cb = corpBlockers(f); if (!cb.length) return '';
+  return `<div class="card warnbox" style="padding:10px;margin-bottom:10px"><b>Do the corporate task${cb.length > 1 ? 's' : ''} for ${esc(f.group)} first</b><div class="meta" style="margin:2px 0 6px">"Mark done" on this task is blocked until ${cb.length > 1 ? 'they\'re' : 'it\'s'} done.</div>${cb.map(t => `<div class="row" style="align-items:center;margin-top:4px"><span>${esc(taskTitle(t))} <span class="meta">(${esc(nameOf(t.assignee))}${t.assignee === me() ? ', you' : ''})</span></span><button type="button" class="btn sm" data-gotask="${esc(t.key)}">Open</button></div>`).join('')}</div>`;
 }
 function dateEditor(f) {
   if (f.manualDates) { const m = f.dates || manualDatesObj(f); return `<div class="card" style="padding:10px"><b>Dates (already scheduled)</b><div class="meta" style="margin-top:4px">Ordering ${fmt(m.ord)} · date of service ${fmt(m.dos)} · delivery ${fmt(m.del)} · enteral ships ${esc(CAD_L[f.manualDates.cadence] || 'Monthly')}</div><div class="meta">${esc(m.why[0])}.${f.email1 ? '' : ' The Chicago handoff email goes out with these dates as soon as the facility has an intake rep and its areas of care.'}</div></div>`; }

@@ -116,8 +116,10 @@ function readLink() {
 // ---------- lists used on screens ----------
 const forWho = () => ui.forWho || me();
 function openTasksFor(who) { return st.tasks.filter(t => t.assignee === who && !done(t) && !t.archived && !(t.fac && facById(t.fac) && facById(t.fac).hold)); }
-const urg = t => [isWaiting(t) ? 1 : 0, isHighTask(t) ? 0 : 1, t.due];
-const cmp = (a, b) => { const x = urg(a), y = urg(b); return x[0] - y[0] || x[1] - y[1] || (x[2] < y[2] ? -1 : x[2] > y[2] ? 1 : 0); };
+// corporate tasks first (Nov 18 2026), then high importance, then by due date
+const isCorpTask = t => !!t && !t.fac && !t.nf;
+const urg = t => [isWaiting(t) ? 1 : 0, isCorpTask(t) ? 0 : 1, isHighTask(t) ? 0 : 1, t.due];
+const cmp = (a, b) => { const x = urg(a), y = urg(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || (x[3] < y[3] ? -1 : x[3] > y[3] ? 1 : 0); };
 const HIGH_PILL = '<span class="pill p-high" title="The Brightree report is done. Schedule as soon as possible, before the last delivery dates change.">High importance</span>';
 // facility page: where the provider + eSign info stands
 function esStatus(f) {
@@ -886,7 +888,7 @@ document.addEventListener('submit', async e => {
       // Gentell WC Transition Lead on the corporate: fills facilities that have none (applyRule); "Apply to open facilities" overwrites
       if (vals.ctl) g.ctl = vals.ctl; else delete g.ctl;
       facsOfGroup(g.name).filter(f => !f.complete).forEach(f => { if (vals.ap.ctl) setCtl(f, vals.ctl, meName()); if (vals.ap.rep && !autoPending(f) && !(vals.ap.acct && isAutoAcct(vals.acct) && !f.email1 && !f.manualDates)) f.rep = vals.rep; if (vals.ap.clin) f.clin = vals.clin === '__same' ? f.rep : vals.clin; if (vals.ap.acct) f.acct = vals.acct; if (vals.ap.am) f.am = vals.am; if (vals.ap.cov) f.cov = {}; });
-      st.tasks.filter(t => !t.fac && lc(t.group) === lc(g.name) && !done(t)).forEach(t => { if ((t.type === 'AREAS' && covKnown(g)) || (t.type === 'PRICE' && g.price) || (t.type === 'EMR' && g.emr) || (t.type === 'RULE' && !facsOfGroup(g.name).some(f => ruleNeeds(f).length))) finishTask(t, me(), meName() + ' (edited the corporate)'); });
+      st.tasks.filter(t => !t.fac && lc(t.group) === lc(g.name) && !done(t)).forEach(t => { if ((t.type === 'AREAS' && covKnown(g)) || (t.type === 'PRICE' && g.price) || (t.type === 'EMR' && g.emr) || (t.type === 'CORP_NOTE' && g.noteDone) || (t.type === 'RULE' && !facsOfGroup(g.name).some(f => ruleNeeds(f).length))) finishTask(t, me(), meName() + ' (edited the corporate)'); });
     }, 'Saved ' + name);
     if (ok) { ui.openGroup = null; renderLayer(); }
     return;
