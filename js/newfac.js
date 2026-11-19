@@ -178,7 +178,7 @@ function nfProblem(v, old) {
   const ap = addressProblem(v.addr); if (ap) return ap;
   if (!['yes', 'no'].includes(v.pb)) return 'Pick "Part B only" or "Not Part B only".';
   if (!v.noPrev && !v.last) return 'Enter the last supply date with the previous provider, or tick "No previous provider".';
-  if (v.last && v.last > st.today) return 'The last supply date can\'t be in the future.';
+  if (v.last && v.last > add(st.today, BT_AHEAD)) return 'The last supply date can\'t be more than ' + BT_AHEAD + ' days from today (latest ' + fmtS(add(st.today, BT_AHEAD)) + '). Check the year.';
   if (v.ent && !/^\d+$/.test(v.ent)) return 'Amount of enteral patients: type a whole number (0 or more), or leave it blank.';
   if (old && nfEnt(old) && !v.ent) return 'The amount of enteral patients can\'t be left blank. It was entered before; change it if it\'s wrong.';
   // reps are optional on the request (left blank → "Pick the reps" task), but once entered they can't be cleared
@@ -191,7 +191,7 @@ function nfPreview(p, id) {
   const box = document.getElementById(p + 'prev'); if (!box) return;
   const v = nfRead(p), n = nfTemp(v, id);
   const last = document.getElementById(p + 'last'); if (last) last.disabled = v.noPrev;
-  if (!v.addr || addressProblem(v.addr) || !['yes', 'no'].includes(v.pb) || (!v.noPrev && !v.last) || (v.last && v.last > st.today)) { box.innerHTML = '<div class="note">The recommended dates show here once the address, Part B only and the last supply date (or "No previous provider") are in.</div>'; return; }
+  if (!v.addr || addressProblem(v.addr) || !['yes', 'no'].includes(v.pb) || (!v.noPrev && !v.last) || (v.last && v.last > add(st.today, BT_AHEAD))) { box.innerHTML = '<div class="note">The recommended dates show here once the address, Part B only and the last supply date (or "No previous provider") are in.</div>'; return; }
   const r = nfCalc(n); if (!r) { box.innerHTML = ''; return; }
   box.innerHTML = `<div class="card" style="padding:10px"><b>Recommended</b><div style="margin-top:4px">Ordering <b>${fmt(r.ord)}</b> · date of service <b>${fmt(r.dos)}</b> · delivery <b>${fmt(r.del)}</b></div>${nfAutoPending(n) ? '<div class="meta">Intake rep: picked at scheduling (' + esc(nameOf(autoPick(r.ord, n.id)) || 'everyone is full that day') + ' right now).</div>' : ''}<div class="meta">The schedule lead can change the date on the schedule task. It recalculates every day until it's scheduled.</div></div>`;
 }

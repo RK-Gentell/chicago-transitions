@@ -311,3 +311,7 @@ Waiting tasks (`isWaiting`: `opensOn` after today) are left out of "My tasks", "
 - Existing data: corporates whose portal setup was already done have `noteDone` (set by the old portal setup) → no task. Corporates with an open facility in Brightree and no `noteDone` get the task on the next load.
 - Schedule task: `corpBlockers(f)` = open `CORP_NOTE` / `EMR` tasks of the facility's corporate. `corpBlockBox` lists them at the top with "Open" (`data-gotask`); "Mark done" is blocked until they're done.
 - Corporate tasks (no fac, no nf: `isCorpTask` in ui.js) sort first: `urg`/`cmp` (old My tasks, All open tasks, My work cards, the new-look All open tasks), and in the non-lead My tasks the sections with corporate tasks come first.
+
+## New facilities: last supply date can be in the future (Nov 19 2026)
+- The new facility "Last supply date with previous provider" can be up to 30 days after today (`BT_AHEAD`, same as the Chicago Brightree report dates since Nov 3). Further out: "The last supply date can't be more than 30 days from today (latest …). Check the year." In `nfProblem`, so the request, Edit details and bulk upload all follow; the request's date preview shows for those dates too. Dates calculate as usual (last + 30, then the 8-day ordering push).
+- Chicago facilities: no change (already allowed 30 days ahead).
