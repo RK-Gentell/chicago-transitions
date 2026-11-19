@@ -230,11 +230,12 @@ function calcDates(f) {
   if (e && o) { dos = e > o ? e : o; why.push('Enteral ' + fmtS(b.lastEnt) + ' + 30 = ' + fmtS(e) + '; OUTs ' + fmtS(b.lastOuts) + ' + 28 = ' + fmtS(o) + '. Later = ' + fmtS(dos)); }
   else if (e) { dos = e; why.push('Enteral only: ' + fmtS(b.lastEnt) + ' + 30 = ' + fmtS(e)); }
   else if (o) { dos = o; why.push('OUTs only: ' + fmtS(b.lastOuts) + ' + 28 = ' + fmtS(o)); }
-  else return null;
+  // no deliveries on the report (box ticked, or an older report saved with both dates blank): the first available date (Nov 19 2026)
+  else { dos = st.today; why.push(b.noDates ? 'No enteral or uro / ostomy / trach deliveries on the Brightree report → first available date' : 'No last delivery dates on the Brightree report → first available date'); }
   if (isWE(dos)) { const m = dow(dos) === 6 ? add(dos, 2) : add(dos, 1); why.push(fmtS(dos) + ' is a weekend → Monday ' + fmtS(m)); dos = m; }
   const pb = partB(g), back = pb ? 2 : 1, earliest = addBiz(st.today, 1); let pushed = false;
   while (addBiz(dos, -back) < earliest) { dos = addBiz(dos, 1); pushed = true; }
-  if (pushed) why.push('Ordering date would be in the past → DOS pushed to ' + fmtS(dos));
+  if (pushed && (e || o)) why.push('Ordering date would be in the past → DOS pushed to ' + fmtS(dos));
   // the ordering date is at least ORD_DAYS from today, unless someone unticked the push box for a rush (f.noPush)
   const plain = dos, weekOut = add(st.today, ORD_DAYS); let wk = dos;
   while (addBiz(wk, -back) < weekOut) wk = addBiz(wk, 1);
@@ -264,7 +265,7 @@ function basisText(f) {
   if (e && o) return (e >= o ? '30 days after the last enteral delivery (' + fmtS(b.lastEnt) + ')' : '28 days after the last OUTs delivery (' + fmtS(b.lastOuts) + ')') + ', the later of the two';
   if (e) return '30 days after the last enteral delivery (' + fmtS(b.lastEnt) + '). Chicago bills a 30-day supply';
   if (o) return '28 days after the last OUTs delivery (' + fmtS(b.lastOuts) + ')';
-  return '';
+  return 'the first available date (no last delivery dates on the Brightree report)';
 }
 function dateWarn(f, dos) {
   const r = f.rec, w = []; if (!r) return w;
@@ -1850,8 +1851,23 @@ function psWaiting(f) {
   if (g && !hasPrice(g)) w.push('The price table (' + roleName('price') + ')');
   if (!f.inPortal) w.push('Adding it to Brightree (' + roleName('portal') + ')');
   if (!f.bt) w.push('The Brightree report');
-  if (!f.dates && f.bt) w.push('The dates (a full address with a state that has a ship point)');
+  if (!f.dates && f.bt) w.push(datesWhy(f));
   return w;
+}
+// why a facility has no dates yet, in plain words (Nov 19 2026: was always "a full address with a state that has a ship point")
+function datesWhy(f) {
+  if (!f.bt && !f.manualDates) return 'The dates: the Brightree report isn\'t done yet';
+  if (!stateOK(f)) return 'The dates: a full address with a state that has a ship point' + (f.address ? ' (now: ' + f.address + ')' : '');
+  if (!covKnown(FG(f))) return 'The dates: the areas of care';
+  return 'The dates: they couldn\'t be worked out. Check the Brightree report dates on the facility page';
+}
+// a facility with nothing open and nothing it's waiting on: what it's actually stuck on, so My work never shows an empty card
+function stuckWhy(f) {
+  if (f.complete || f.deleted) return null;
+  const psIn = done(fTask(f, 'PORTAL_SETUP')) || preDone(f, 'ps');
+  if (!psIn && !fTask(f, 'PORTAL_SETUP')) { const w = psWaiting(f); if (w.length) return { n: 'Portal setup can\'t start yet. Waiting on: ' + w.join('; '), who: 'the steps before it' }; }
+  if (!f.dates && datesOpen(f)) return { n: datesWhy(f), who: 'the steps before it' };
+  return { n: 'No open step right now. Open the facility page to see what\'s next', who: 'no one yet' };
 }
 // after a task is done: the task it's recommended to do right away. { to: 'PORTAL_SETUP'|'SCHEDULE', task, waiting: [...] } or null
 function nextStep(f, from) {
@@ -1875,9 +1891,16 @@ function btFutureProblem(le, lo) {
   if ((le && le > max) || (lo && lo > max)) return 'A last delivery date can\'t be more than ' + BT_AHEAD + ' days from today (latest ' + fmtS(max) + '). Check the year.';
   return '';
 }
+// Nov 19 2026: at least 1 date, or the box "No enteral or uro / ostomy / trach deliveries on the report". Not both.
+const BT_NONE_L = 'No enteral or uro / ostomy / trach deliveries on the report';
+function btDatesProblem(le, lo, none) {
+  if (!le && !lo && !none) return 'Enter at least 1 last delivery date, or tick "' + BT_NONE_L + '".';
+  if ((le || lo) && none) return 'You entered a last delivery date and ticked "' + BT_NONE_L + '". Pick one: clear the date, or untick the box.';
+  return '';
+}
 function btProblem(f, v) {
   const b = f.bt || {};
-  if (!v.le && !v.lo) return 'Enter at least 1 last delivery date.';
+  const dp = btDatesProblem(v.le, v.lo, v.none); if (dp) return dp;
   const fut = btFutureProblem(v.le, v.lo); if (fut) return fut;
   if ((b.lastEnt && !v.le) || (b.lastOuts && !v.lo)) return 'A last delivery date that was entered can\'t be cleared here. If it was entered by mistake, put the Brightree report task back in the queue and do it again.';
   if (!v.cad) return 'Pick how often enteral ships.';
@@ -1888,7 +1911,8 @@ function updateBt(f, v, by, byName) {
   const err = updateBtCheck(f, v); if (err) return { err };
   const cad = ({ Monthly: '4', Biweekly: '2', Weekly: '1' })[v.cad] || v.cad || '4';
   const old = Object.assign({}, f.bt || {}), nb = { lastEnt: v.le || '', lastOuts: v.lo || '', cadence: cad };
-  const changed = (old.lastEnt || '') !== nb.lastEnt || (old.lastOuts || '') !== nb.lastOuts;
+  if (v.none) nb.noDates = true;
+  const changed = (old.lastEnt || '') !== nb.lastEnt || (old.lastOuts || '') !== nb.lastOuts || !!old.noDates !== !!nb.noDates;
   const dropped = changed && !!f.dosChosen, oldDos = f.dates ? f.dates.dos : '';
   (f.btHistory = f.btHistory || []).push({ bt: old, at: f.btAt || '', by: f.btBy || '' });
   f.bt = nb; f.btAt = nowIso(); f.btBy = byName;
@@ -1900,8 +1924,8 @@ function updateBt(f, v, by, byName) {
 // Anything that was entered can be changed, but not cleared: a task that was done stays done. Wrong from the start? Put the task back in the queue.
 // v holds only the fields the form showed. Returns '' or what's wrong (then nothing is changed).
 // Brightree report dates typed in on the facility page before the report task was done (only while dates can still move)
-const btNew = (f, v) => v.le !== undefined && !f.bt && datesOpen(f) && !f.manualDates && !!(v.le || v.lo);
-const btChanged = (f, v) => { const b = f.bt || {}, cad = ({ 4: 'Monthly', 2: 'Biweekly', 1: 'Weekly' })[b.cadence] || 'Monthly'; return v.le !== undefined && !!f.bt && datesOpen(f) && ((b.lastEnt || '') !== v.le || (b.lastOuts || '') !== v.lo || cad !== v.cad); };
+const btNew = (f, v) => v.le !== undefined && !f.bt && datesOpen(f) && !f.manualDates && !!(v.le || v.lo || v.none);
+const btChanged = (f, v) => { const b = f.bt || {}, cad = ({ 4: 'Monthly', 2: 'Biweekly', 1: 'Weekly' })[b.cadence] || 'Monthly'; return v.le !== undefined && !!f.bt && datesOpen(f) && ((b.lastEnt || '') !== v.le || (b.lastOuts || '') !== v.lo || cad !== v.cad || !!b.noDates !== !!v.none); };
 function editFacilityCheck(f, v) {
   if (!f) return 'That facility isn\'t there anymore.';
   const blank = (had, now, label) => had && now !== undefined && !now ? label + ' can\'t be left blank. It was entered before; if it was wrong, change it, or put the task that entered it back in the queue.' : '';
@@ -1953,7 +1977,7 @@ function editFacility(f, v, by, byName) {
   }
   let btRes = null; if (btv) btRes = updateBt(f, btv, by, byName);
   // report dates typed in here before the report task: it closes
-  if (btNew(f, v)) { f.bt = { lastEnt: v.le || '', lastOuts: v.lo || '', cadence: CAD_V[v.cad] || '4' }; f.btAt = nowIso(); f.btBy = byName; closed.push(...closeFilled(f, ['BRIGHTREE'], by, byName)); }
+  if (btNew(f, v)) { f.bt = { lastEnt: v.le || '', lastOuts: v.lo || '', cadence: CAD_V[v.cad] || '4' }; if (v.none) f.bt.noDates = true; f.btAt = nowIso(); f.btBy = byName; closed.push(...closeFilled(f, ['BRIGHTREE'], by, byName)); }
   // wound rep + regional both in: the FastCare task isn't needed (it also needs the corporate; a missing address gets its own task)
   let fcLeft = '';
   const wrNew = JSON.stringify([f.wound || null, f.regional || null]) !== wrWas; // only when they were filled in or changed just now

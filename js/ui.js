@@ -670,9 +670,9 @@ function editDetails(f, R, A) {
   // a task still open for something this form can fill in: say that filling it in closes the task
   const closes = (type, what) => { const t = fTask(f, type); return t && !done(t) && !t.archived ? '<div class="meta">' + what + ' closes the "' + esc(taskTitle(t)) + '" task' + (t.assignee && t.assignee !== me() ? ' (' + esc(nameOf(t.assignee)) + ' gets an email that it\'s not needed)' : '') + '.</div>' : ''; };
   const btFirst = !f.bt && datesOpen(f) && !f.manualDates;
-  const bt = btFirst ? `<div class="sect">Brightree report${tip('Last delivery dates from the GNS Lakewood Report in Chicago\'s Brightree (Delivery Actual date). The dates calculate from them.')}</div><div class="row">${fld('Last enteral (Delivery Actual date)', dt('fd_le', ''))}${fld('Last uro / ostomy / trach', dt('fd_lo', ''))}${fld('Enteral ships', sel('fd_cad', ['Monthly', 'Weekly', 'Biweekly'], 'Monthly'))}</div>${closes('BRIGHTREE', 'Entering them')}`
+  const bt = btFirst ? `<div class="sect">Brightree report${tip('Last delivery dates from the GNS Lakewood Report in Chicago\'s Brightree (Delivery Actual date). The dates calculate from them.')}</div><div class="row">${fld('Last enteral (Delivery Actual date)', dt('fd_le', ''))}${fld('Last uro / ostomy / trach', dt('fd_lo', ''))}${fld('Enteral ships', sel('fd_cad', ['Monthly', 'Weekly', 'Biweekly'], 'Monthly'))}</div>${chk('fd_btnone', BT_NONE_L)}${closes('BRIGHTREE', 'Entering them')}`
     : !f.bt ? '' : !datesOpen(f) ? `<div class="meta">Brightree report: last enteral ${b.lastEnt ? fmtS(b.lastEnt) : '-'}, last uro / ostomy / trach ${b.lastOuts ? fmtS(b.lastOuts) : '-'}. The Chicago handoff email went out, so these can't change here.</div>`
-    : `<div class="sect">Brightree report${tip('Changing a date recalculates the recommended dates. A date of service picked by hand goes back to the new recommended one.')}</div><div class="row">${fld('Last enteral (Delivery Actual date)', dt('fd_le', b.lastEnt))}${fld('Last uro / ostomy / trach', dt('fd_lo', b.lastOuts))}${fld('Enteral ships', sel('fd_cad', ['Monthly', 'Weekly', 'Biweekly'], cadV))}</div>`;
+    : `<div class="sect">Brightree report${tip('Changing a date recalculates the recommended dates. A date of service picked by hand goes back to the new recommended one.')}</div><div class="row">${fld('Last enteral (Delivery Actual date)', dt('fd_le', b.lastEnt))}${fld('Last uro / ostomy / trach', dt('fd_lo', b.lastOuts))}${fld('Enteral ships', sel('fd_cad', ['Monthly', 'Weekly', 'Biweekly'], cadV))}</div>${chk('fd_btnone', BT_NONE_L, b.noDates)}`;
   const gdd = `<div class="row">${fld('GDD orders?', sel('fd_gdd', ['Yes', 'No'], ['Yes', 'No'].includes(f.gdd) ? f.gdd : '', true), f.gdd === 'Already done' ? 'Marked "already done" on the request. Pick Yes or No only if you know.' : '')}<div class="field" id="fd_whbox" ${f.gdd === 'Yes' ? '' : 'hidden'}><label>GDD warehouse</label>${sel('fd_wh', st.settings.warehouses, f.gddWh || '', true)}</div></div>${closes('GDD', 'Answering it')}`;
   return `<details class="card" style="padding:10px" id="fdetbox" ${ui.editOpen === f.id ? 'open' : ''}><summary><b>Edit details</b> <span class="meta">(changes here don't touch the portal or Brightree. Changed after the portal setup? You get an "Update the portal" task)</span></summary><form id="fdet" style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
     <div class="row">${fld('Chicago name', txt('fd_name', f.name), 'The name GNS Chicago / Gentell uses (from the request). Used to search Chicago\'s Brightree and FastCare.')}${fld('Portal name', txt('fd_pn', f.portalName), 'Our name in Brightree and the portal, exactly as Brightree shows it. Once it\'s in, it\'s the name everywhere in the app and in every email.' + (f.inPortal ? '' : ' Typing it in means the facility is in Brightree.'))}</div>${f.inPortal ? '' : closes('PORTAL_ADD', 'Typing in the portal name')}
@@ -712,7 +712,7 @@ document.addEventListener('click', async e => {
   if (T.closest('[data-leadnote]')) { e.stopPropagation(); return; } // typing in the tracker notes box doesn't open the facility
   const ef = T.closest('[data-editfac]'); if (ef) { e.stopPropagation(); ui.openWork = null; ui.openFac = +ef.dataset.editfac; ui.editOpen = ui.openFac; ui.openTask = ui.openGroup = null; renderLayer(); const b = document.getElementById('fdetbox'); if (b) b.scrollIntoView({ block: 'start' }); return; }
   const sn = T.closest('[data-savenote]'); if (sn) { const id = +sn.dataset.savenote, box = document.getElementById(sn.dataset.notebox); if (!box) return; const ok = await saveNote(id, box.value.trim()); if (!ok && !ui.errors.length) toast('No changes to save.'); return; }
-  const rc = T.closest('[data-recheckbt]'); if (rc) { const id = +rc.dataset.recheckbt, vals = { le: V('rc_le'), lo: V('rc_lo'), cad: V('rc_cad') }; let res = null;
+  const rc = T.closest('[data-recheckbt]'); if (rc) { const id = +rc.dataset.recheckbt, vals = { le: V('rc_le'), lo: V('rc_lo'), cad: V('rc_cad'), none: V('rc_none') }; let res = null;
     const f0 = facById(id), pre = f0 && (updateBtCheck(f0, vals)); if (pre) { $('#rc_err').innerHTML = '<div class="err">' + esc(pre) + '</div>'; return; }
     await act(() => { res = updateBt(facById(id), vals, me(), meName()); if (res.err) return false; });
     if (res && res.err) { toast(res.err); return; }
@@ -864,7 +864,11 @@ document.addEventListener('submit', async e => {
       try { const f = facById(t.fac); for (const [w, pre] of [['fac', 'facility'], ['corp', 'corporate']]) { const s = shotFor(t, w); if (!s) continue; const name = pre + '-contacts-CT-' + pad(f.id) + '.jpg'; const r = await STORE.uploadFile('CT-' + pad(f.id), new File([s.blob], name, { type: 'image/jpeg' })); ui.shotSaved[w] = { name, path: r.path, url: r.url, data: r.data || '' }; } }
       catch (e) { btnLoading($('#tf button[type=submit]'), false); $('#tf_err').innerHTML = '<div class="err">A screenshot didn\'t upload: ' + esc(e.message || e) + '. Try again.</div>'; return; }
     }
-    const ok = await act(() => { const t2 = taskByKey(key); if (!t2 || done(t2)) { toast('Someone already finished this task.'); return false; } TT[t2.type].done(t2, { by: me(), byName: meName() }); finishTask(t2, me(), meName()); }, 'Done. Recorded as done by ' + meName() + '.');
+    // what's on the form now is what gets saved, even if the panel is closed or another task opened while it saves
+    const snap = snapForm('#tf'); let late = '';
+    const ok = await act(() => { const t2 = taskByKey(key); if (!t2 || done(t2)) { toast('Someone already finished this task.'); return false; }
+      formSnap = snap; try { late = TT[t2.type].validate(t2); if (late) return false; TT[t2.type].done(t2, { by: me(), byName: meName() }); } finally { formSnap = null; } finishTask(t2, me(), meName()); }, 'Done. Recorded as done by ' + meName() + '.');
+    if (late) { const er = $('#tf_err'); if (er) er.innerHTML = '<div class="err">' + esc(late) + '</div>'; toast('Not saved: ' + late); }
     if (ok) { if (t.type === 'FASTCARE') { delete ui.shots.fc_fac; delete ui.shots.fc_corp; } if (t.type === 'FAC_NOTICE') ui.notice = null; ui.openTask = null;
       if (!ui.openWork && ['BRIGHTREE', 'PORTAL_SETUP'].includes(t.type) && !ui.errors.length && nextStep(facById(t.fac), t.type)) ui.next = { fac: t.fac, from: t.type };
       renderLayer(); }
@@ -876,7 +880,7 @@ document.addEventListener('submit', async e => {
     if (has('fd_w')) { vals.wound = readPerson('fd_w'); vals.woundRaw = V('fd_w'); vals.regional = readPerson('fd_r'); vals.regionalRaw = V('fd_r'); }
     if (has('fd_ctl')) { vals.ctl = readCtl('fd_ctl'); vals.ctlRaw = V('fd_ctl'); }
     if (has('fd_gdd')) { vals.gdd = V('fd_gdd'); vals.gddWh = V('fd_wh'); }
-    if (has('fd_le')) { vals.le = V('fd_le'); vals.lo = V('fd_lo'); vals.cad = V('fd_cad'); }
+    if (has('fd_le')) { vals.le = V('fd_le'); vals.lo = V('fd_lo'); vals.cad = V('fd_cad'); vals.none = V('fd_btnone'); }
     // check against what's on screen first, so a mistake shows next to the form; checked again on the latest data when saving
     let err = editFacilityCheck(f0, vals); if (err) { $('#fd_err').innerHTML = '<div class="err">' + esc(err) + '</div>'; return; }
     let res = null;
