@@ -66,7 +66,7 @@ function leadWorkHtml(ts, all, flt) {
   const F = ui.myF, groups = {};
   ts.forEach(t => { (groups[wKey(t)] = groups[wKey(t)] || []).push(t); });
   const ready = Object.entries(groups).map(([k, arr]) => [k, arr.sort(wSort)]).sort((a, b) => cmp(a[1].slice().sort(cmp)[0], b[1].slice().sort(cmp)[0]));
-  const others = st.facs.filter(f => amOf(f) === forWho() && !f.complete && !f.archived && !f.deleted && !groups['f' + f.id]
+  const others = st.facs.filter(f => amOf(f) === forWho() && !f.complete && !f.hold && !f.archived && !f.deleted && !groups['f' + f.id]
     && (!F.fac || f.id === +F.fac) && (!F.corp || lc(f.group || '__nocorp') === F.corp)).sort((a, b) => facName(a).localeCompare(facName(b)));
   const empty = all.length ? 'No tasks match these filters.' : 'Nothing for you to do right now.';
   return `<h1>My work</h1>${flt}${wSec('Ready for you', ready.length, ready.map(([k, arr]) => wCard(k, arr)).join('') || `<div class="wempty">${empty}</div>`)}${others.length ? wSec('Waiting on others', others.length, others.map(f => wCard('f' + f.id, [])).join('')) : ''}`;

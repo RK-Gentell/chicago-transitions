@@ -322,3 +322,6 @@ Waiting tasks (`isWaiting`: `opensOn` after today) are left out of "My tasks", "
 - New box on the Brightree report task, the schedule task's recheck (`rc_none`) and Edit details (`fd_btnone`): "No enteral or uro / ostomy / trach deliveries on the report" (`BT_NONE_L`). Rule `btDatesProblem(le, lo, none)`: at least 1 date or the box, not both. Ticked → `f.bt.noDates = true`.
 - Raizy: no deliveries = schedule on the first available date, nothing else changes. `calcDates` with no last dates (box, or an older report saved blank like Leonard) starts DOS at today, then the usual weekend / 8-day ordering / David capacity rules. Portal setup → schedule → handoff as usual. No data was changed on stuck facilities: they get dates on the next load and portal setup shows up for the lead. Facilities with dates calculate exactly as before.
 - `datesWhy(f)` gives the real reason a facility has no dates (psWaiting used to always say "a full address…"). `stuckWhy(f)`: `wWaits` adds it when a facility has no open task for anyone and nothing to wait on, so a My work card is never empty.
+
+## My work: no on-hold facilities (Nov 19 2026)
+- "Waiting on others" on My work (`leadWorkHtml`) skips facilities on hold (`f.hold`), like their tasks already were. They come back when taken off hold. Tracker and facility page unchanged.
