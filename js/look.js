@@ -18,11 +18,13 @@ const STEP_OF = { FASTCARE: 'wr', PORTAL_ADD: 'added', PUMPS: 'pumps', GDD: 'gdd
   PORTAL_SETUP: 'ps', SCHEDULE: 'sched', ESIGN_PORTAL: 'esp', FAC_NOTICE: 'e2', PRICE: 'corp', EMR: 'corp' };
 function doneSteps(f) {
   const out = [];
-  PRE_ITEMS.forEach(([k]) => { let d = false; try { d = stepIsDone(f, k); } catch (_) { } if (d) out.push(STEP_SHORT[k] || k); });
+  PRE_ITEMS.forEach(([k]) => { let d = false; try { d = stepIsDone(f, k); } catch (_) { } if (d) out.push(STEP_SHORT[k] || k); else if (k === 'e3' && e3Skipped(f)) out.push(STEP_SKIPPED); });
   tasksOf(f).filter(t => t.status === 'Done' && !STEP_OF[t.type]).sort(wSort).forEach(t => out.push(wShort(t)));
   return [...new Set(out)];
 }
-const doneHover = list => list.length ? `<div class="wdone"><button type="button" class="wdonebtn" data-wdone title="Hover to see completed steps">✓ <span>${list.length} completed</span></button><div class="wdonepop"><div class="in">${list.map(s => `<span class="pill p-done">✓ ${esc(s)}</span>`).join('')}</div></div></div>` : '';
+// contacts never received and the facility is scheduled (Nov 23 2026): listed with the completed steps, gray, as skipped
+const STEP_SKIPPED = 'Contacts received: skipped';
+const doneHover = list => list.length ? `<div class="wdone"><button type="button" class="wdonebtn" data-wdone title="Hover to see completed steps">✓ <span>${list.length} completed</span></button><div class="wdonepop"><div class="in">${list.map(s => s === STEP_SKIPPED ? `<span class="pill p-wother" title="Never received. The facility was scheduled, so the app stopped following up.">– ${esc(s)}</span>` : `<span class="pill p-done">✓ ${esc(s)}</span>`).join('')}</div></div></div>` : '';
 
 // ---------- All open tasks as cards ----------
 function allLookHtml(all, ts, flt, facOk) {

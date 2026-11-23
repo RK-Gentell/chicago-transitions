@@ -458,7 +458,7 @@ function mailStillValid(m) {
     if (c.untilEmail1 && f.email1) return false;
     if (c.untilEmail2 && f.email2) return false;
     if (c.untilE3Done && (f.e3Done || f.e3Reply)) return false;
-    if ('e3Round' in c && (f.e3Done || f.e3Reply || (f.e3Round || 0) !== c.e3Round)) return false;
+    if ('e3Round' in c && (f.e3Done || f.e3Reply || schedIn(f) || (f.e3Round || 0) !== c.e3Round)) return false;
     if ('esRound' in c && (f.esignGot || f.esignDone || (f.esignRound || 0) !== c.esRound)) return false;
     if (c.ord && (!f.dates || f.dates.ord !== c.ord)) return false;
   }
@@ -665,7 +665,8 @@ function sendCtlEmail(f, correction) {
 // To = the contacts they keep. CC = WC lead, regional, wound rep, transition lead, intake rep (David on his facilities), account manager,
 // and the Settings "Transfer notice to the facility" lists (the old e1bTo / e1bCc).
 const NOTICE_SUBJECT = f => facName(f) + ' - Transfer from GNS Chicago to Lakewood';
-const noticeContactsIn = f => !e3Pending(f) && (!f.email3 || !!f.e3Done);
+// once the facility is scheduled the notice doesn't wait for the contacts (Nov 23 2026), only for a reply the lead already has to put in
+const noticeContactsIn = f => schedIn(f) ? !(f.e3Reply && !f.e3Done) : !e3Pending(f) && (!f.email3 || !!f.e3Done);
 // Nov 17 2026, later: also facilities handed off before Oct 26 (no e1Split, GNS Chicago was asked): their "Chicago hasn't sent" task becomes this one, right away
 const noticeReady = f => !!(f.email1 && !f.email2 && !f.complete && !f.hold && !f.deleted && f.dates);
 const noticeWaitsContacts = f => f.e1Split && !noticeContactsIn(f);
@@ -795,7 +796,12 @@ const e3Rems = f => e3Mails(f).filter(m => m.code === 'E16F' && m.status !== 'Fa
 const e3Auto = f => e3Mails(f).filter(m => m.code === 'E16F' && !isManualRem(m)).sort((a, b) => a.day < b.day ? -1 : a.day > b.day ? 1 : 0);
 const lastE3Rem = f => { const now = nowMs(); return e3Rems(f).filter(m => m.status === 'Sent' || remAt(m) <= now).pop() || null; };
 const nextE3RemAt = f => { const l = lastE3Rem(f); return l ? remAt(l) + REM_GAP : 0; };
-const e3Chasing = f => !!f.email3 && !f.e3Done && !f.e3Reply && !f.hold && !f.complete && !f.deleted;
+// Nov 23 2026 (Raizy): the contacts are only chased until the facility is scheduled. Once it is, no more follow-ups, nothing is sent
+// to the wound rep / regional about it, and the contacts step shows as skipped so it doesn't hold up completion. A reply that comes in
+// later still makes a "Contacts reply" task for the transition lead (and reopens the facility if it was already complete).
+const schedIn = f => !!(f.manualDates || f.schedDone || done(fTask(f, 'SCHEDULE')) || (f.email1 && !handoffOnly(f)));
+const e3Skipped = f => !!f.email3 && !f.e3Done && !f.e3Reply && schedIn(f);
+const e3Chasing = f => !!f.email3 && !f.e3Done && !f.e3Reply && !schedIn(f) && !f.hold && !f.complete && !f.deleted;
 const canRemindE3 = f => e3Chasing(f) && nowMs() >= nextE3RemAt(f);
 function setMailDay(m, d) { const day = d > st.today ? d : st.today; m.day = day; m.sendOn = day > st.today ? day + 'T12:00:00Z' : new Date(nowMs() - 60000).toISOString(); }
 function e3FollowBody(f, again) {
@@ -806,7 +812,7 @@ function e3FollowMail(f, key, day, again, escalate) {
   return mail({ key, code: 'E16F', day, cond: { fac: f.id, e3Round: f.e3Round || 0 }, ...e3Attach(f), to: [f.wound && f.wound.email, f.regional && f.regional.email], cc: [ctlEmail(f), amOf(f), escalate ? roleEmail('escalate') : ''], fac: f.id, noTag: true, link: 'none', subject: 'RE: ' + E3_SUBJECT(f), body: e3FollowBody(f, again) });
 }
 function chaseEmail3(f) {
-  if (!f.email3 || f.e3Done || f.e3Reply) return;
+  if (!f.email3 || f.e3Done || f.e3Reply || schedIn(f)) return;
   const pre = e3Pre(f), n = () => st.mails.filter(m => m.fac === f.id && m.key.startsWith('m:E3F:') && e3RoundOf(m.key) === (f.e3Round || 0)).length;
   let alert = e3Mails(f).find(m => m.code === 'E16A');
   if (alert && alert.status !== 'Queued') return; // the lead was already told (this or the old timing): nothing more this round
@@ -831,6 +837,7 @@ function chaseEmail3(f) {
 function sendE3Reminder(f, by, byName) {
   if (!f || !f.email3) return 'The contacts request hasn\'t gone out yet.';
   if (f.e3Done || f.e3Reply) return 'The contacts are already in.';
+  if (schedIn(f)) return 'The facility is scheduled, so there are no more follow-ups on the contacts.';
   if (f.hold) return 'This facility is on hold.';
   if (f.complete || f.deleted) return 'This facility isn\'t open.';
   if (!canRemindE3(f)) return 'A follow-up went out less than 24 hours ago. Next one possible ' + whenET(nextE3RemAt(f)) + '.';
@@ -871,7 +878,10 @@ const leadOnReply = (f, m) => [...(m.to || []), ...(m.cc || [])].map(lc).include
 // someone replied to Email 3: stop the follow-ups, AM puts in what they sent
 const e3Who = (f, from) => { const x = [f.wound, f.regional].find(p => p && lc(p.email) === lc(from)); return x ? x.name : (nameOf(from) || from); };
 function gotE3Reply(f, m) {
-  f.e3Reply = { from: m.from, at: (m.received || '').slice(0, 10) || st.today, inbox: m._id || '' };
+  const late = schedIn(f);
+  f.e3Reply = { from: m.from, at: (m.received || '').slice(0, 10) || st.today, inbox: m._id || '', late };
+  // came in after the facility was complete (contacts were skipped at scheduling): reopen it until the lead puts them in
+  if (f.complete) { f.reopened = (f.reopened || []).concat({ on: st.today, why: 'Contacts came in after it was complete', was: f.complete }); f.complete = ''; }
   const t = newTask('E3_REPLY', { fac: f.id, assignee: amOf(f), amTask: true, reply: f.e3Reply });
   if (!leadOnReply(f, m)) todo(t, 'reply to the contacts request for ' + facName(f), esc(e3Who(f, m.from)) + ' replied to the contacts request for <b>' + esc(facName(f)) + '</b>. Put in the info they sent.');
 }
@@ -1417,7 +1427,7 @@ function run() {
     // complete
     // never complete while the FastCare task is still open (Oct 2026). Facilities already marked complete stay as they are.
     const fcOpen = !!fTask(f, 'FASTCARE') && !done(fTask(f, 'FASTCARE'));
-    if (f.email2 && (done(fTask(f, 'GDD')) || preDone(f, 'gdd')) && (!f.email3 || f.e3Done) && !fcOpen && esignOk(f)) {
+    if (f.email2 && (done(fTask(f, 'GDD')) || preDone(f, 'gdd')) && (!f.email3 || f.e3Done || e3Skipped(f)) && !fcOpen && esignOk(f)) {
       f.complete = st.today;
       tasksOf(f).forEach(t => { if (!done(t) && ['CHICAGO_FOLLOW'].includes(t.type)) t.status = 'Not needed'; });
       mail({ key: 'm:E24:' + f.id, code: 'E24', to: [am, f.requester], fac: f.id, link: 'fac', subject: 'Transition complete: ' + facName(f), fyi: true, body: `<p><b>${esc(facName(f))}</b> is done.${f.dates ? ` First DOS ${fmt(f.dates.dos)}, ordering ${fmt(f.dates.ord)}, delivery ${fmt(f.dates.del)}.` : ''} Intake rep: ${esc(nameOf(f.rep)) || '-'}.</p>` });
@@ -1455,7 +1465,7 @@ function e3AlertDay(f) {
 }
 function waitingFor(f) {
   if (f.hold || f.complete || f.deleted || f.archived) return [];
-  const out = [], d3 = f.email3 && !f.e3Done && !f.e3Reply && e3AlertDay(f);
+  const out = [], d3 = f.email3 && !f.e3Done && !f.e3Reply && !schedIn(f) && e3AlertDay(f);
   if (d3 && st.today >= d3) out.push({ sec: 'e3', f, days: bizCount((f.e3Round ? f.e3RoundFrom : f.email3) || f.email3, st.today) });
   const de = f.esignAsk && !f.esignGot && !f.esignDone && chaseAlertDay(f, 'E31F', f.esignRound || 0, 2);
   if (de && st.today >= de) out.push({ sec: 'es', f, days: bizCount((f.esignRound ? f.esignRoundFrom : f.esignAsk) || f.esignAsk, st.today) });

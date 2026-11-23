@@ -42,7 +42,7 @@ function wWaits(f, noTasks) {
     .forEach(t => w.push({ n: wShort(t), who: nameOf(t.assignee) || 'nobody yet', k: 'other' }));
   if (hasPrice(G(f)) && !f.inPortal && !fTask(f, 'PORTAL_ADD')) w.push({ n: 'Add to Brightree', who: roleName('portal'), k: 'other' });
   if (ctlNeeded(f) && !w.some(x => x.n === 'Pick the reps')) w.push({ n: 'Gentell WC Transition Lead', who: roleName('rules'), k: 'other' });
-  if (f.email3 && !f.e3Done && !f.e3Reply) w.push({ n: 'Contacts', who: e3Names(f).join(', ') || 'wound rep and regional', k: 'wait', e3: f.id });
+  if (f.email3 && !f.e3Done && !f.e3Reply && !schedIn(f)) w.push({ n: 'Contacts', who: e3Names(f).join(', ') || 'wound rep and regional', k: 'wait', e3: f.id });
   if (f.esignAsk && !f.esignGot && !f.esignDone) w.push({ n: 'Provider and eSign info', who: esGreet(), k: 'wait' });
   // safety net (Nov 19 2026): nothing open for anyone and nothing to wait on → say what it's stuck on, never an empty card
   if (!w.length && !st.tasks.some(t => t.fac === f.id && !done(t) && !t.archived && !isWaiting(t))) { const s = stuckWhy(f); if (s) w.push({ n: s.n, who: s.who, k: 'other' }); }

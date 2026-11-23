@@ -76,7 +76,7 @@ function waits(d) {
   });
   d.facs.filter(f => !f.hold && !f.complete && !f.archived).forEach(f => {
     if (f.email1 && !f.email2) out.push({ who: 'chicago', whoName: 'GNS Chicago', kind: 'others', what: 'Transfer notice to the facility', f, corp: f.group, lead: amOf(f), since: f.email1, days: bizDays(f.email1, st.today) });
-    if (f.email3 && !f.e3Done && !f.e3Reply) out.push({ who: 'woundreg', whoName: 'Wound rep / regional', kind: 'others', what: 'Reply to the contacts request', f, corp: f.group, lead: amOf(f), since: f.email3, days: bizDays(f.email3, st.today) });
+    if (f.email3 && !f.e3Done && !f.e3Reply && !schedIn(f)) out.push({ who: 'woundreg', whoName: 'Wound rep / regional', kind: 'others', what: 'Reply to the contacts request', f, corp: f.group, lead: amOf(f), since: f.email3, days: bizDays(f.email3, st.today) });
   });
   out.forEach(w => { if (w.late === undefined) w.late = w.days >= 5; });
   return out;

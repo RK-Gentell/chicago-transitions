@@ -334,3 +334,12 @@ Waiting tasks (`isWaiting`: `opensOn` after today) are left out of "My tasks", "
 ## "What's new" for the notes box (Nov 23 2026)
 - `WHATS_NEW` entries can have `when()`: shown only once it's true for that person, checked on every My work draw, and not counted as seen until shown (Raizy: show it later rather than skip).
 - `notes-2026-11-23` "Transition lead notes are easier to find": `when` = one of my open tasks is on a facility with notes and shows the notes box (`leadTaskNotes`), so people who aren't transition leads don't get it. Shown once per person per browser.
+
+## Contacts: follow up only until the facility is scheduled (Nov 23 2026)
+- Raizy: the contacts request is followed up only until the facility is scheduled. `schedIn(f)` = scheduled (SCHEDULE done, `schedDone`, `manualDates`, or handoff sent and not `handoffOnly`). `e3Skipped(f)` = request sent, no reply, not "taken care of", and scheduled.
+- Once scheduled: `chaseEmail3` stops, queued E16F follow-ups and the E16A "No reply" alert cancel (`mailStillValid` e3Round cond), "Remind" is gone (`e3Chasing`), off the waiting lists and the 3 PM list. Nothing is sent to the wound rep / regional about it. Applies to facilities already scheduled on the next load.
+- Completion: `(!f.email3 || f.e3Done || e3Skipped(f))`. A reply already in (open "Contacts reply") still has to be done; its "keep following up" choice is hidden once scheduled.
+- Not sent yet at scheduling (waiting on FastCare / WC lead): the contacts request still goes once, no follow-ups.
+- Transfer notice: `noticeContactsIn` no longer waits for the contacts once scheduled (only for an open reply the lead has to put in).
+- Late reply (inbox matching unchanged): `gotE3Reply` sets `e3Reply.late`; a complete facility is reopened (`f.complete` cleared, `f.reopened[]`), E3_REPLY task for the lead; done → completes again (E24 not resent).
+- Shows as "Contacts received: skipped" (gray, `STEP_SKIPPED`) in the completed steps; facility page "Their reply" says skipped.

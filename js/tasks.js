@@ -314,9 +314,9 @@ const TT = {
   E3_REPLY: {
     title: t => 'Contacts reply: ' + facName(facById(t.fac)),
     form: t => { const f = facById(t.fac), r = t.reply || {}, m = (st.inbox || []).find(x => x._id && x._id === r.inbox);
-      return `<div class="instr">${esc(r.from ? e3Who(f, r.from) : 'Someone')} replied to the contacts request${r.at ? ' on ' + fmt(r.at) : ''}. Put the info they sent (new contacts, corrections) into the portal.${m && m.path ? ` <a href="${esc(STORE.fileUrl(m.path))}" target="_blank" rel="noopener">Open their email</a>` : ''}</div>${m && m.preview ? `<div class="note">"${esc(m.preview.slice(0, 300))}"</div>` : ''}${fld('Where things stand', sel('e3s', [['done', 'Their info is in the portal'], ['more', 'They didn\'t send everything yet: keep following up']], '', true))}`; },
+      return `<div class="instr">${esc(r.from ? e3Who(f, r.from) : 'Someone')} replied to the contacts request${r.at ? ' on ' + fmt(r.at) : ''}. Put the info they sent (new contacts, corrections) into the portal.${m && m.path ? ` <a href="${esc(STORE.fileUrl(m.path))}" target="_blank" rel="noopener">Open their email</a>` : ''}</div>${m && m.preview ? `<div class="note">"${esc(m.preview.slice(0, 300))}"</div>` : ''}${fld('Where things stand', sel('e3s', [['done', 'Their info is in the portal']].concat(schedIn(f) ? [] : [['more', 'They didn\'t send everything yet: keep following up']]), '', true))}${schedIn(f) ? '<div class="meta">The facility is scheduled, so there are no more follow-ups on the contacts. Put in what they sent.</div>' : ''}`; },
     example: () => ({ e3s: 'done' }), validate: () => V('e3s') ? '' : 'Pick where things stand.',
-    done: t => { const f = facById(t.fac); if (V('e3s') === 'more') { f.e3Reply = null; f.e3Round = (f.e3Round || 0) + 1; f.e3RoundFrom = st.today; } else markE3Done(f, typeof meName === 'function' ? meName() : ''); }
+    done: t => { const f = facById(t.fac); if (V('e3s') === 'more' && !schedIn(f)) { f.e3Reply = null; f.e3Round = (f.e3Round || 0) + 1; f.e3RoundFrom = st.today; } else markE3Done(f, typeof meName === 'function' ? meName() : ''); }
   },
   EMAIL3_FOLLOW: {
     title: t => 'Contacts follow-up: ' + facName(facById(t.fac)),
