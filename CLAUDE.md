@@ -343,3 +343,9 @@ Waiting tasks (`isWaiting`: `opensOn` after today) are left out of "My tasks", "
 - Transfer notice: `noticeContactsIn` no longer waits for the contacts once scheduled (only for an open reply the lead has to put in).
 - Late reply (inbox matching unchanged): `gotE3Reply` sets `e3Reply.late`; a complete facility is reopened (`f.complete` cleared, `f.reopened[]`), E3_REPLY task for the lead; done → completes again (E24 not resent).
 - Shows as "Contacts received: skipped" (gray, `STEP_SKIPPED`) in the completed steps; facility page "Their reply" says skipped.
+
+## Holidays: no emails to non-leads, not a business day (Nov 23 2026)
+- Raizy: New Year's Day, Memorial Day, July 4th, Labor Day, Thanksgiving, Christmas, every year (`holidaysOf`, `holidayName` in engine.js). Saturday → observed the Friday before, Sunday → the Monday after.
+- Not a business day for tasks and emails: `addWork` / `isOff` (task due dates, reminders, contacts / eSign follow-ups, at-risk day, "Still waiting" counts and the 3 PM list, My work "Waiting N days", analytics day counts, demo "Next business day"). Facility dates (ordering / DOS / delivery, Chicago and new facilities) still use `addBiz` (weekends only): Raizy's call.
+- Emails whose To has anyone not ticked "Transition lead" (`isAm`) don't go on a holiday: `mail()` and `holdHolidays()` (end of `run()`, after reminder spacing) move them to 8 am Eastern the next business day. CC doesn't count (lead in To, others CC'd → goes that day). Covers rows queued before the holiday and hand-sent ones ("Send reminder", "Send transfer notice", etc.); the click shows a toast "Today is Thanksgiving: … will go out Fri … at 8 am Eastern." (`heldKeys`, `act2`).
+- Only runs when someone has the app open before/on the day (it moves the Outbox SendOn); the flow itself is unchanged.

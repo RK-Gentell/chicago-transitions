@@ -116,7 +116,7 @@ function nfRun() {
     if (!t) { t = newTask('NF_SCHEDULE', { nf: n.id, assignee: n.lead || fallbackOwner(), amTask: true }); todo(t, 'schedule ' + n.name + ' (new facility)', 'Schedule the new facility <b>' + esc(n.name) + '</b>' + (n.group ? ' (' + esc(n.group) + ')' : '') + '.'); }
     // the task follows the schedule lead if it changes
     if (t.amTask && !done(t) && n.lead && t.assignee !== n.lead) {
-      t.assignee = n.lead; t.due = addBiz(st.today, isAm(n.lead) ? st.settings.amDays : st.settings.helperDays);
+      t.assignee = n.lead; t.due = addWork(st.today, isAm(n.lead) ? st.settings.amDays : st.settings.helperDays);
       mail({ key: 'm:E20:' + t.key + ':' + uid(), code: 'E20', to: [n.lead], subject: 'You\'re now the schedule lead: ' + n.name, body: `<p>${esc(n.editedBy || 'Someone')} made you the schedule lead for the new facility <b>${esc(n.name)}</b>. Due ${fmt(t.due)}.</p>`, task: t.key, cond: { task: t.key } });
     }
   });

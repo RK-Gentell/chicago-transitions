@@ -7,7 +7,7 @@
    ===================================================================== */
 
 // business days from a to b (a not counted, b counted): Mon→Tue = 1
-function bizDays(a, b) { if (!a || !b || b <= a) return 0; let n = 0, d = a; while (d < b) { d = add(d, 1); if (!isWE(d)) n++; } return n; }
+function bizDays(a, b) { if (!a || !b || b <= a) return 0; let n = 0, d = a; while (d < b) { d = add(d, 1); if (!isOff(d)) n++; } return n; }
 const avg = xs => xs.length ? Math.round(xs.reduce((s, x) => s + x, 0) / xs.length * 10) / 10 : null;
 const latest = xs => xs.filter(Boolean).sort().pop() || '';
 

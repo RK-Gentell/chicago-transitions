@@ -11,7 +11,7 @@ const ui = { shots: {}, view: 'mytasks', openTask: null, openFac: null, openGrou
 const $ = s => document.querySelector(s);
 const me = () => st.me.email;
 const meName = () => st.me.name;
-function toast(t) { document.querySelectorAll('.toast').forEach(x => x.remove()); const el = document.createElement('div'); el.className = 'toast'; el.textContent = t; document.body.appendChild(el); setTimeout(() => el.remove(), 3200); }
+function toast(t, ms) { document.querySelectorAll('.toast').forEach(x => x.remove()); const el = document.createElement('div'); el.className = 'toast'; el.textContent = t; document.body.appendChild(el); setTimeout(() => el.remove(), ms || 3200); }
 function setStatus(t, bad) { const e = $('#status'); if (e) { e.textContent = t; e.className = 'status' + (bad ? ' bad' : ''); } }
 
 // ---------- start ----------
@@ -82,6 +82,7 @@ async function act(fn, okMsg) {
 async function act2(fn, okMsg) {
   try {
     await STORE.load();
+    const before = new Set(st.mails.map(m => m.key));
     const r = await fn();
     if (r === false) { ui.busy = false; setStatus(''); return false; }
     ui.errors = [];
@@ -89,7 +90,10 @@ async function act2(fn, okMsg) {
     ui.busy = false;
     setStatus(ui.errors.length ? 'Not saved' : 'Saved', !!ui.errors.length);
     render();
-    if (okMsg && !ui.errors.length) toast(okMsg);
+    // a holiday: say so when this click made emails that wait for the next business day
+    const hol = holidayName(st.today), held = hol && !ui.errors.length ? st.mails.filter(m => !before.has(m.key) && heldKeys.has(m.key) && m.status === 'Queued') : [];
+    if (held.length) toast((okMsg ? okMsg + '. ' : '') + 'Today is ' + hol + ': ' + (held.length === 1 ? 'the email' : held.length + ' emails') + ' to people who aren\'t transition leads will go out ' + fmt(held[0].day) + ' at 8 am Eastern.', 8000);
+    else if (okMsg && !ui.errors.length) toast(okMsg);
     return true;
   } catch (e) {
     ui.busy = false; console.error(e);
@@ -844,7 +848,7 @@ document.addEventListener('click', async e => {
     for (const r of rows) { try { const res = await STORE.searchPeople(r.querySelector('.p-name').value.trim()); if (res.length === 1 || (res[0] && lc(res[0].name) === lc(r.querySelector('.p-name').value))) { r.querySelector('.p-email').value = res[0].email; found++; } } catch (err) { toast(err.message); break; } }
     toast(found + ' of ' + rows.length + ' found. Check them, then "Save settings".'); return;
   }
-  if (T.id === 'nextDay') { st.today = addBiz(st.today, 1); await act(() => { }, 'Now ' + fmt(st.today)); return; }
+  if (T.id === 'nextDay') { st.today = addWork(st.today, 1); await act(() => { }, 'Now ' + fmt(st.today)); return; }
   if (T.id === 'reset') { await STORE.init(); ui.view = 'new'; ui.openWork = ui.openTask = ui.openFac = ui.openGroup = null; ui.errors = []; render(); toast('Demo reset'); return; }
 });
 function segSync(id) { const h = document.getElementById(id), g = document.querySelector(`[data-seg="${id}"]`); if (!h || !g) return; g.querySelectorAll('.segb').forEach(b => { const on = b.dataset.segval === h.value; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); }); }

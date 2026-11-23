@@ -89,6 +89,22 @@ const fmt = s => { if (!s) return ''; const d = D(s); return WD[d.getUTCDay()].s
 const fmtS = s => { if (!s) return ''; const d = D(s); return (d.getUTCMonth() + 1) + '/' + d.getUTCDate() + '/' + String(d.getUTCFullYear()).slice(2); };
 const todayET = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const nextBizDay = s => isWE(s) ? addBiz(s, 1) : s;
+// Office holidays (Nov 23 2026, Raizy): New Year's Day, Memorial Day, July 4th, Labor Day, Thanksgiving, Christmas.
+// Saturday → observed the Friday before, Sunday → the Monday after. Not a business day for task due dates, reminders,
+// follow-ups and "waiting N days" (addWork / isOff). Facility dates (ordering / DOS / delivery) still use addBiz: weekends only.
+// Emails To anyone who isn't a transition lead don't go out on a holiday: they wait until 8 am Eastern the next business day (holdHolidays).
+const holCache = {};
+function holidaysOf(y) {
+  if (holCache[y]) return holCache[y];
+  const ds = (m, d) => y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  const nth = (m, wd, n) => ds(m, 1 + ((wd - dow(ds(m, 1)) + 7) % 7) + 7 * (n - 1));
+  let mem = ds(5, 31); while (dow(mem) !== 1) mem = add(mem, -1);
+  const obs = s => dow(s) === 6 ? add(s, -1) : dow(s) === 0 ? add(s, 1) : s;
+  return holCache[y] = { [obs(ds(1, 1))]: "New Year's Day", [mem]: 'Memorial Day', [obs(ds(7, 4))]: 'July 4th', [nth(9, 1, 1)]: 'Labor Day', [nth(11, 4, 4)]: 'Thanksgiving', [obs(ds(12, 25))]: 'Christmas' };
+}
+const holidayName = s => { if (!s) return ''; const y = +s.slice(0, 4); return holidaysOf(y)[s] || holidaysOf(y + 1)[s] || ''; };
+const isOff = s => isWE(s) || !!holidayName(s);
+const addWork = (s, n) => { let d = s, step = n < 0 ? -1 : 1, k = Math.abs(n); while (k > 0) { d = add(d, step); if (!isOff(d)) k--; } return d; };
 
 // ---------- people ----------
 const people = () => st.settings.people;
@@ -293,7 +309,7 @@ function stageOf(f) {
   const sch = fTask(f, 'SCHEDULE'); if (sch && !done(sch)) return ['Ready to schedule', 'p-ready'];
   return ['In setup', 'p-setup'];
 }
-function atRisk(f) { const d = f.dates; return !!(d && !f.email1 && !f.hold && !f.complete && addBiz(st.today, 3) >= d.ord); }
+function atRisk(f) { const d = f.dates; return !!(d && !f.email1 && !f.hold && !f.complete && addWork(st.today, 3) >= d.ord); }
 
 // a corporate we already work with in the portal (price table, EMR access) that's new to this app
 const hasPrice = g => !!(g && (g.price || g.existing));
@@ -415,7 +431,8 @@ function mail(m) {
   const to = toRaw.filter(validEmail), cc = ccRaw.filter(e => validEmail(e) && !to.includes(e));
   let subject = m.subject;
   if (m.fac && !m.noTag) subject = '[CT-' + pad(m.fac) + '] ' + subject;
-  const day = m.day && m.day > st.today ? m.day : st.today;
+  let day = m.day && m.day > st.today ? m.day : st.today;
+  if (holidayName(day) && to.some(e => !isAm(e))) { day = addWork(day, 1); heldKeys.add(m.key); }
   const rec = {
     key: m.key, code: m.code, to, cc, subject, body: emailHtml(m.body, m), fac: m.fac || null, task: m.task || null, day,
     sendOn: day > st.today ? day + 'T12:00:00Z' : new Date(Date.now() - 60000).toISOString(),
@@ -424,6 +441,16 @@ function mail(m) {
   if (!to.length) { rec.status = 'Failed'; rec.error = 'Nobody to send it to' + (bad.length ? ' (bad address: ' + bad.join(', ') + ')' : '') + '. Fix the address on this email in the Outbox and click "Send it again".'; }
   else if (bad.length) rec.error = 'Skipped (no valid email): ' + bad.join(', ');
   st.mails.unshift(rec); return rec;
+}
+// a holiday: queued emails To anyone who isn't a transition lead move to 8 am Eastern the next business day (CC doesn't matter).
+// Runs at the end of run(), after reminders are spaced, so it also moves rows queued before the holiday and hand-sent ones.
+const heldKeys = new Set();
+function holdHolidays() {
+  st.mails.forEach(m => {
+    if (m.status !== 'Queued' || !(m.to || []).some(e => !isAm(e))) return;
+    const hd = [m.day, m.sendOn ? etDay(m.sendOn) : ''].find(x => x && x >= st.today && holidayName(x)); if (!hd) return;
+    const nd = addWork(hd, 1); m.day = nd; m.sendOn = nd + 'T12:00:00Z'; heldKeys.add(m.key);
+  });
 }
 let pending = [];
 function queue(code, to, f, task, make) { pending.push({ code, to, f, task, make }); }
@@ -474,7 +501,7 @@ function newTask(type, o) {
   const existing = taskByKey(key); if (existing) { if (existing.parked) unpark(existing); return existing; }
   const t = Object.assign({ key, type, status: 'Open', created: st.today, doneBy: '', doneOn: '', assignee: '' }, o);
   if (!t.assignee) t.assignee = fallbackOwner();
-  if (!t.due) t.due = addBiz(t.opensOn && t.opensOn > st.today ? t.opensOn : st.today, isAm(t.assignee) ? st.settings.amDays : st.settings.helperDays);
+  if (!t.due) t.due = addWork(t.opensOn && t.opensOn > st.today ? t.opensOn : st.today, isAm(t.assignee) ? st.settings.amDays : st.settings.helperDays);
   st.tasks.push(t); return t;
 }
 function taskTitle(t) { return (TT[t.type] && TT[t.type].title(t)) || t.type; }
@@ -485,7 +512,7 @@ function finishTask(t, by, byName) {
 function reassign(t, to, byName) {
   if (!to || to === t.assignee) return;
   t.assignee = to; t.amTask = false;
-  t.due = addBiz(isWaiting(t) ? t.opensOn : st.today, isAm(to) ? st.settings.amDays : st.settings.helperDays);
+  t.due = addWork(isWaiting(t) ? t.opensOn : st.today, isAm(to) ? st.settings.amDays : st.settings.helperDays);
   mail({ key: 'm:E20:' + t.key + ':' + uid(), code: 'E20', to: [to], fac: t.fac, subject: 'Reassigned to you: ' + taskTitle(t), body: `<p>${esc(byName)} reassigned this to you. Due ${fmt(t.due)}.</p>`, task: t.key, cond: { task: t.key } });
 }
 // reminders and "this task is open now" emails, scheduled ahead of time; the flow sends them on the day
@@ -505,13 +532,13 @@ function ensureTaskMails() {
     // Only the next one is ever queued; the one after is queued once its turn comes.
     const rk = t.assignee + '|' + t.due, days = [1, 2, 4];
     if (t.remFor !== rk) { t.remFor = rk; t.remNext = 0; }
-    while (t.remNext < days.length && (t.remNext === 0 || st.today >= addBiz(t.due, days[t.remNext - 1]))) {
+    while (t.remNext < days.length && (t.remNext === 0 || st.today >= addWork(t.due, days[t.remNext - 1]))) {
       const i = t.remNext, am = f ? amOf(f) : t.nf ? ((typeof nfById === 'function' && nfById(t.nf)) || {}).lead || fallbackOwner() : (grp(t.group) && grp(t.group).am) || fallbackOwner();
       mail({
         key: 'm:E17:' + t.key + ':' + hash(rk) + ':' + (i + 1), code: 'E17', to: [t.assignee],
         cc: [i >= 1 && am !== t.assignee ? am : '', i >= 2 ? roleEmail('escalate') : ''],
         fac: t.fac, subject: 'Reminder' + (i ? ' #' + (i + 1) : '') + ': ' + taskTitle(t), body: `<p>This was due ${fmt(t.due)}.</p>`,
-        task: t.key, day: addBiz(t.due, days[i]), cond: { task: t.key, assignee: t.assignee, due: t.due }
+        task: t.key, day: addWork(t.due, days[i]), cond: { task: t.key, assignee: t.assignee, due: t.due }
       });
       t.remNext++;
     }
@@ -535,7 +562,7 @@ function lastReminder(t) { const now = nowMs(); return remindersOf(t).filter(m =
 function nextReminderAt(t) { const l = lastReminder(t); return l ? remAt(l) + REM_GAP : 0; }
 const canRemind = t => !done(t) && !t.archived && !isWaiting(t) && nowMs() >= nextReminderAt(t);
 // a weekend lands on 8 am Eastern the next business day
-function remSlot(ms) { const d = etDay(new Date(ms).toISOString()); return isWE(d) ? Date.parse(nextBizDay(d) + 'T12:00:00Z') : ms; }
+function remSlot(ms) { const d = etDay(new Date(ms).toISOString()); return isOff(d) ? Date.parse(addWork(d, 1) + 'T12:00:00Z') : ms; }
 // scheduled reminders closer than 24 hours to the one before move later. Sent ones and ones a person sent never move.
 function spaceReminders(t) { spaceList(remindersOf(t)); }
 function spaceList(list) {
@@ -656,8 +683,8 @@ function sendCtlEmail(f, correction) {
   if (correction) return;
   f.e1b = st.today; f.e1bCtl = lc(c.email); f.e1bCtlName = c.name;
   if (withIns) f.inserviceAsked = st.today;
-  mail({ key: 'm:E15:' + f.id, code: 'E15', to: [c.email], cc: [am], fac: f.id, noTag: true, link: 'none', day: addBiz(st.today, 3), cond: { fac: f.id, untilEmail2: true }, subject: 'RE: ' + ctlSubject(f), body: `<p>Hi ${esc(first(c.name))},</p><p>Checking in, has the facility email for <b>${esc(facName(f))}</b> gone out? Please CC ${esc(CFG.mailbox)} on it.</p><p>Thank you!<br>${esc(nameOf(am))}</p>` });
-  newTask('CHICAGO_FOLLOW', { fac: f.id, assignee: am, amTask: true, opensOn: addBiz(st.today, 5) });
+  mail({ key: 'm:E15:' + f.id, code: 'E15', to: [c.email], cc: [am], fac: f.id, noTag: true, link: 'none', day: addWork(st.today, 3), cond: { fac: f.id, untilEmail2: true }, subject: 'RE: ' + ctlSubject(f), body: `<p>Hi ${esc(first(c.name))},</p><p>Checking in, has the facility email for <b>${esc(facName(f))}</b> gone out? Please CC ${esc(CFG.mailbox)} on it.</p><p>Thank you!<br>${esc(nameOf(am))}</p>` });
+  newTask('CHICAGO_FOLLOW', { fac: f.id, assignee: am, amTask: true, opensOn: addWork(st.today, 5) });
 }
 // ---------- the transfer notice, sent to the facility from the mailbox (Nov 17 2026) ----------
 // Before: the Gentell WC Transition Lead got an email (E14b) asking them to send it. Now the transition lead gets a FAC_NOTICE task
@@ -787,7 +814,7 @@ function sendEmail3(f) {
 // A transition lead / admin can send one by hand ("Remind"); never 2 within 24 hours, the next automatic one moves to 24 hours later.
 const E3_DUE = 2, E3_REM = [1, 2, 4];
 const e3Start = f => (f.e3Round ? f.e3RoundFrom : f.email3) || f.email3;
-const e3Due = f => addBiz(e3Start(f), E3_DUE);
+const e3Due = f => addWork(e3Start(f), E3_DUE);
 const e3RoundOf = k => +((k.match(/^m:E3F:\d+:r(\d+):/) || [])[1] || 0);
 const e3Pre = f => 'm:E3F:' + f.id + ':' + (f.e3Round ? 'r' + f.e3Round + ':' : '');
 // this round's follow-up emails (not cancelled)
@@ -819,10 +846,10 @@ function chaseEmail3(f) {
   let auto = e3Auto(f);
   if (alert && auto.length < 3) { alert.status = 'Cancelled'; alert = null; } // queued the old way (after 2): the 3rd follow-up goes first
   // queued ones follow the current timing (facilities that started on the old timing move over; sent ones count)
-  auto.forEach((m, i) => { if (m.status === 'Queued') { const d = addBiz(e3Due(f), E3_REM[i]); if (m.day !== d && !(d <= st.today && m.day <= st.today)) setMailDay(m, d); } });
+  auto.forEach((m, i) => { if (m.status === 'Queued') { const d = addWork(e3Due(f), E3_REM[i]); if (m.day !== d && !(d <= st.today && m.day <= st.today)) setMailDay(m, d); } });
   if (auto.length < 3 && !auto.some(m => m.status === 'Queued')) {
     const i = auto.length;
-    e3FollowMail(f, pre + (i + 1) + ':' + n(), addBiz(e3Due(f), E3_REM[i]), e3Rems(f).length > 0, i === 2);
+    e3FollowMail(f, pre + (i + 1) + ':' + n(), addWork(e3Due(f), E3_REM[i]), e3Rems(f).length > 0, i === 2);
   }
   spaceList(e3Rems(f));
   auto = e3Auto(f);
@@ -919,7 +946,7 @@ function chaseEsign(f) {
   const used = mine.filter(m => m.status !== 'Cancelled');
   const step = used.length + 1; if (step > 3) return;
   const last = used.map(m => m.day).sort().pop() || (round ? f.esignRoundFrom : f.esignAsk);
-  const day = addBiz(last, 2), key = pre + step + ':' + mine.length, am = amOf(f), cond = { fac: f.id, esRound: round };
+  const day = addWork(last, 2), key = pre + step + ':' + mine.length, am = amOf(f), cond = { fac: f.id, esRound: round };
   if (step < 3) mail({ key, code: 'E31F', day, cond, to: esTo(), cc: [am], fac: f.id, noTag: true, link: 'none', subject: 'RE: ' + ES_SUBJECT(f),
       body: `<p>Hi ${esc(esGreet())},</p><p>${step === 1 ? 'Just following up on my email below' : 'Following up again on my email below'} about <b>${esc(f.name)}</b>. Can you please send over the provider info?</p><p>Thank you!<br>${esc(nameOf(am))}</p><hr>${esignBody(f)}` });
   else mail({ key, code: 'E31A', day, cond, to: [am], fac: f.id, link: 'fac', subject: 'No reply about provider and eSign info: ' + facName(f),
@@ -1421,7 +1448,7 @@ function run() {
     if (f.email2 || f.complete) tasksOf(f, 'FAC_NOTICE').forEach(t => { if (!done(t)) { t.status = 'Not needed'; t.doneOn = st.today; } });
     // at risk: ordering date within 3 business days and Email 1 not out
     if (f.dates && !f.email1 && f.riskFor !== f.dates.ord) {
-      f.riskFor = f.dates.ord; const day = addBiz(f.dates.ord, -3);
+      f.riskFor = f.dates.ord; const day = addWork(f.dates.ord, -3);
       mail({ key: 'm:risk:' + f.id + ':' + f.dates.ord, code: 'E18', to: [am], fac: f.id, link: 'fac', day: day > st.today ? day : st.today, cond: { fac: f.id, untilEmail1: true, ord: f.dates.ord }, subject: 'At risk: ' + facName(f) + ' orders ' + fmt(f.dates.ord) + ' and Chicago hasn\'t been emailed', body: '<p>Finish the open tasks so the Chicago handoff email can go out.</p>' });
     }
     // complete
@@ -1446,17 +1473,18 @@ function run() {
   st.tasks.forEach(t => { if (!done(t) && !t.archived) spaceReminders(t); });
   st.mails.forEach(m => { if (m.status === 'Queued' && !mailStillValid(m)) m.status = 'Cancelled'; });
   leadDigest();
+  holdHolidays();
 }
 
 // ---------- 3 PM "Still waiting" list to each transition lead (only with Settings leadQuiet) ----------
 // Replaces the separate "No reply" and "At risk" emails. A facility shows up the day that email would have gone,
 // and stays until it's taken care of. Days = business days since the first ask (or the latest "keep following up").
-const bizCount = (a, b) => { let n = 0, d = a; while (d < b) { d = add(d, 1); if (!isWE(d)) n++; } return n; };
+const bizCount = (a, b) => { let n = 0, d = a; while (d < b) { d = add(d, 1); if (!isOff(d)) n++; } return n; };
 // the day the "No reply" alert is due: 2 follow-ups out in this round, then gap business days after the 2nd
 function chaseAlertDay(f, code, round, gap) {
   const roundOf = k => +((k.match(/^m:\w+:\d+:r(\d+):/) || [])[1] || 0);
   const fu = st.mails.filter(m => m.fac === f.id && m.code === code && m.status !== 'Cancelled' && roundOf(m.key) === round);
-  return fu.length < 2 ? '' : addBiz(fu.map(m => m.day).sort().pop(), gap);
+  return fu.length < 2 ? '' : addWork(fu.map(m => m.day).sort().pop(), gap);
 }
 // the contacts request's "No reply" day: the 3rd automatic follow-up's day (or the day the lead was told on the old timing)
 function e3AlertDay(f) {
@@ -1469,7 +1497,7 @@ function waitingFor(f) {
   if (d3 && st.today >= d3) out.push({ sec: 'e3', f, days: bizCount((f.e3Round ? f.e3RoundFrom : f.email3) || f.email3, st.today) });
   const de = f.esignAsk && !f.esignGot && !f.esignDone && chaseAlertDay(f, 'E31F', f.esignRound || 0, 2);
   if (de && st.today >= de) out.push({ sec: 'es', f, days: bizCount((f.esignRound ? f.esignRoundFrom : f.esignAsk) || f.esignAsk, st.today) });
-  if (f.dates && !f.email1 && st.today >= addBiz(f.dates.ord, -3)) out.push({ sec: 'risk', f });
+  if (f.dates && !f.email1 && st.today >= addWork(f.dates.ord, -3)) out.push({ sec: 'risk', f });
   return out;
 }
 // 3 PM Eastern on a day, as a UTC time (19:00 or 20:00 depending on daylight saving)
@@ -1485,7 +1513,7 @@ function digestBody(lead, items) {
   return `<p>Hi ${esc(first(nameOf(lead)))},</p>` + secs.map(([k, title, row]) => { const l = items.filter(x => x.sec === k); return l.length ? `<p style="margin-bottom:2px"><b>${esc(title)}</b></p><ul style="margin-top:2px">${l.map(row).join('')}</ul>` : ''; }).join('');
 }
 function leadDigest() {
-  if (!st.settings.leadQuiet || isWE(st.today)) return;
+  if (!st.settings.leadQuiet || isOff(st.today)) return;
   const byLead = {};
   st.facs.forEach(f => waitingFor(f).forEach(x => { const l = lc(amOf(f)); (byLead[l] = byLead[l] || []).push(x); }));
   const leads = new Set([...Object.keys(byLead), ...st.mails.filter(m => m.code === 'E33' && m.day === st.today && m.status === 'Queued').map(m => m.to[0])]);
@@ -1509,7 +1537,7 @@ function leadDigest() {
 function holdToggle(f, on, byName) {
   f.hold = on;
   const open = tasksOf(f).filter(t => !done(t)), owners = [...new Set(open.map(t => t.assignee))];
-  if (!on) open.forEach(t => { t.due = addBiz(isWaiting(t) ? t.opensOn : st.today, isAm(t.assignee) ? st.settings.amDays : st.settings.helperDays); });
+  if (!on) open.forEach(t => { t.due = addWork(isWaiting(t) ? t.opensOn : st.today, isAm(t.assignee) ? st.settings.amDays : st.settings.helperDays); });
   mail({ key: 'm:E23:' + f.id + ':' + uid(), code: 'E23', to: owners.length ? owners : [amOf(f)], cc: [amOf(f)], fac: f.id, link: 'fac', subject: (on ? 'On hold: ' : 'Back on: ') + facName(f), body: (on ? '<p>Your tasks for this facility are paused. Reminders stop.</p>' : '<p>Picking up where it stopped.</p>') + '<p>By ' + esc(byName) + '.</p>' });
 }
 // admin only: removes a test facility or a mistake. The rows stay in SharePoint (archived) but the app ignores them.
@@ -1537,7 +1565,7 @@ function reopenTask(t, to, by, byName, force, quiet) {
   (t.history = t.history || []).push({ doneBy: t.doneBy, doneByName: t.doneByName, doneOn: t.doneOn, reopenedBy: by, reopenedByName: byName, reopenedOn: st.today });
   t.status = 'Open'; t.doneBy = ''; t.doneByName = ''; t.doneOn = ''; t.reopened = st.today;
   if (to) { t.assignee = to; t.amTask = false; }
-  t.due = addBiz(st.today, isAm(t.assignee) ? st.settings.amDays : st.settings.helperDays);
+  t.due = addWork(st.today, isAm(t.assignee) ? st.settings.amDays : st.settings.helperDays);
   // the pumps answer is what the task recorded; undo it so the portal setup shows "not checked yet" again
   if (t.type === 'PUMPS') { const f = facById(t.fac); if (f && f.pumps === 'checked') f.pumps = ''; }
   // portal setup done again covers every field, so any open "Update the portal" task isn't needed; the snapshot is retaken when it's done
@@ -1728,7 +1756,7 @@ function reopenStep(f, types, by, byName) {
 function park(t) { t.status = 'Not needed'; t.doneOn = st.today; t.parked = true; }
 function unpark(t) {
   t.parked = false; t.status = 'Open'; t.doneOn = ''; t.doneBy = ''; t.doneByName = ''; t.round = (t.round || 0) + 1;
-  t.due = addBiz(t.opensOn && t.opensOn > st.today ? t.opensOn : st.today, isAm(t.assignee) ? st.settings.amDays : st.settings.helperDays);
+  t.due = addWork(t.opensOn && t.opensOn > st.today ? t.opensOn : st.today, isAm(t.assignee) ? st.settings.amDays : st.settings.helperDays);
 }
 function unmarkStep(f, k, by, byName) {
   const err = unmarkProblem(f, k); if (err) return { err };
