@@ -325,3 +325,8 @@ Waiting tasks (`isWaiting`: `opensOn` after today) are left out of "My tasks", "
 
 ## My work: no on-hold facilities (Nov 19 2026)
 - "Waiting on others" on My work (`leadWorkHtml`) skips facilities on hold (`f.hold`), like their tasks already were. They come back when taken off hold. Tracker and facility page unchanged.
+
+## Transition lead notes at the top (Nov 23 2026)
+- Leads said the notes were hard to find (a closed "Notes" section at the bottom). `noteBox` (ui.js) is now an orange "Transition lead notes" box (`.leadnotebox`), always open, at the top of: the facility page (both looks; look.js moves it above "Your tasks"), the My work panel (above "Your tasks"; the closed Notes section is gone), and the task drawer (above the form).
+- Task drawer shows it when the task is for the facility's transition lead or anyone ticked "Transition lead" (`leadTaskNotes`). Tracker notes column unchanged.
+- Typing without saving shows "Not saved yet: click Save notes." (`.lnunsaved`, compares with `data-saved`). Same data (`f.leadNotes`); nothing about saving changed.

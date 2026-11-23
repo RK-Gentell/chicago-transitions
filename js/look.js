@@ -112,10 +112,10 @@ function lookFac(L, f) {
   if (contacts) secs.push(cardSection(contacts, 'fac'));
   if (inH || outH) { const nodes = []; if (inH) { nodes.push(label('Came in'), ...after(inH)); inH.remove(); } if (outH) { const r = after(outH); nodes.push(label('From the app'), ...r); outH.remove(); } secs.push(secWrap('fac:emails', 'Emails', nodes)); }
   if (files) secs.push(cardSection(files, 'fac'));
-  if (notes) secs.push(cardSection(notes, 'fac', false, 'Notes'));
   cards.filter(c => ![dates, areas, contacts, files, notes].includes(c) && c.isConnected && c.parentNode === body).forEach(c => { const s = cardSection(c, 'fac'); if (s) secs.push(s); });
   const steps = kids.find(x => x.id === 'fsteps'); if (steps) { steps.classList.add('wsect-like'); secs.push(steps); }
   secs.filter(Boolean).forEach(s => body.appendChild(s));
+  if (notes) body.insertBefore(notes, body.firstChild); // transition lead notes stay at the top, always open
   if (ui.editOpen === f.id && ed) setTimeout(() => ed.scrollIntoView({ block: 'start' }), 0);
 }
 function lookCorp(L) {

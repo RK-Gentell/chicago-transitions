@@ -454,3 +454,7 @@ details.wsect-like{background:var(--panel);border:1px solid var(--line);border-r
 .newlook form.rqform details.rqd[open]>summary h2.rqh::after{content:"Optional · click to close"}
 .newlook form.rqform details.rqd[open]>summary{margin-bottom:8px}
 .newlook form.rqform details.rqd>summary h2.rqh::before,.newlook form.rqform details.rqd[open]>summary h2.rqh::before{transform:none;border:0;width:24px;height:24px;margin-right:0;transition:none}
+/* transition lead notes: always at the top, easy to spot */
+.leadnotebox{padding:10px 12px;background:var(--warn-soft);border-color:var(--warn);border-left:4px solid var(--warn)}
+.leadnotebox>b{color:var(--warn)}
+.leadnotebox textarea{margin-top:6px;min-height:60px;width:100%;background:var(--panel)}

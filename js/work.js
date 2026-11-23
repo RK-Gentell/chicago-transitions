@@ -4,7 +4,7 @@
 // changes how tasks are made, saved or emailed. Every task still opens with its own full form (TT[type].form), the same one as before.
 // - Transition leads (Team "Transition lead" ticked): a grid of facility cards ("Ready for you" / "Waiting on others").
 //   Clicking a card opens the facility's work panel: one box per open task of theirs, in flow order (the first one open),
-//   then Where it stands / Details / Emails / Notes, closed until clicked.
+//   then Where it stands / Details / Emails, closed until clicked. Transition lead notes at the top, open.
 // - Everyone else: their tasks as cards grouped by task type, oldest first. Pumps and GDD are answered right on the card;
 //   other tasks open their usual form.
 // Loaded right before ui.js: it only uses ui.js's helpers when something is drawn or clicked.
@@ -112,8 +112,9 @@ function workPanel(k) {
   const waits = f ? wWaits(f) : [];
   const nothing = !ts.length ? `<div class="wquiet"><b>Nothing for you here right now.</b>${waits.length ? `<div class="meta">Waiting on: ${waits.map(x => esc(x.n + ' (' + x.who + ')')).join(' · ')}</div>` : ''}</div>` : '';
   return `<div class="scrim" data-close></div><div class="drawer wpanel" role="dialog" aria-label="${esc(h.title)}"><header><div style="flex:1;min-width:0"><h1 style="font-size:17px;margin:0 0 2px">${esc(h.title)}</h1>${sub.map(s => `<div class="meta">${esc(s)}</div>`).join('')}${link ? `<div style="margin-top:2px">${link}</div>` : ''}</div>${closeX}</header><div class="body">
+  ${f ? noteBox(f, 'work') : ''}
   ${ts.length ? `<div class="wptitle"><span>Your tasks</span><span>${ts.length}</span></div>` : ''}${boxes}${nothing}
-  ${f ? wStands(f) + wDetails(f) + wMails(f) + `<details class="wsect"><summary>Notes</summary><div class="in">${noteBox(f, 'work')}</div></details>` : ''}
+  ${f ? wStands(f) + wDetails(f) + wMails(f) : ''}
   </div></div>`;
 }
 function wStands(f) {
