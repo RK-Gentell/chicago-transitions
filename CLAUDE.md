@@ -330,3 +330,7 @@ Waiting tasks (`isWaiting`: `opensOn` after today) are left out of "My tasks", "
 - Leads said the notes were hard to find (a closed "Notes" section at the bottom). `noteBox` (ui.js) is now an orange "Transition lead notes" box (`.leadnotebox`), always open, at the top of: the facility page (both looks; look.js moves it above "Your tasks"), the My work panel (above "Your tasks"; the closed Notes section is gone), and the task drawer (above the form).
 - Task drawer shows it when the task is for the facility's transition lead or anyone ticked "Transition lead" (`leadTaskNotes`). Tracker notes column unchanged.
 - Typing without saving shows "Not saved yet: click Save notes." (`.lnunsaved`, compares with `data-saved`). Same data (`f.leadNotes`); nothing about saving changed.
+
+## "What's new" for the notes box (Nov 23 2026)
+- `WHATS_NEW` entries can have `when()`: shown only once it's true for that person, checked on every My work draw, and not counted as seen until shown (Raizy: show it later rather than skip).
+- `notes-2026-11-23` "Transition lead notes are easier to find": `when` = one of my open tasks is on a facility with notes and shows the notes box (`leadTaskNotes`), so people who aren't transition leads don't get it. Shown once per person per browser.

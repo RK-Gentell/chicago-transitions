@@ -211,7 +211,11 @@ document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === 
 // ---------- first-time tour and "What's new" (each shown once per person, remembered in this browser) ----------
 // To announce a big change: add { id, date, title, text } to the top of WHATS_NEW. Each person sees the newest one they haven't seen, once.
 // Someone who hasn't had the tour yet gets the tour instead, and every note up to now counts as seen.
-const WHATS_NEW = [];
+// Optional when(): shown only once it's true for this person (checked every time; not counted as seen until it's shown).
+const WHATS_NEW = [
+  { id: 'notes-2026-11-23', date: 'Nov 23', title: 'Transition lead notes are easier to find', text: 'They\'re now in an orange box at the top of the facility page, the facility on My work, and your tasks.',
+    when: () => myOpen().some(t => { const f = t.fac && facById(t.fac); return f && leadTaskNotes(t, f) && (f.leadNotes || '').trim(); }) }
+];
 const TOUR_ID = 'work-2026-11-17';
 const TOURS = {
   lead: [
@@ -232,7 +236,7 @@ function maybeIntro() {
   if (!workOn() || ui.view !== 'mytasks' || tour || ui.openWork || ui.openTask || ui.openFac || !me() || document.querySelector('.tour-tip')) return;
   const tk = 'ct_tour:' + TOUR_ID + ':' + me(), nk = 'ct_news:' + me();
   if (!lsGet(tk)) { lsSet(tk, '1'); if (WHATS_NEW[0]) lsSet(nk, WHATS_NEW[0].id); startTour(); return; }
-  const n = WHATS_NEW[0]; if (n && lsGet(nk) !== n.id && lsGet(nk) !== 'unavailable') { lsSet(nk, n.id); showNews(n); }
+  const n = WHATS_NEW[0]; if (n && lsGet(nk) !== n.id && lsGet(nk) !== 'unavailable' && (!n.when || n.when())) { lsSet(nk, n.id); showNews(n); }
 }
 function tourSteps() {
   if (!isLeadView()) return TOURS.single;
