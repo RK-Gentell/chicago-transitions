@@ -683,7 +683,7 @@ function editDetails(f, R, A) {
   return `<details class="card" style="padding:10px" id="fdetbox" ${ui.editOpen === f.id ? 'open' : ''}><summary><b>Edit details</b> <span class="meta">(changes here don't touch the portal or Brightree. Changed after the portal setup? You get an "Update the portal" task)</span></summary><form id="fdet" style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
     <div class="row">${fld('Chicago name', txt('fd_name', f.name), 'The name GNS Chicago / Gentell uses (from the request). Used to search Chicago\'s Brightree and FastCare.')}${fld('Portal name', txt('fd_pn', f.portalName), 'Our name in Brightree and the portal, exactly as Brightree shows it. Once it\'s in, it\'s the name everywhere in the app and in every email.' + (f.inPortal ? '' : ' Typing it in means the facility is in Brightree.'))}</div>${f.inPortal ? '' : closes('PORTAL_ADD', 'Typing in the portal name')}
     <div class="row">${fld('Address', txt('fd_addr', f.address, '123 Main St, City, ST 12345'), 'The state (' + esc(f.state || 'none yet') + ') comes from the end of the address (2 letters or the full name, then the zip). It decides the ship point and delivery date.')}</div>
-    <div class="row">${fld('Corporate', sel('fd_grp', Object.values(st.groups).filter(x => !x.standalone || lc(x.name) === lc(f.group)).map(x => x.name).sort(az), g.name, true))}</div>${chk('fd_none', 'No corporate (standalone)', g.standalone)}
+    <div class="row">${fld('Corporate', sel('fd_grp', [...Object.values(st.groups).filter(x => !x.standalone || lc(x.name) === lc(f.group)).map(x => x.name).sort(az), 'New corporate…'], g.name, true))}<div class="field" id="fd_newbox" hidden><label>New corporate name</label>${txt('fd_newcorp', '')}</div></div>${chk('fd_none', 'No corporate (standalone)', g.standalone)}
     <div class="row">${fld('Intake rep', sel('fd_rep', withCur(R, f.rep), f.rep, true))}${fld('Clinical rep', sel('fd_clin', withCur(R, f.clin), f.clin, true))}${fld('Account manager', sel('fd_acct', withCur(R, acctOf(f)), acctOf(f), true))}${fld('Transition lead', sel('fd_am', withCur(A, f.am || amOf(f)), f.am || amOf(f), true))}</div>
     <div class="row">${fld('Wound and Product Specialist', personPick('fd_w', f.wound))}${fld('Regional Manager', personPick('fd_r', f.regional))}${fld('Gentell WC Transition Lead', ctlPick('fd_ctl', f.ctl), 'CC\'d on the transfer notice the app sends to the facility. Pick "Use regional" to use the Regional Manager.')}</div>${f.email3 && !f.e3Done ? '<div class="meta">The contacts request already went out. A change here only affects its follow-ups.</div>' : ''}${f.group ? closes('FASTCARE', 'Picking both') : ''}${f.group && fTask(f, 'FASTCARE') && !done(fTask(f, 'FASTCARE')) && !f.noE3 ? '<div class="meta">Then the contacts request goes to them, without a FastCare contacts screenshot.</div>' : ''}
     ${gdd}${bt}
@@ -882,7 +882,7 @@ document.addEventListener('submit', async e => {
   }
   if (id === 'fdet') {
     const fid = ui.openFac, f0 = facById(fid), has = x => !!document.getElementById(x);
-    const vals = { name: V('fd_name'), pn: V('fd_pn'), addr: V('fd_addr'), grp: V('fd_grp'), none: V('fd_none'), rep: V('fd_rep'), clin: V('fd_clin'), am: V('fd_am'), acct: V('fd_acct'), why: V('fd_why') };
+    const vals = { name: V('fd_name'), pn: V('fd_pn'), addr: V('fd_addr'), grp: V('fd_grp'), newCorp: V('fd_newcorp'), noCorp: V('fd_none'), rep: V('fd_rep'), clin: V('fd_clin'), am: V('fd_am'), acct: V('fd_acct'), why: V('fd_why') };
     if (has('fd_w')) { vals.wound = readPerson('fd_w'); vals.woundRaw = V('fd_w'); vals.regional = readPerson('fd_r'); vals.regionalRaw = V('fd_r'); }
     if (has('fd_ctl')) { vals.ctl = readCtl('fd_ctl'); vals.ctlRaw = V('fd_ctl'); }
     if (has('fd_gdd')) { vals.gdd = V('fd_gdd'); vals.gddWh = V('fd_wh'); }
@@ -967,6 +967,7 @@ document.addEventListener('change', async e => {
   }
   const pg = id.match(/^(rq_pi_|fs_pi_)gdd_(\d+)$/); if (pg) { const b = document.getElementById(pg[1] + 'whb_' + pg[2]); if (b) b.hidden = e.target.value !== 'Yes'; }
   if (id === 'fc_grp') { const b = $('#fc_newbox'); if (b) b.hidden = e.target.value !== 'New corporate…'; }
+  if (id === 'fd_grp') { const b = $('#fd_newbox'); if (b) b.hidden = e.target.value !== 'New corporate…'; }
   if (['de_ord', 'de_dos', 'de_del'].includes(id)) deLive(id);
   if (/(^|_)acct(_\d+)?$/.test(id)) syncRepLocks();
   if (id === 'sc_rep') { const t = taskByKey(ui.openTask), f = t && (t.nf ? nfById(t.nf) : facById(t.fac)); if (f && f.dates) { ui.scRep = e.target.value && e.target.value !== V('sc_auto') ? { fac: f.id, rep: e.target.value } : null; const w = $('#sc_warn'); if (w) w.innerHTML = autoRepWarn(f, e.target.value, f.dates.ord).map(x => '<div class="err" style="margin-top:6px">' + esc(x) + '</div>').join(''); } }

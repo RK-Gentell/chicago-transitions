@@ -1980,6 +1980,7 @@ function editFacilityCheck(f, v) {
   }
   if (v.gdd !== undefined) { if (['Yes', 'No'].includes(f.gdd) && !v.gdd) errs.push('The GDD answer can\'t be left blank.'); if (v.gdd === 'Yes' && !v.gddWh) errs.push('Which GDD warehouse?'); }
   if (v.addr && addressFormatProblem(v.addr)) errs.push(addressFormatProblem(v.addr));
+  if (!v.noCorp && v.grp === 'New corporate…') { const ng = v.newCorp && grp(v.newCorp); if (!v.newCorp) errs.push('Type the new corporate name.'); else if (ng && ng.standalone) errs.push('"' + v.newCorp + '" is a facility with no corporate. Type a different corporate name.'); }
   if (btChanged(f, v) || btNew(f, v)) errs.push(btProblem(f, v));
   return errs.find(Boolean) || '';
 }
@@ -2000,7 +2001,10 @@ function editFacility(f, v, by, byName) {
   // the rep named on the handoff email / transfer notice changed (a new intake rep, or the account manager changed to or from David)
   const newC = repLine(f);
   if (f.email1 && lc(newC.email) !== lc(oldC.email)) leadNote(f, 'm:E13:rep:' + f.id + ':' + uid(), (f.rep !== repWas ? 'Intake rep' : 'Rep on the facility email') + ' changed after the Chicago handoff email: ' + facName(f), '<p>' + esc(byName) + ' changed ' + (f.rep !== repWas ? 'the intake rep from ' + esc(nameOf(repWas)) + ' to ' + esc(nameOf(f.rep)) : 'the account manager to ' + esc(nameOf(f.acct))) + '. The Chicago handoff email (and the transfer notice to the facility) named ' + esc(oldC.name) + '; it should now be ' + esc(newC.name) + '. Click "Dates changed: send correction" on the facility page to send Chicago the corrected email, or let the facility know yourself.</p>', true);
-  if (v.none) { if (!G(f).standalone) makeStandalone(f); } else if (v.grp && lc(v.grp) !== lc(f.group) && grp(v.grp)) { f.group = grp(v.grp).name; settleFacCov(f); }
+  // "No corporate" (noCorp) is its own box: v.none is the Brightree report's "no deliveries" box
+  if (v.noCorp) { if (!G(f).standalone) makeStandalone(f); }
+  else if (v.grp === 'New corporate…' && v.newCorp) { const g = ensureGroup(v.newCorp); if (lc(g.name) !== lc(f.group)) { f.group = g.name; if (f.pendingCov) g.cov = Object.assign({}, f.pendingCov, g.cov || {}); settleFacCov(f); } }
+  else if (v.grp && v.grp !== 'New corporate…' && lc(v.grp) !== lc(f.group) && grp(v.grp)) { f.group = grp(v.grp).name; if (f.pendingCov) grp(v.grp).cov = Object.assign({}, f.pendingCov, grp(v.grp).cov || {}); settleFacCov(f); }
   if (v.wound) f.wound = v.wound; if (v.regional) f.regional = v.regional;
   // a new Gentell WC Transition Lead after their email went out (and the facility email hasn't): the new one never got it
   if (v.ctl) setCtl(f, v.ctl, byName);
